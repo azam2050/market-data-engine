@@ -1,123 +1,48 @@
 import os
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 
 import aiohttp
 import websockets
 
-API_KEY = os.getenv("POLYGON_API_KEY")
+# ── Config ────────────────────────────────────────────────────
+API_KEY     = os.getenv("POLYGON_API_KEY")
 WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL")
 
 SYMBOLS = [
-    "QQQ",
-    "SPY",
-    "AAPL",
-    "NVDA",
-    "MSFT",
-    "TSLA",
-    "AMD",
-    "META",
-    "AMZN",
-    "GOOGL",
-    "AVGO",
-    "NFLX"
+    "QQQ", "SPY", "AAPL", "NVDA", "MSFT",
+    "TSLA", "AMD", "META", "AMZN", "GOOGL", "AVGO", "NFLX"
 ]
 
 WS_URL = "wss://socket.polygon.io/stocks"
 
-latest_prices = {}
+# ── Storage: OHLCV كاملة لكل رمز ─────────────────────────────
+latest_bars: dict = {}
 
 
-async def send_snapshot(session):
-    snapshot = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "symbols": latest_prices
-    }
+# ── Send Snapshot ─────────────────────────────────────────────
+async def send_snapshot(session: aiohttp.ClientSession):
+    timestamp = datetime.now(timezone.utc).isoformat()
 
-    try:
-        async with session.post(WEBHOOK_URL, json=snapshot) as resp:
-            print("Snapshot sent:", resp.status)
-    except Exception as e:
-        print("Webhook error:", str(e))
-
-
-async def snapshot_loop():
-    async with aiohttp.ClientSession() as session:
-        while True:
-            await asyncio.sleep(5)
-
-            if latest_prices and WEBHOOK_URL:
-                await send_snapshot(session)
-            else:
-                print("Waiting for prices or webhook URL...")
-
-
-async def websocket_loop():
-    while True:
+    for symbol, bar in list(latest_bars.items()):
+        payload = {
+            "timestamp":  timestamp,
+            "symbol":     symbol,
+            "open":       bar.get("open"),
+            "high":       bar.get("high"),
+            "low":        bar.get("low"),
+            "close":      bar.get("close"),
+            "volume":     bar.get("volume"),
+            "vwap":       bar.get("vwap"),
+            "trades":     bar.get("trades"),
+            "bar_start":  bar.get("bar_start_ts"),
+            "bar_end":    bar.get("bar_end_ts"),
+        }
         try:
-            print("Connecting to Polygon WebSocket...")
-            async with websockets.connect(
-                WS_URL,
-                ping_interval=20,
-                ping_timeout=20,
-                close_timeout=10
-            ) as ws:
-
-                # 1) Auth
-                await ws.send(json.dumps({
-                    "action": "auth",
-                    "params": API_KEY
-                }))
-
-                auth_response = await ws.recv()
-                print("Auth response:", auth_response)
-
-                # 2) Subscribe to aggregate bars for selected symbols
-                subs = ",".join([f"A.{s}" for s in SYMBOLS])
-
-                await ws.send(json.dumps({
-                    "action": "subscribe",
-                    "params": subs
-                }))
-
-                sub_response = await ws.recv()
-                print("Subscribe response:", sub_response)
-
-                # 3) Read messages forever
-                while True:
-                    msg = await ws.recv()
-                    data = json.loads(msg)
-
-                    if isinstance(data, list):
-                        for ev in data:
-                            sym = ev.get("sym")
-                            close_price = ev.get("c")
-
-                            if sym in SYMBOLS and close_price is not None:
-                                latest_prices[sym] = close_price
-
-                        if latest_prices:
-                            print("Updated prices:", latest_prices)
-
+            async with session.post(WEBHOOK_URL, json=payload) as resp:
+                print(f"✅ [{symbol}] O={bar.get('open')} H={bar.get('high')} "
+                      f"L={bar.get('low')} C={bar.get('close')} "
+                      f"V={bar.get('volume')} → {resp.status}")
         except Exception as e:
-            print("WebSocket error:", str(e))
-            print("Reconnecting in 5 seconds...")
-            await asyncio.sleep(5)
-
-
-async def main():
-    if not API_KEY:
-        raise ValueError("POLYGON_API_KEY is missing")
-
-    if not WEBHOOK_URL:
-        print("Warning: N8N_WEBHOOK_URL is missing. Snapshot sending will wait.")
-
-    await asyncio.gather(
-        websocket_loop(),
-        snapshot_loop()
-    )
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+            print(f"Webhook error [{symbol}]:", str(e))
