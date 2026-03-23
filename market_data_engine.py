@@ -83,8 +83,8 @@ async def websocket_loop():
                 auth_resp = await ws.recv()
                 print("Auth:", auth_resp)
 
-                # 2) Subscribe
-                subs = ",".join([f"A.{s}" for s in SYMBOLS])
+                # 2) Subscribe — AM.* = شمعة دقيقة كاملة ✅ (بدل A.* الثانية)
+                subs = ",".join([f"AM.{s}" for s in SYMBOLS])
                 await ws.send(json.dumps({
                     "action": "subscribe",
                     "params": subs
@@ -97,19 +97,22 @@ async def websocket_loop():
                     msg = await ws.recv()
                     data = json.loads(msg)
                     for event in data:
-                        if event.get("ev") == "A":
+                        # AM = Aggregate Minute — شمعة مكتملة كل دقيقة ✅
+                        if event.get("ev") == "AM":
                             sym = event.get("sym")
                             latest_bars[sym] = {
-                                "open":         event.get("o"),
-                                "high":         event.get("h"),
-                                "low":          event.get("l"),
-                                "close":        event.get("c"),
-                                "volume":       event.get("v"),
-                                "vwap":         event.get("vw"),
-                                "trades":       event.get("z"),
-                                "bar_start_ts": event.get("s"),
-                                "bar_end_ts":   event.get("e"),
+                                "open":         event.get("o"),   # افتتاح الدقيقة
+                                "high":         event.get("h"),   # أعلى سعر في الدقيقة
+                                "low":          event.get("l"),   # أدنى سعر في الدقيقة
+                                "close":        event.get("c"),   # إغلاق الدقيقة
+                                "volume":       event.get("av"),  # حجم متراكم اليوم
+                                "vwap":         event.get("vw"),  # VWAP الدقيقة
+                                "trades":       event.get("z"),   # عدد الصفقات
+                                "bar_start_ts": event.get("s"),   # بداية الشمعة
+                                "bar_end_ts":   event.get("e"),   # نهاية الشمعة
                             }
+                            print(f"📊 {sym}: O={event.get('o')} H={event.get('h')} "
+                                  f"L={event.get('l')} C={event.get('c')}")
 
         except Exception as e:
             print("WebSocket error:", str(e))
