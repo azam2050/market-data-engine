@@ -20,38 +20,50 @@ WS_URL = "wss://socket.polygon.io/stocks"
 # ── Storage ───────────────────────────────────────────────────
 latest_bars: dict = {}
 
+
 # ── Send Snapshot ─────────────────────────────────────────────
 async def send_snapshot(session: aiohttp.ClientSession):
+    if not latest_bars:
+        return
+
     timestamp = datetime.now(timezone.utc).isoformat()
-    for symbol, bar in list(latest_bars.items()):
-        payload = {
-            "timestamp": timestamp,
-            "symbol":    symbol,
-            "open":      bar.get("open"),
-            "high":      bar.get("high"),
-            "low":       bar.get("low"),
-            "close":     bar.get("close"),
-            "volume":    bar.get("volume"),
-            "vwap":      bar.get("vwap"),
-            "trades":    bar.get("trades"),
-            "bar_start": bar.get("bar_start_ts"),
-            "bar_end":   bar.get("bar_end_ts"),
-        }
-        try:
-            async with session.post(WEBHOOK_URL, json=payload) as resp:
-                print(f"✅ [{symbol}] C={bar.get('close')} → {resp.status}")
-        except Exception as e:
-            print(f"Webhook error [{symbol}]:", str(e))
+
+    payload = {
+        "timestamp": timestamp,
+        "bars": [
+            {
+                "symbol":    symbol,
+                "open":      bar.get("open"),
+                "high":      bar.get("high"),
+                "low":       bar.get("low"),
+                "close":     bar.get("close"),
+                "volume":    bar.get("volume"),
+                "vwap":      bar.get("vwap"),
+                "trades":    bar.get("trades"),
+                "bar_start": bar.get("bar_start_ts"),
+                "bar_end":   bar.get("bar_end_ts"),
+            }
+            for symbol, bar in latest_bars.items()
+        ]
+    }
+
+    try:
+        async with session.post(WEBHOOK_URL, json=payload) as resp:
+            print(f"✅ Snapshot sent: {len(latest_bars)} symbols → {resp.status}")
+    except Exception as e:
+        print("Webhook error:", str(e))
+
 
 # ── Snapshot Loop ─────────────────────────────────────────────
 async def snapshot_loop():
     async with aiohttp.ClientSession() as session:
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(10)
             if latest_bars and WEBHOOK_URL:
                 await send_snapshot(session)
             else:
                 print("Waiting for data or webhook URL...")
+
 
 # ── WebSocket Loop ────────────────────────────────────────────
 async def websocket_loop():
@@ -88,13 +100,13 @@ async def websocket_loop():
                         if event.get("ev") == "A":
                             sym = event.get("sym")
                             latest_bars[sym] = {
-                                "open":        event.get("o"),
-                                "high":        event.get("h"),
-                                "low":         event.get("l"),
-                                "close":       event.get("c"),
-                                "volume":      event.get("v"),
-                                "vwap":        event.get("vw"),
-                                "trades":      event.get("z"),
+                                "open":         event.get("o"),
+                                "high":         event.get("h"),
+                                "low":          event.get("l"),
+                                "close":        event.get("c"),
+                                "volume":       event.get("v"),
+                                "vwap":         event.get("vw"),
+                                "trades":       event.get("z"),
                                 "bar_start_ts": event.get("s"),
                                 "bar_end_ts":   event.get("e"),
                             }
@@ -103,6 +115,7 @@ async def websocket_loop():
             print("WebSocket error:", str(e))
             print("Reconnecting in 5 seconds...")
             await asyncio.sleep(5)
+
 
 # ── Main ──────────────────────────────────────────────────────
 async def main():
@@ -115,6 +128,7 @@ async def main():
         websocket_loop(),
         snapshot_loop()
     )
+
 
 if __name__ == "__main__":
     asyncio.run(main())
