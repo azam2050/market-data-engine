@@ -1,137 +1,74 @@
-import os
-import json
-import asyncio
-from datetime import datetime, timezone
+نعم، هذا الملف market_data_engine.py هو طبقة بيانات السوق الأساسية، وأريدك تعدله ليطابق منطق المشروع النهائي.
 
-import aiohttp
-import websockets
+المطلوب:
 
-# ── Config ────────────────────────────────────────────────────
-API_KEY     = os.getenv("POLYGON_API_KEY")
-WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL")
+1) هذا الملف يكون مسؤول عن تحديد ما الذي نأخذه من السوق فقط، وليس سحب كل السوق الخام.
+2) لا أريد كل market feed، أريد بيانات مختصرة ومفلترة فقط.
+3) اجعل المدخلات كالتالي:
+   - QQQ فقط كأصل رئيسي
+   - الأسهم القيادية المؤثرة على QQQ فقط
+   - خيارات QQQ فقط
+4) الهدف هو إرسال payload مختصر وواضح للبوت، وليس بيانات ضخمة.
 
-SYMBOLS = [
-    "QQQ", "SPY", "AAPL", "NVDA", "MSFT",
-    "TSLA", "AMD", "META", "AMZN", "GOOGL", "AVGO", "NFLX"
-]
+التعديلات المطلوبة:
 
-WS_URL = "wss://socket.polygon.io/stocks"
+A) الأسهم:
+- راقب QQQ والأسهم القيادية فقط
+- ابنِ candles بإطار 30 ثانية
+- لكل رمز أخرج:
+  symbol, timeframe=30s, open, high, low, close, vwap, volume, timestamp
 
-# ── Storage ───────────────────────────────────────────────────
-latest_bars: dict = {}
+B) القياديات:
+- استخدم فقط:
+  AAPL, MSFT, NVDA, AMZN, GOOGL, META, AVGO, TSLA
+- أرسل نفس بيانات 30 ثانية
 
+C) الخيارات:
+- أضف طبقة خيارات QQQ
+- لا ترسل كل options chain
+- فلتر فقط:
+  - QQQ only
+  - 0DTE و 1DTE فقط
+  - exclude illiquid contracts
+  - exclude contracts with missing bid/ask
+  - keep only top candidate CALLs and PUTs
+  - prefer near-the-money strikes
 
-# ── Send Snapshot ─────────────────────────────────────────────
-async def send_snapshot(session: aiohttp.ClientSession):
-    if not latest_bars:
-        return
+لكل عقد مرشح أرسل:
+- contract_symbol
+- side
+- strike
+- expiry
+- dte
+- bid
+- ask
+- mid
+- volume
+- open_interest
+- delta if available
+- iv if available
 
-    timestamp = datetime.now(timezone.utc).isoformat()
+D) الإرسال:
+- أرسل snapshot كل 30 ثانية، وليس كل 10 ثواني
+- لا ترسل إلا البيانات المختصرة الجاهزة للقرار
 
-    payload = {
-        "timestamp": timestamp,
-        "bars": [
-            {
-                "symbol":    symbol,
-                "open":      bar.get("open"),
-                "high":      bar.get("high"),
-                "low":       bar.get("low"),
-                "close":     bar.get("close"),
-                "volume":    bar.get("volume"),
-                "vwap":      bar.get("vwap"),
-                "trades":    bar.get("trades"),
-                "bar_start": bar.get("bar_start_ts"),
-                "bar_end":   bar.get("bar_end_ts"),
-            }
-            for symbol, bar in latest_bars.items()
-        ]
-    }
+شكل payload النهائي المطلوب:
+{
+  "timestamp": "...",
+  "timeframe": "30s",
+  "underlying": {...},
+  "leaders": [...],
+  "options_candidates": [...]
+}
 
-    try:
-        async with session.post(WEBHOOK_URL, json=payload) as resp:
-            print(f"✅ Snapshot sent: {len(latest_bars)} symbols → {resp.status}")
-    except Exception as e:
-        print("Webhook error:", str(e))
+E) مهم:
+- لا تغير منطق المشروع
+- هذا الملف فقط طبقة market data preparation
+- الهدف تقليل الضوضاء وتقليل استهلاك Claude وتقليل حجم البيانات
+- أي معلومة لا تخدم القرار لا ترسلها
 
-
-# ── Snapshot Loop ─────────────────────────────────────────────
-async def snapshot_loop():
-    async with aiohttp.ClientSession() as session:
-        while True:
-            await asyncio.sleep(10)
-            if latest_bars and WEBHOOK_URL:
-                await send_snapshot(session)
-            else:
-                print("Waiting for data or webhook URL...")
-
-
-# ── WebSocket Loop ────────────────────────────────────────────
-async def websocket_loop():
-    while True:
-        try:
-            async with websockets.connect(
-                WS_URL,
-                ping_interval=20,
-                ping_timeout=20,
-                close_timeout=10
-            ) as ws:
-                # 1) Auth
-                await ws.send(json.dumps({
-                    "action": "auth",
-                    "params": API_KEY
-                }))
-                auth_resp = await ws.recv()
-                print("Auth:", auth_resp)
-
-                # 2) Subscribe — AM.* = شمعة دقيقة كاملة ✅ (بدل A.* الثانية)
-                subs = ",".join([f"AM.{s}" for s in SYMBOLS])
-                await ws.send(json.dumps({
-                    "action": "subscribe",
-                    "params": subs
-                }))
-                sub_resp = await ws.recv()
-                print("Subscribed:", sub_resp)
-
-                # 3) Read messages forever
-                while True:
-                    msg = await ws.recv()
-                    data = json.loads(msg)
-                    for event in data:
-                        # AM = Aggregate Minute — شمعة مكتملة كل دقيقة ✅
-                        if event.get("ev") == "AM":
-                            sym = event.get("sym")
-                            latest_bars[sym] = {
-                                "open":         event.get("o"),   # افتتاح الدقيقة
-                                "high":         event.get("h"),   # أعلى سعر في الدقيقة
-                                "low":          event.get("l"),   # أدنى سعر في الدقيقة
-                                "close":        event.get("c"),   # إغلاق الدقيقة
-                                "volume":       event.get("av"),  # حجم متراكم اليوم
-                                "vwap":         event.get("vw"),  # VWAP الدقيقة
-                                "trades":       event.get("z"),   # عدد الصفقات
-                                "bar_start_ts": event.get("s"),   # بداية الشمعة
-                                "bar_end_ts":   event.get("e"),   # نهاية الشمعة
-                            }
-                            print(f"📊 {sym}: O={event.get('o')} H={event.get('h')} "
-                                  f"L={event.get('l')} C={event.get('c')}")
-
-        except Exception as e:
-            print("WebSocket error:", str(e))
-            print("Reconnecting in 5 seconds...")
-            await asyncio.sleep(5)
-
-
-# ── Main ──────────────────────────────────────────────────────
-async def main():
-    if not API_KEY:
-        raise ValueError("POLYGON_API_KEY is missing")
-    if not WEBHOOK_URL:
-        print("Warning: N8N_WEBHOOK_URL is missing")
-
-    await asyncio.gather(
-        websocket_loop(),
-        snapshot_loop()
-    )
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+بعد التعديل:
+1) اشرح لي بالضبط ما الذي أصبح يُسحب من السوق
+2) اشرح لي ما الذي يتم استبعاده
+3) اعطني مثال payload حقيقي نهائي
+4) وضح هل بنيت 30s candles داخليًا أم اعتمدت مصدر جاهز
