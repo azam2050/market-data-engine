@@ -1,40 +1,43 @@
-نعم، هذا الملف market_data_engine.py هو طبقة بيانات السوق الأساسية، وأريدك تعدله ليطابق منطق المشروع النهائي.
+Yes, this file `market_data_engine.py` is the market data preparation layer, and I want it updated to match the final project logic.
 
-المطلوب:
+Goal:
+This file must decide what we take from the market and what we ignore.
+I do NOT want the full raw market feed.
+I want a filtered, compact, decision-ready payload sent directly to the bot webhook.
 
-1) هذا الملف يكون مسؤول عن تحديد ما الذي نأخذه من السوق فقط، وليس سحب كل السوق الخام.
-2) لا أريد كل market feed، أريد بيانات مختصرة ومفلترة فقط.
-3) اجعل المدخلات كالتالي:
-   - QQQ فقط كأصل رئيسي
-   - الأسهم القيادية المؤثرة على QQQ فقط
-   - خيارات QQQ فقط
-4) الهدف هو إرسال payload مختصر وواضح للبوت، وليس بيانات ضخمة.
+Scope:
+1) Underlying:
+- QQQ only
 
-التعديلات المطلوبة:
+2) Leaders:
+- AAPL, MSFT, NVDA, AMZN, GOOGL, META, AVGO, TSLA
 
-A) الأسهم:
-- راقب QQQ والأسهم القيادية فقط
-- ابنِ candles بإطار 30 ثانية
-- لكل رمز أخرج:
-  symbol, timeframe=30s, open, high, low, close, vwap, volume, timestamp
+3) Options:
+- QQQ options only
+- 0DTE and 1DTE only
+- exclude illiquid contracts
+- exclude contracts with missing bid/ask
+- prefer near-the-money strikes
+- keep only top candidate CALLs and PUTs
+- do NOT send the full options chain
 
-B) القياديات:
-- استخدم فقط:
-  AAPL, MSFT, NVDA, AMZN, GOOGL, META, AVGO, TSLA
-- أرسل نفس بيانات 30 ثانية
+A) Equity candles
+Monitor QQQ and the leader stocks only.
+Build 30-second candles.
+If no native 30s feed exists, build 30s candles internally from finer-grained events.
+For each symbol output only:
+- symbol
+- timeframe = 30s
+- open
+- high
+- low
+- close
+- vwap
+- volume
+- timestamp
 
-C) الخيارات:
-- أضف طبقة خيارات QQQ
-- لا ترسل كل options chain
-- فلتر فقط:
-  - QQQ only
-  - 0DTE و 1DTE فقط
-  - exclude illiquid contracts
-  - exclude contracts with missing bid/ask
-  - keep only top candidate CALLs and PUTs
-  - prefer near-the-money strikes
-
-لكل عقد مرشح أرسل:
+B) Options candidates
+For each selected contract output only:
 - contract_symbol
 - side
 - strike
@@ -48,11 +51,13 @@ C) الخيارات:
 - delta if available
 - iv if available
 
-D) الإرسال:
-- أرسل snapshot كل 30 ثانية، وليس كل 10 ثواني
-- لا ترسل إلا البيانات المختصرة الجاهزة للقرار
+C) Send frequency
+- send one snapshot every 30 seconds
+- do not send every 10 seconds
+- do not send raw ticks or oversized payloads
+- send only compact decision-ready data
 
-شكل payload النهائي المطلوب:
+D) Final payload format
 {
   "timestamp": "...",
   "timeframe": "30s",
@@ -61,14 +66,18 @@ D) الإرسال:
   "options_candidates": [...]
 }
 
-E) مهم:
-- لا تغير منطق المشروع
-- هذا الملف فقط طبقة market data preparation
-- الهدف تقليل الضوضاء وتقليل استهلاك Claude وتقليل حجم البيانات
-- أي معلومة لا تخدم القرار لا ترسلها
+E) Important constraints
+- do not change project decision logic
+- do not add Telegram logic here
+- do not add Claude logic here
+- this file is only the market data preparation layer
+- reduce noise
+- reduce payload size
+- reduce Claude token usage
+- any field that does not help decision-making should be excluded
 
-بعد التعديل:
-1) اشرح لي بالضبط ما الذي أصبح يُسحب من السوق
-2) اشرح لي ما الذي يتم استبعاده
-3) اعطني مثال payload حقيقي نهائي
-4) وضح هل بنيت 30s candles داخليًا أم اعتمدت مصدر جاهز
+After the update, explain clearly:
+1) exactly what is now pulled from the market
+2) exactly what is excluded
+3) one final realistic payload example
+4) whether the 30s candles were built internally or from a native source
