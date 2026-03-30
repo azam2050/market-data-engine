@@ -115,8 +115,19 @@ def rank_option(contract: Dict[str, Any], spot_price: float) -> tuple:
     dist = strike_distance_pct(spot_price, strike)
     spread_pct = ((ask - bid) / max((ask + bid) / 2.0, 0.01)) * 100.0 if ask >= bid else 999.0
 
-    # أقرب strike + سبريد أقل + سيولة أعلى
     return (dist, spread_pct, -volume, -oi)
+
+
+def payload_summary(payload: Dict[str, Any]) -> str:
+    underlying = payload.get("underlying") or {}
+    symbol = underlying.get("symbol")
+    close = underlying.get("close")
+    leaders_count = len(payload.get("leaders") or [])
+    options_count = len(payload.get("options_candidates") or [])
+    return (
+        f"underlying={symbol} close={close} "
+        f"leaders={leaders_count} options={options_count}"
+    )
 
 
 # =========================
@@ -354,20 +365,26 @@ async def send_snapshot(session: aiohttp.ClientSession) -> None:
         return
 
     try:
+        log.info("Sending webhook | %s", payload_summary(payload))
+
         async with session.post(BOT_WEBHOOK_URL, json=payload, timeout=HTTP_TIMEOUT_SEC) as resp:
             last_delivery_status = resp.status
             text = await resp.text()
 
             if 200 <= resp.status < 300:
                 log.info(
-                    "Snapshot sent | leaders=%s | options=%s | status=%s",
-                    len(payload["leaders"]),
-                    len(payload["options_candidates"]),
+                    "Webhook sent successfully | status=%s | %s",
                     resp.status,
+                    payload_summary(payload),
                 )
             else:
                 last_error = f"webhook_failed:{resp.status}:{text[:200]}"
-                log.error("Webhook failed: %s | %s", resp.status, text[:200])
+                log.error(
+                    "Webhook failed | status=%s | response=%s | %s",
+                    resp.status,
+                    text[:200],
+                    payload_summary(payload),
+                )
 
     except Exception as e:
         last_error = f"webhook_exception:{e}"
@@ -400,6 +417,7 @@ async def main() -> None:
     log.info("Snapshot interval: %ss", SNAPSHOT_INTERVAL_SEC)
     log.info("Top calls: %s | Top puts: %s", TOP_CALLS, TOP_PUTS)
     log.info("Webhook configured: %s", bool(BOT_WEBHOOK_URL))
+    log.info("Webhook URL: %s", BOT_WEBHOOK_URL if BOT_WEBHOOK_URL else "NOT SET")
     log.info("==========================================")
 
     await asyncio.gather(
