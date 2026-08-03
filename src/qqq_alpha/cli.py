@@ -26,11 +26,13 @@ from qqq_alpha.data.pricing import BlackScholesPricer
 from qqq_alpha.data.synthetic import synthetic_week
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
+from qqq_alpha.learning import analyse, apply_lesson, propose
 from qqq_alpha.live.engine import LiveEngine
 from qqq_alpha.live.notifier import ConsoleNotifier
 from qqq_alpha.live.review import load_period, review
 from qqq_alpha.live.stream import LiveBarStream, StreamAuthError, drain
 from qqq_alpha.live.telegram import FanoutNotifier, TelegramNotifier, verify_telegram
+from qqq_alpha.memory import Memory
 
 app = typer.Typer(add_completion=False, help="QQQ Alpha — AI options research engine")
 console = Console()
@@ -63,6 +65,7 @@ def demo(
         pricer=BlackScholesPricer(),
         playbook=load_playbook(settings.playbook_path),
         journal=journal,
+        memory=Memory(settings.data_dir / "memory.db"),
     )
 
     result = asyncio.run(backtester.run(sessions))
@@ -125,6 +128,7 @@ def backtest(
                 pricer=BlackScholesPricer(volatility),
                 playbook=load_playbook(settings.playbook_path),
                 journal=journal,
+                memory=Memory(settings.data_dir / "memory.db"),
             )
             result = await backtester.run(sessions, prior_days=prior_days)
             render_report(result, console)
@@ -312,6 +316,114 @@ def report(
                 border_style="yellow",
             )
         )
+
+
+@app.command()
+def memory() -> None:
+    """Show what the engine remembers, and what that memory says about it."""
+    settings = get_settings()
+    store = Memory(settings.data_dir / "memory.db")
+    counts = store.counts()
+
+    head = Table(title="Engine Memory", show_header=False, box=None)
+    head.add_column(style="cyan", width=26)
+    head.add_column(style="bold")
+    head.add_row("Database", str(settings.data_dir / "memory.db"))
+    head.add_row("Session days recorded", str(counts["session_days"]))
+    head.add_row("Trades remembered", f"{counts['closed']} closed of {counts['trades']}")
+    head.add_row("Decisions recorded", str(counts["decisions"]))
+    console.print(head)
+
+    for column, title in (
+        ("regime", "By market regime"),
+        ("direction", "By direction"),
+        ("exit_reason", "By exit reason"),
+    ):
+        rows = store.performance_by(column, min_sample=1)
+        if not rows:
+            continue
+        table = Table(title=title)
+        table.add_column(column)
+        table.add_column("Trades", justify="right")
+        table.add_column("Win rate", justify="right")
+        table.add_column("Avg return", justify="right")
+        for row in rows:
+            table.add_row(
+                str(row["bucket"]),
+                str(row["trades"]),
+                f"{row['win_rate']:.0f}%",
+                f"{row['avg_return']:+.1f}%",
+            )
+        console.print(table)
+
+    hours = store.performance_by_hour(min_sample=1)
+    if hours:
+        table = Table(title="Best hours to trade")
+        table.add_column("Session hour")
+        table.add_column("Trades", justify="right")
+        table.add_column("Win rate", justify="right")
+        table.add_column("Avg return", justify="right")
+        for row in hours:
+            table.add_row(
+                row["session_hour"],
+                str(row["trades"]),
+                f"{row['win_rate']:.0f}%",
+                f"{row['avg_return']:+.1f}%",
+            )
+        console.print(table)
+
+    if counts["closed"] == 0:
+        console.print("[dim]nothing learned yet — the engine has no closed trades[/]")
+
+
+@app.command()
+def learn(
+    apply: int = typer.Option(None, help="Approve a pending lesson by id and write it into the playbook"),
+    reject: int = typer.Option(None, help="Reject a pending lesson by id"),
+) -> None:
+    """Analyse the trade record and propose playbook amendments for your approval."""
+    settings = get_settings()
+    store = Memory(settings.data_dir / "memory.db")
+
+    if apply is not None:
+        book = apply_lesson(store, load_playbook(settings.playbook_path), apply, settings)
+        console.print(f"[green]lesson {apply} applied — playbook is now v{book.version}[/]")
+        return
+
+    if reject is not None:
+        store.set_lesson_status(reject, "rejected")
+        console.print(f"[yellow]lesson {reject} rejected[/]")
+        return
+
+    report = analyse(store)
+    console.print(
+        f"[cyan]analysed {report.total_trades} closed trades "
+        f"(baseline {report.baseline_return:+.1f}% per trade)[/]"
+    )
+
+    for note in report.notes:
+        console.print(f"[dim]• {note}[/]")
+
+    if report.has_findings:
+        propose(store, report)
+
+    pending = store.pending_lessons()
+    if not pending:
+        console.print("[dim]no lessons pending approval[/]")
+        return
+
+    for row in pending:
+        console.print(
+            Panel(
+                f"{row['statement']}\n\n[dim]evidence: {row['evidence']}[/]\n"
+                f"[dim]sample: {row['sample_size']} trades | confidence: {row['confidence']}[/]",
+                title=f"lesson #{row['id']} — pending your approval",
+                border_style="cyan",
+            )
+        )
+    console.print(
+        "[dim]approve with  qqq learn --apply <id>   |   reject with  qqq learn --reject <id>[/]"
+    )
 
 
 @app.command()

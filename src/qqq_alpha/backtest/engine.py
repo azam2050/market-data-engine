@@ -36,6 +36,7 @@ from qqq_alpha.domain import (
 )
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
+from qqq_alpha.memory import Memory
 from qqq_alpha.trades import TradeManager
 
 log = logging.getLogger(__name__)
@@ -86,6 +87,7 @@ class Backtester:
         playbook: Playbook,
         journal: Journal | None = None,
         contracts_by_symbol: dict[str, OptionContract] | None = None,
+        memory: Memory | None = None,
     ):
         self.settings = settings
         self.decider = decider
@@ -93,6 +95,7 @@ class Backtester:
         self.playbook = playbook
         self.journal = journal
         self.contracts = contracts_by_symbol or {}
+        self.memory = memory
         self.builder = SnapshotBuilder(settings.primary_symbol)
 
     # ------------------------------------------------------------------
@@ -212,6 +215,9 @@ class Backtester:
                 recent_trades=recent_trades or [],
                 rail_warnings=pre.warnings,
                 attention_note=verdict.summary,
+                similar_trades=(
+                    self.memory.similar_trades(snapshot, limit=8) if self.memory else None
+                ),
             )
             result.brain_calls += 1
             result.decisions.append(decision)
@@ -242,6 +248,8 @@ class Backtester:
             result.trades.append(trade)
             if self.journal:
                 self.journal.log_trade(trade)
+            if self.memory:
+                self.memory.remember_trade(trade, snapshot)
 
         # 6. nothing survives the close on 0DTE
         if session_bars:
@@ -250,6 +258,9 @@ class Backtester:
                 price = self._price(trade.occ_symbol, final.ts, final.close) or 0.01
                 manager.force_close(trade, price, final.ts, "session_close")
 
+        if self.memory:
+            for trade in result.trades:
+                self.memory.remember_trade(trade)
         if self.journal:
             for trade in result.trades:
                 self.journal.log_trade(trade)

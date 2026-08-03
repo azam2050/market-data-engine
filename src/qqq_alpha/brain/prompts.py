@@ -140,6 +140,7 @@ def build_user_prompt(
     recent_trades: list[Trade] | None = None,
     rail_warnings: list[str] | None = None,
     attention_note: str = "",
+    similar_trades: list | None = None,
 ) -> str:
     sections: list[str] = []
 
@@ -245,6 +246,18 @@ def build_user_prompt(
         ]
         sections.append(
             "=== THIS ENGINE'S RECENT TRADES (your own track record — learn from it) ===\n"
+            + _compact(rows)
+        )
+
+    if similar_trades:
+        rows = [
+            t.as_prompt_row() if hasattr(t, "as_prompt_row") else t for t in similar_trades
+        ]
+        sections.append(
+            "=== WHEN THE MARKET LOOKED LIKE THIS BEFORE ===\n"
+            "Your own trades taken under comparable conditions, nearest match first. "
+            "This is evidence about you, not about the market in general — if these "
+            "went badly, that is a fact about your judgement in this setup.\n"
             + _compact(rows)
         )
 

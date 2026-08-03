@@ -32,6 +32,7 @@ from qqq_alpha.journal import Journal
 from qqq_alpha.live.notifier import ConsoleNotifier, Notifier
 from qqq_alpha.live.state import SessionState, StateStore
 from qqq_alpha.live.stream import LiveBarStream
+from qqq_alpha.memory import Memory
 from qqq_alpha.trades import TradeManager
 
 log = logging.getLogger(__name__)
@@ -99,6 +100,9 @@ class LiveEngine:
         self.recent_trades: list[Trade] = []
         self._current_day: date | None = None
         self.store = StateStore(self.settings.journal_dir / "session-state.json")
+        # long-term memory lives on disk, so a restart never costs the engine
+        # what it has learned — unlike the in-process list it replaced
+        self.memory = Memory(self.settings.data_dir / "memory.db")
 
     # ------------------------------------------------------------------
     def _persist(self) -> None:
@@ -154,6 +158,7 @@ class LiveEngine:
             )
 
         await self._restore()
+        self._refresh_recent()
         await self._warm_start()
 
         try:
@@ -236,6 +241,7 @@ class LiveEngine:
             if update is not None:
                 await self.notifier.update(trade, update, self._delayed)
                 self.journal.log_trade(trade)
+                self.memory.remember_trade(trade)
                 self._persist()
 
         self.status.open_positions = len(self.manager.open_trades)
@@ -274,6 +280,7 @@ class LiveEngine:
             recent_trades=self.recent_trades,
             rail_warnings=pre.warnings,
             attention_note=verdict.summary,
+            similar_trades=self.memory.similar_trades(snapshot, limit=8),
         )
         self.status.brain_calls += 1
 
@@ -281,6 +288,7 @@ class LiveEngine:
         self.journal.log_decision(
             decision, snapshot, post.blocks, pre.warnings + post.warnings, verdict.score
         )
+        self.memory.remember_decision(decision, snapshot, verdict.score, post.blocks)
 
         if decision.action is not Action.ENTER or not post.allowed:
             if decision.action is Action.ENTER:
@@ -296,6 +304,7 @@ class LiveEngine:
         self.status.trades_today += 1
         self.status.signals_sent += 1
         self.journal.log_trade(trade)
+        self.memory.remember_trade(trade, snapshot)
         # persist before publishing: a crash between the two must leave the
         # position recoverable, never announced-but-forgotten
         self._persist()
@@ -310,6 +319,7 @@ class LiveEngine:
             update = self.manager.force_close(trade, price, bar.ts, "session_close")
             await self.notifier.update(trade, update, self._delayed)
             self.journal.log_trade(trade)
+            self.memory.remember_trade(trade)
             self._persist()
 
     async def _roll_session(self, new_day: date) -> None:
@@ -324,8 +334,8 @@ class LiveEngine:
             )
             await self.notifier.update(trade, update, self._delayed)
 
-        self.recent_trades.extend(self.manager.closed_trades)
-        self.recent_trades = self.recent_trades[-50:]
+        for closed in self.manager.closed_trades:
+            self.memory.remember_trade(closed)
 
         await self.notifier.note(
             f"session {self._current_day} closed | trades={self.status.trades_today} "
@@ -334,6 +344,7 @@ class LiveEngine:
 
         self.manager = TradeManager()
         self.attention.reset()
+        self._refresh_recent()
         self.session_bars = []
         self.leader_bars = {}
         self.status.trades_today = 0
@@ -351,6 +362,10 @@ class LiveEngine:
             f"engine stopped | signals={self.status.signals_sent} "
             f"| open positions left unmanaged: {len(self.manager.open_trades)}"
         )
+
+    def _refresh_recent(self) -> None:
+        """Reload recent history from disk rather than trusting process memory."""
+        self.recent_trades = self.memory.recent_trades(limit=15)
 
     @property
     def _delayed(self) -> bool:
