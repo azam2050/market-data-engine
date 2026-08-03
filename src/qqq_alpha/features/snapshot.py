@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from qqq_alpha.config import MARKET_TZ, REGULAR_OPEN
+from qqq_alpha.data.quality import DataQuality
 from qqq_alpha.domain import (
     Bar,
     FlowEvent,
@@ -21,6 +22,7 @@ from qqq_alpha.domain import (
 )
 from qqq_alpha.features import indicators, levels
 from qqq_alpha.features.flow import flow_bias, summarize_flow
+from qqq_alpha.features.timeframes import TimeframeSet
 
 
 def _session_minute(ts: datetime) -> int:
@@ -51,13 +53,25 @@ class SnapshotBuilder:
         overnight_low: float | None = None,
         events: list[str] | None = None,
         now: datetime | None = None,
+        quality: DataQuality | None = None,
     ) -> MarketSnapshot:
         if not session_bars:
             raise ValueError("cannot build a snapshot without bars")
 
         last = session_bars[-1]
         now = now or last.ts
+
+        # the same session at three resolutions — 15m for trend, 5m for
+        # structure, 1m for timing. Rolled up from the provider's minute bars,
+        # so every timeframe is arithmetically consistent with the others.
+        tfs = TimeframeSet.build(session_bars)
         ind = indicators.compute_all(session_bars)
+        timeframe_packs = {
+            "1m": ind,
+            "5m": indicators.compute_all(tfs.m5) if len(tfs.m5) >= 3 else {},
+            "15m": indicators.compute_all(tfs.m15) if len(tfs.m15) >= 3 else {},
+        }
+
         lvl = levels.compute_levels(session_bars, prior_day, overnight_high, overnight_low)
         flow = summarize_flow(flow_events or [], now) if flow_events else None
 
@@ -77,7 +91,8 @@ class SnapshotBuilder:
                 leader_alignment = (positive / len(moves)) * 2 - 1
 
         observations = self._observe(session_bars, ind, lvl, flow, leader_alignment)
-        regime = self._classify_regime(ind)
+        observations.extend(self._observe_timeframes(timeframe_packs))
+        regime = self._classify_regime(timeframe_packs.get("5m") or ind)
 
         data_age = max(0.0, (datetime.now(UTC) - last.ts.astimezone(UTC)).total_seconds())
 
@@ -87,13 +102,84 @@ class SnapshotBuilder:
             underlying=last,
             leaders=leaders_last,
             indicators=ind,
+            timeframes=timeframe_packs,
             levels=lvl,
             flow=flow,
             regime=regime,
             observations=observations,
             events=events or [],
             data_age_sec=round(data_age, 1),
+            data_quality=quality.summary() if quality else "",
+            data_usable=quality.is_usable if quality else True,
         )
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _observe_timeframes(
+        packs: dict[str, dict[str, float | None]],
+    ) -> list[Observation]:
+        """Higher-timeframe context, and whether the timeframes agree.
+
+        Agreement across 1m/5m/15m is the single most useful piece of context a
+        short-term trader has: it separates a real move from a wiggle inside a
+        move going the other way.
+        """
+        out: list[Observation] = []
+        directions: list[float] = []
+
+        for label, weight in (("5m", 0.9), ("15m", 1.0)):
+            pack = packs.get(label) or {}
+            ema9, ema21 = pack.get("ema9"), pack.get("ema21")
+            if not ema9 or not ema21:
+                continue
+            spread_pct = (ema9 - ema21) / ema21 * 100.0
+            score = _clamp(spread_pct / 0.30)
+            directions.append(score)
+            out.append(
+                Observation(
+                    name=f"trend_{label}",
+                    category="trend",
+                    value=round(spread_pct, 3),
+                    score=score,
+                    confidence=weight,
+                    note=f"{label} trend direction — the backdrop the 1m entry has to fight or ride",
+                )
+            )
+
+            momentum = pack.get("mom_5m")
+            if momentum is not None:
+                out.append(
+                    Observation(
+                        name=f"momentum_{label}",
+                        category="momentum",
+                        value=momentum,
+                        score=_clamp(momentum / 0.6),
+                        confidence=weight * 0.8,
+                        note=f"momentum over the last 5 {label} bars",
+                    )
+                )
+
+        one_minute = packs.get("1m") or {}
+        ema9, ema21 = one_minute.get("ema9"), one_minute.get("ema21")
+        if ema9 and ema21 and directions:
+            directions.append(_clamp((ema9 - ema21) / ema21 * 100.0 / 0.15))
+            same_sign = all(d > 0 for d in directions) or all(d < 0 for d in directions)
+            out.append(
+                Observation(
+                    name="timeframe_alignment",
+                    category="context",
+                    value=round(sum(directions) / len(directions), 3),
+                    score=_clamp(sum(directions) / len(directions)) if same_sign else 0.0,
+                    confidence=1.0 if same_sign else 0.4,
+                    note=(
+                        "all timeframes point the same way"
+                        if same_sign
+                        else "timeframes disagree — a move on one is noise on another"
+                    ),
+                )
+            )
+
+        return out
 
     # ------------------------------------------------------------------
     def _observe(

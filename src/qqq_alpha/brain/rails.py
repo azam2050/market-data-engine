@@ -56,6 +56,13 @@ class SafetyRails:
                 f"(limit {self.settings.max_data_age_sec}s)"
             )
 
+        # bad data is an execution problem, not a market opinion: you cannot
+        # trade a picture you know to be wrong
+        if not snapshot.data_usable:
+            blocks.append(f"unusable_data: {snapshot.data_quality}")
+        elif snapshot.data_quality and "clean" not in snapshot.data_quality:
+            warnings.append(f"degraded_data: {snapshot.data_quality}")
+
         local_time = snapshot.ts.astimezone(MARKET_TZ).time()
         if not _within(local_time, REGULAR_OPEN, REGULAR_CLOSE):
             blocks.append(f"outside_session: {local_time.strftime('%H:%M')} ET")

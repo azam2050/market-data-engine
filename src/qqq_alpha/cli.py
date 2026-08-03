@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 import typer
 from rich.console import Console
 
-from qqq_alpha.backtest.engine import Backtester, prior_day_map, sessions_from_bars
+from qqq_alpha.backtest.engine import Backtester, prior_day_map
 from qqq_alpha.backtest.report import render_report
 from qqq_alpha.brain.decider import build_decider
 from qqq_alpha.brain.playbook import load_playbook
@@ -88,12 +88,17 @@ def backtest(
             prior_days = prior_day_map(daily)
 
             sessions: dict[date, list] = {}
+            skipped: list[str] = []
             day = start_date
             while day <= end_date:
                 if day.weekday() < 5:
-                    bars = await client.minute_bars(settings.primary_symbol, day)
-                    if bars:
-                        sessions.update(sessions_from_bars(bars))
+                    session_data = await client.session(settings.primary_symbol, day)
+                    if session_data.regular and session_data.is_usable:
+                        sessions[day] = session_data.regular
+                    elif session_data.regular:
+                        skipped.append(
+                            f"{day}: {session_data.quality.summary() if session_data.quality else 'unusable'}"
+                        )
                 day += timedelta(days=1)
 
             if not sessions:
@@ -101,6 +106,10 @@ def backtest(
                 raise typer.Exit(code=1)
 
             console.print(f"[green]{len(sessions)} sessions loaded[/]")
+            if skipped:
+                console.print(f"[yellow]{len(skipped)} sessions skipped for data quality:[/]")
+                for line in skipped[:10]:
+                    console.print(f"  [dim]{line}[/]")
 
             journal = Journal(settings.journal_dir, session_tag=f"bt-{start}-{end}")
             backtester = Backtester(
@@ -129,10 +138,10 @@ def snapshot(
 
     async def _run() -> None:
         async with MassiveClient(settings) as client:
-            bars = await client.minute_bars(settings.primary_symbol, target_day)
+            session_data = await client.session(settings.primary_symbol, target_day)
 
-        if not bars:
-            console.print("[red]no bars for that session[/]")
+        if not session_data.regular:
+            console.print("[red]no regular-session bars for that day[/]")
             raise typer.Exit(code=1)
 
         from qqq_alpha.config import MARKET_TZ
@@ -140,15 +149,22 @@ def snapshot(
         cutoff = datetime(
             target_day.year, target_day.month, target_day.day, hour, minute, tzinfo=MARKET_TZ
         )
-        window = [b for b in bars if b.ts.astimezone(MARKET_TZ) <= cutoff]
+        window = [b for b in session_data.regular if b.ts.astimezone(MARKET_TZ) <= cutoff]
         if len(window) < 30:
             console.print("[red]not enough bars before that time[/]")
             raise typer.Exit(code=1)
 
-        snap = SnapshotBuilder(settings.primary_symbol).build(window)
+        snap = SnapshotBuilder(settings.primary_symbol).build(
+            window,
+            overnight_high=session_data.premarket_high,
+            overnight_low=session_data.premarket_low,
+            quality=session_data.quality,
+        )
         console.print(f"[bold]{settings.primary_symbol} @ {snap.underlying.close}[/]  "
                       f"regime={snap.regime.value}  net_bias={snap.net_bias:+.3f}")
-        console.print(snap.indicators)
+        console.print(f"[dim]data: {snap.data_quality}[/]")
+        for label, pack in snap.timeframes.items():
+            console.print(f"[magenta]{label}[/] {pack}")
         console.print(snap.levels)
         for obs in snap.observations:
             console.print(f"  [cyan]{obs.name:<22}[/] score={obs.score:+.2f} "

@@ -23,6 +23,7 @@ from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.brain.rails import DayState, SafetyRails
 from qqq_alpha.config import Settings
 from qqq_alpha.data.pricing import OptionPricer
+from qqq_alpha.data.quality import inspect_session
 from qqq_alpha.domain import (
     Action,
     Bar,
@@ -138,6 +139,14 @@ class Backtester:
         recent_trades: list[Trade] | None = None,
     ) -> DayResult:
         result = DayResult(day=day)
+        # inspect the day once; the verdict rides along with every snapshot so
+        # the rails and the brain both know how much to trust the picture
+        quality = inspect_session(session_bars)
+        if not quality.is_usable:
+            log.warning("%s | skipping session: %s", day, quality.summary())
+            result.rail_blocks["unusable_data"] = 1
+            return result
+
         rails = SafetyRails(self.settings)
         attention = AttentionEngine(
             self.settings.attention_threshold, self.settings.attention_cooldown_sec
@@ -167,6 +176,7 @@ class Backtester:
                 flow_events=[e for e in (flow_events or []) if e.ts <= now],
                 prior_day=prior_day,
                 now=now,
+                quality=quality,
             )
             snapshot.data_age_sec = 0.0  # replay: bars are by definition current
 

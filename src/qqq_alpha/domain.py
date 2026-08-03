@@ -27,6 +27,10 @@ class Bar(BaseModel):
     close: float
     volume: int
     vwap: float | None = None
+    transactions: int | None = None
+    """Number of individual trades in the bar. Volume tells you how much changed
+    hands; this tells you across how many decisions — a large volume spread over
+    few trades is one institution, over many trades it is the crowd."""
 
 
 class OptionType(StrEnum):
@@ -146,12 +150,18 @@ class MarketSnapshot(BaseModel):
     underlying: Bar
     leaders: list[Bar] = Field(default_factory=list)
     indicators: dict[str, float | None] = Field(default_factory=dict)
+    timeframes: dict[str, dict[str, float | None]] = Field(
+        default_factory=dict,
+        description="Indicator pack per timeframe: 1m for timing, 5m for structure, 15m for trend",
+    )
     levels: dict[str, float | None] = Field(default_factory=dict)
     flow: FlowSummary | None = None
     regime: MarketRegime = MarketRegime.UNKNOWN
     observations: list[Observation] = Field(default_factory=list)
     events: list[str] = Field(default_factory=list)  # scheduled macro events nearby
     data_age_sec: float = 0.0
+    data_quality: str = ""
+    data_usable: bool = True
 
     @property
     def net_bias(self) -> float:

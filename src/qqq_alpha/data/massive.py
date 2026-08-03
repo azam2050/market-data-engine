@@ -8,15 +8,37 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from qqq_alpha.config import Settings, get_settings
 from qqq_alpha.domain import Bar, FlowEvent, FlowKind, OptionContract, OptionType
 
+if TYPE_CHECKING:
+    from qqq_alpha.data.quality import DataQuality
+
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class TradingSession:
+    """A cleaned trading day: regular hours isolated, quality assessed."""
+
+    symbol: str
+    day: date
+    regular: list[Bar] = field(default_factory=list)
+    premarket: list[Bar] = field(default_factory=list)
+    afterhours: list[Bar] = field(default_factory=list)
+    premarket_high: float | None = None
+    premarket_low: float | None = None
+    quality: DataQuality | None = None
+
+    @property
+    def is_usable(self) -> bool:
+        return bool(self.regular) and (self.quality is None or self.quality.is_usable)
 
 MAX_RETRIES = 4
 BACKOFF_BASE_SEC = 1.5
@@ -95,7 +117,12 @@ class MassiveClient:
     # Equities
     # ------------------------------------------------------------------
     async def minute_bars(self, symbol: str, day: date) -> list[Bar]:
-        """All 1-minute bars for one symbol on one calendar day."""
+        """Raw 1-minute bars for one calendar day.
+
+        Note this spans 04:00-20:00 ET: the provider includes extended hours and
+        offers no parameter to exclude them. Use `session()` unless you
+        specifically want pre/post-market prints.
+        """
         payload = await self._get(
             f"/v2/aggs/ticker/{symbol}/range/1/minute/{day.isoformat()}/{day.isoformat()}",
             {"adjusted": "true", "sort": "asc", "limit": 50_000},
@@ -110,9 +137,36 @@ class MassiveClient:
                 close=float(row["c"]),
                 volume=int(row.get("v") or 0),
                 vwap=float(row["vw"]) if row.get("vw") is not None else None,
+                transactions=int(row["n"]) if row.get("n") is not None else None,
             )
             for row in payload.get("results") or []
         ]
+
+    async def session(self, symbol: str, day: date) -> TradingSession:
+        """One trading day, cleaned and ready to use.
+
+        This is the entry point the engine should call. It fetches the raw day,
+        removes duplicate minutes, splits off extended hours, bridges only very
+        short gaps, and attaches a quality verdict so nothing downstream has to
+        guess whether the data is trustworthy.
+        """
+        from qqq_alpha.data.quality import dedupe, fill_gaps, inspect_session
+        from qqq_alpha.features.timeframes import split_session
+
+        raw = await self.minute_bars(symbol, day)
+        split = split_session(dedupe(raw))
+        regular = fill_gaps(split.regular)
+
+        return TradingSession(
+            symbol=symbol,
+            day=day,
+            regular=regular,
+            premarket=split.premarket,
+            afterhours=split.afterhours,
+            premarket_high=split.premarket_high,
+            premarket_low=split.premarket_low,
+            quality=inspect_session(regular),
+        )
 
     async def daily_bars(self, symbol: str, start: date, end: date) -> list[Bar]:
         payload = await self._get(
@@ -129,6 +183,7 @@ class MassiveClient:
                 close=float(row["c"]),
                 volume=int(row.get("v") or 0),
                 vwap=float(row["vw"]) if row.get("vw") is not None else None,
+                transactions=int(row["n"]) if row.get("n") is not None else None,
             )
             for row in payload.get("results") or []
         ]
@@ -197,6 +252,7 @@ class MassiveClient:
                 close=float(row["c"]),
                 volume=int(row.get("v") or 0),
                 vwap=float(row["vw"]) if row.get("vw") is not None else None,
+                transactions=int(row["n"]) if row.get("n") is not None else None,
             )
             for row in payload.get("results") or []
         ]

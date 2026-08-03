@@ -159,8 +159,24 @@ def build_user_prompt(
         )
     )
 
-    sections.append("=== INDICATORS ===\n" + _compact(snapshot.indicators))
+    if snapshot.timeframes:
+        sections.append(
+            "=== MULTI-TIMEFRAME VIEW ===\n"
+            "15m = where the day is going, 5m = whether structure supports the trade, "
+            "1m = when to press the button. A 1m signal against the 15m is usually noise.\n"
+            + _compact(snapshot.timeframes)
+        )
+    else:
+        sections.append("=== INDICATORS ===\n" + _compact(snapshot.indicators))
+
     sections.append("=== LEVELS ===\n" + _compact(snapshot.levels))
+
+    if snapshot.data_quality:
+        sections.append(
+            "=== DATA QUALITY ===\n"
+            f"{snapshot.data_quality}\n"
+            "Degraded data is a reason to lower confidence or pass, not to guess."
+        )
 
     observations = [
         {
