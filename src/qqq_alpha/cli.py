@@ -13,17 +13,21 @@ from datetime import date, datetime, timedelta
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 
 from qqq_alpha.backtest.engine import Backtester, prior_day_map
 from qqq_alpha.backtest.report import render_report
 from qqq_alpha.brain.decider import build_decider
 from qqq_alpha.brain.playbook import load_playbook
-from qqq_alpha.config import get_settings
+from qqq_alpha.config import MARKET_TZ, get_settings
 from qqq_alpha.data.massive import MassiveClient
 from qqq_alpha.data.pricing import BlackScholesPricer
 from qqq_alpha.data.synthetic import synthetic_week
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
+from qqq_alpha.live.engine import LiveEngine
+from qqq_alpha.live.notifier import ConsoleNotifier
+from qqq_alpha.live.stream import LiveBarStream, StreamAuthError, drain
 
 app = typer.Typer(add_completion=False, help="QQQ Alpha — AI options research engine")
 console = Console()
@@ -169,6 +173,89 @@ def snapshot(
         for obs in snap.observations:
             console.print(f"  [cyan]{obs.name:<22}[/] score={obs.score:+.2f} "
                           f"conf={obs.confidence:.2f}  {obs.note}")
+
+    asyncio.run(_run())
+
+
+@app.command()
+def live(
+    mode: str = typer.Option("ai", help="ai or heuristic"),
+    shadow: bool = typer.Option(
+        True,
+        help="Shadow mode publishes signals without claiming a track record. Keep it on until the engine has proven itself.",
+    ),
+    volatility: float = typer.Option(0.22, help="Volatility for modelled contract pricing"),
+) -> None:
+    """Run the engine against the live market feed."""
+    settings = get_settings()
+    _setup_logging(settings.log_level)
+
+    if not settings.massive_api_key:
+        console.print("[red]MASSIVE_API_KEY is not set — see .env.example[/]")
+        raise typer.Exit(code=1)
+
+    if settings.massive_feed_mode != "real_time":
+        console.print(
+            Panel(
+                "[bold yellow]Feed is DELAYED (15 minutes).[/]\n"
+                "0DTE setups do not survive a 15-minute delay, so these signals are for "
+                "pipeline validation only — never for execution.\n"
+                "Real-time requires the Advanced tier on both stocks and options.",
+                border_style="yellow",
+            )
+        )
+
+    engine = LiveEngine(
+        settings=settings,
+        decider=build_decider(settings, mode),
+        pricer=BlackScholesPricer(volatility),
+        playbook=load_playbook(settings.playbook_path),
+        journal=Journal(settings.journal_dir, session_tag="live"),
+        notifier=ConsoleNotifier(console),
+        dry_run=shadow,
+    )
+
+    try:
+        asyncio.run(engine.run())
+    except KeyboardInterrupt:
+        console.print("\n[dim]stopped by user[/]")
+        console.print(engine.status.as_dict())
+
+
+@app.command()
+def check() -> None:
+    """Connect to the live feed for 60 seconds and report what actually arrives.
+
+    Run this before trusting a subscription: it proves the key works, the plan
+    covers the channels we need, and bars are shaped the way we expect.
+    """
+    settings = get_settings()
+    _setup_logging(settings.log_level)
+
+    async def _run() -> None:
+        stream = LiveBarStream(settings, [settings.primary_symbol])
+        console.print(f"[cyan]listening for {settings.primary_symbol} bars (60s)…[/]")
+        try:
+            bars = await drain(stream, seconds=60)
+        except StreamAuthError as exc:
+            console.print(f"[red]authentication failed: {exc}[/]")
+            raise typer.Exit(code=1) from exc
+
+        if not bars:
+            console.print(
+                "[yellow]connected, but no bars arrived.[/]\n"
+                "If the market is open this means the plan does not include the "
+                "minute-aggregate channel. If it is closed, that is expected."
+            )
+            return
+
+        console.print(f"[green]{len(bars)} bars received[/]")
+        for bar in bars[-5:]:
+            console.print(
+                f"  {bar.ts.astimezone(MARKET_TZ).strftime('%H:%M')} "
+                f"O={bar.open} H={bar.high} L={bar.low} C={bar.close} "
+                f"V={bar.volume} VWAP={bar.vwap} trades={bar.transactions}"
+            )
 
     asyncio.run(_run())
 
