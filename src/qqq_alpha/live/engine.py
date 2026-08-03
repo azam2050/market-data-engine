@@ -19,10 +19,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 from qqq_alpha.brain.attention import AttentionEngine
-from qqq_alpha.brain.decider import Decider
+from qqq_alpha.brain.decider import Decider, next_expiry
 from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.brain.rails import DayState, SafetyRails
 from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, Settings
+from qqq_alpha.data.chain import LiveChainPricer
 from qqq_alpha.data.massive import MassiveClient
 from qqq_alpha.data.pricing import OptionPricer
 from qqq_alpha.data.quality import inspect_session
@@ -228,13 +229,15 @@ class LiveEngine:
         if len(self.session_bars) < WARMUP_BARS:
             return
 
+        await self._refresh_chain(bar)
         await self._mark_open_positions(bar)
         await self._maybe_decide(bar)
         await self._close_if_session_over(bar)
 
     async def _mark_open_positions(self, bar: Bar) -> None:
         for trade in list(self.manager.open_trades):
-            price = self.pricer.price_at(trade.occ_symbol, bar.ts, bar.close)
+            # mark at the bid: that is what closing the position would actually fetch
+            price = self.pricer.price_at(trade.occ_symbol, bar.ts, bar.close, side="exit")
             if price is None:
                 continue
             update = self.manager.update(trade, price, bar.ts)
@@ -281,10 +284,22 @@ class LiveEngine:
             rail_warnings=pre.warnings,
             attention_note=verdict.summary,
             similar_trades=self.memory.similar_trades(snapshot, limit=8),
+            chain=(
+                self.pricer.chain_context(bar.close)
+                if isinstance(self.pricer, LiveChainPricer)
+                else None
+            ),
         )
         self.status.brain_calls += 1
 
-        post = self.rails.post_check(decision, None)
+        # with a live chain we can validate the real contract: spread, liquidity,
+        # whether it exists at all
+        contract = (
+            self.pricer.contract(decision.occ_symbol or "")
+            if isinstance(self.pricer, LiveChainPricer)
+            else None
+        )
+        post = self.rails.post_check(decision, contract)
         self.journal.log_decision(
             decision, snapshot, post.blocks, pre.warnings + post.warnings, verdict.score
         )
@@ -295,7 +310,9 @@ class LiveEngine:
                 await self.notifier.note(f"entry blocked by rails: {post.blocks}")
             return
 
-        fill = self.pricer.price_at(decision.occ_symbol or "", bar.ts, bar.close)
+        # you pay the offer; pricing an entry at the mid invents profit that
+        # will not exist when the trade is actually taken
+        fill = self.pricer.price_at(decision.occ_symbol or "", bar.ts, bar.close, side="entry")
         if fill is None or fill <= 0:
             await self.notifier.note(f"could not price {decision.occ_symbol}; signal dropped")
             return
@@ -315,7 +332,9 @@ class LiveEngine:
         if local < REGULAR_CLOSE:
             return
         for trade in list(self.manager.open_trades):
-            price = self.pricer.price_at(trade.occ_symbol, bar.ts, bar.close) or 0.01
+            price = (
+                self.pricer.price_at(trade.occ_symbol, bar.ts, bar.close, side="exit") or 0.01
+            )
             update = self.manager.force_close(trade, price, bar.ts, "session_close")
             await self.notifier.update(trade, update, self._delayed)
             self.journal.log_trade(trade)
@@ -362,6 +381,15 @@ class LiveEngine:
             f"engine stopped | signals={self.status.signals_sent} "
             f"| open positions left unmanaged: {len(self.manager.open_trades)}"
         )
+
+    async def _refresh_chain(self, bar: Bar) -> None:
+        """Keep live quotes current. A stale chain prices today's trades at yesterday."""
+        if not isinstance(self.pricer, LiveChainPricer):
+            return
+
+        expiry = next_expiry(bar.ts.astimezone(MARKET_TZ).date(), 0)
+        if not await self.pricer.refresh(expiry) and self.pricer.last_error:
+            self.status.last_error = f"chain: {self.pricer.last_error}"
 
     def _refresh_recent(self) -> None:
         """Reload recent history from disk rather than trusting process memory."""

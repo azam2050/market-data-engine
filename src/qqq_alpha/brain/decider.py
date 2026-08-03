@@ -58,6 +58,7 @@ class Decider(Protocol):
         rail_warnings: list[str],
         attention_note: str,
         similar_trades: list | None = None,
+        chain: list | None = None,
     ) -> Decision: ...
 
 
@@ -85,6 +86,7 @@ class AIDecider:
         rail_warnings: list[str],
         attention_note: str,
         similar_trades: list | None = None,
+        chain: list | None = None,
     ) -> Decision:
         if not self.settings.anthropic_model:
             raise RuntimeError("ANTHROPIC_MODEL is not configured (see .env.example)")
@@ -97,6 +99,7 @@ class AIDecider:
             rail_warnings=rail_warnings,
             attention_note=attention_note,
             similar_trades=similar_trades,
+            chain=chain,
         )
 
         client = self._get_client()
@@ -207,6 +210,7 @@ class HeuristicDecider:
         rail_warnings: list[str],
         attention_note: str,
         similar_trades: list | None = None,
+        chain: list | None = None,
     ) -> Decision:
         bias = snapshot.net_bias
         rel_vol = snapshot.indicators.get("rel_volume") or 0.0

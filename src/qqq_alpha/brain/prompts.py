@@ -27,6 +27,7 @@ HOW TO THINK
 2. Weigh the evidence. Observations carry a directional score and a confidence. Conflicting evidence is information: it usually means wait, not enter.
 3. Institutional flow is the highest-value input when it is aggressive and repeated. A single large block may be a hedge, not a bet — treat it with suspicion.
 4. Ask what has to be true for this to work, and what price proves you wrong. If you cannot name the invalidation, you do not have a trade.
+4b. Price the round trip honestly. You enter at the ask and exit at the bid, so the spread is paid twice. On a 4% spread a "+50%" target really needs the contract to move about 58%.
 5. Size the target off actual volatility (ATR) and the distance to the next level, not off hope. A target that needs a move the tape has not produced all day is not a target.
 6. Time matters more than anything on same-day expiry. Theta is relentless. A thesis that needs an hour to develop at 14:45 is not a thesis.
 
@@ -141,6 +142,7 @@ def build_user_prompt(
     rail_warnings: list[str] | None = None,
     attention_note: str = "",
     similar_trades: list | None = None,
+    chain: list | None = None,
 ) -> str:
     sections: list[str] = []
 
@@ -247,6 +249,15 @@ def build_user_prompt(
         sections.append(
             "=== THIS ENGINE'S RECENT TRADES (your own track record — learn from it) ===\n"
             + _compact(rows)
+        )
+
+    if chain:
+        sections.append(
+            "=== TRADEABLE CONTRACTS RIGHT NOW ===\n"
+            "Live quotes. Choose a strike from this list — anything else does not exist "
+            "or cannot be filled. You buy at the ask and sell at the bid, so a wide "
+            "spread raises the move you need before you are even flat.\n"
+            + _compact(chain)
         )
 
     if similar_trades:

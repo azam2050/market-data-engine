@@ -88,7 +88,9 @@ def years_to_expiry(now: datetime, expiry: date, close_hour_utc: int = 20) -> fl
 
 
 class OptionPricer(Protocol):
-    def price_at(self, occ_symbol: str, ts: datetime, spot: float) -> float | None: ...
+    def price_at(
+        self, occ_symbol: str, ts: datetime, spot: float, side: str = "mid"
+    ) -> float | None: ...
 
     @property
     def is_approximation(self) -> bool: ...
@@ -107,7 +109,9 @@ class HistoricalPricer:
     def is_approximation(self) -> bool:
         return False
 
-    def price_at(self, occ_symbol: str, ts: datetime, spot: float) -> float | None:
+    def price_at(
+        self, occ_symbol: str, ts: datetime, spot: float, side: str = "mid"
+    ) -> float | None:
         series = self._index.get(occ_symbol)
         if not series:
             return None
@@ -132,7 +136,9 @@ class BlackScholesPricer:
     def is_approximation(self) -> bool:
         return True
 
-    def price_at(self, occ_symbol: str, ts: datetime, spot: float) -> float | None:
+    def price_at(
+        self, occ_symbol: str, ts: datetime, spot: float, side: str = "mid"
+    ) -> float | None:
         from qqq_alpha.data.massive import parse_occ_symbol
 
         _, expiry, option_type, strike = parse_occ_symbol(occ_symbol)

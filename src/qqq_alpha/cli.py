@@ -18,9 +18,10 @@ from rich.table import Table
 
 from qqq_alpha.backtest.engine import Backtester, prior_day_map
 from qqq_alpha.backtest.report import render_report
-from qqq_alpha.brain.decider import build_decider
+from qqq_alpha.brain.decider import build_decider, next_expiry
 from qqq_alpha.brain.playbook import load_playbook
 from qqq_alpha.config import MARKET_TZ, get_settings
+from qqq_alpha.data.chain import LiveChainPricer
 from qqq_alpha.data.massive import MassiveClient
 from qqq_alpha.data.pricing import BlackScholesPricer
 from qqq_alpha.data.synthetic import synthetic_week
@@ -225,10 +226,14 @@ def live(
             "You will miss them when away from this screen.[/]"
         )
 
+    # real quotes, with the model kept only as a labelled fallback for contracts
+    # the chain does not cover
+    pricer = LiveChainPricer(settings, fallback=BlackScholesPricer(volatility))
+
     engine = LiveEngine(
         settings=settings,
         decider=build_decider(settings, mode),
-        pricer=BlackScholesPricer(volatility),
+        pricer=pricer,
         playbook=load_playbook(settings.playbook_path),
         journal=Journal(settings.journal_dir, session_tag="live"),
         notifier=notifier,
@@ -442,6 +447,64 @@ def telegram() -> None:
     else:
         console.print(f"[red]{message}[/]")
         raise typer.Exit(code=1)
+
+
+@app.command()
+def chain(
+    dte: int = typer.Option(0, help="0 for today's expiry, 1 for the next session"),
+) -> None:
+    """Print the live option chain around the money. Verifies the options plan works."""
+    settings = get_settings()
+    _setup_logging(settings.log_level)
+
+    async def _run() -> None:
+        async with MassiveClient(settings) as client:
+            bars = await client.minute_bars(settings.primary_symbol, date.today())
+        if not bars:
+            console.print("[yellow]no bars today (market closed?) — using last known price[/]")
+
+        spot = bars[-1].close if bars else 0.0
+        if spot <= 0:
+            console.print("[red]cannot determine the underlying price[/]")
+            raise typer.Exit(code=1)
+
+        pricer = LiveChainPricer(settings)
+        expiry = next_expiry(date.today(), dte)
+        if not await pricer.refresh(expiry, force=True):
+            console.print(f"[red]chain fetch failed: {pricer.last_error}[/]")
+            console.print(
+                "[yellow]if this says 'NOT_AUTHORIZED', the options plan does not cover "
+                "snapshots — check the subscription tier[/]"
+            )
+            raise typer.Exit(code=1)
+
+        console.print(
+            f"[green]{settings.primary_symbol} @ {spot} — expiry {expiry} — {pricer.status}[/]"
+        )
+
+        table = Table(title="Tradeable contracts around the money")
+        for column in ("Contract", "Type", "Strike", "Bid", "Ask", "Spread", "Delta", "IV", "Vol", "OI"):
+            table.add_column(column, justify="right" if column != "Contract" else "left")
+
+        for row in pricer.chain_context(spot, count=5):
+            table.add_row(
+                str(row["symbol"]),
+                str(row["type"]),
+                f"{row['strike']:.0f}",
+                f"{row['bid']:.2f}" if row["bid"] else "—",
+                f"{row['ask']:.2f}" if row["ask"] else "—",
+                f"{row['spread_pct']:.1f}%" if row["spread_pct"] is not None else "—",
+                f"{row['delta']:.2f}" if row["delta"] is not None else "—",
+                f"{row['iv']:.2f}" if row["iv"] is not None else "—",
+                str(row["volume"]),
+                str(row["open_interest"]),
+            )
+        console.print(table)
+        console.print(
+            "[dim]entries fill at the ask, exits at the bid — the spread is paid twice[/]"
+        )
+
+    asyncio.run(_run())
 
 
 @app.command()
