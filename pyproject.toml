@@ -3,19 +3,19 @@ name = "qqq-alpha"
 version = "0.1.0"
 description = "AI-driven 0DTE options research engine for QQQ"
 requires-python = ">=3.12"
+# Deliberately small. Indicators are pure Python and memory is SQLite from the
+# standard library, so pandas, numpy and duckdb are not needed — carrying them
+# would triple the image and give a constrained build host a reason to fail.
 dependencies = [
     "anthropic>=0.40,<1.0",
     "httpx>=0.27,<1.0",
     "pydantic>=2.7,<3.0",
     "pydantic-settings>=2.3,<3.0",
-    "pandas>=2.2,<3.0",
-    "numpy>=1.26,<3.0",
+    "python-dotenv>=1.0,<2.0",
     "pyyaml>=6.0,<7.0",
     "typer>=0.12,<1.0",
     "rich>=13.7,<15.0",
     "websockets>=12.0,<16.0",
-    "python-dotenv>=1.0,<2.0",
-    "duckdb>=1.0,<2.0",
 ]
 
 [project.optional-dependencies]
