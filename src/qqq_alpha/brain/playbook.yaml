@@ -1,0 +1,117 @@
+# =============================================================================
+# PLAYBOOK — guidance, not law.
+#
+# The brain reads this as accumulated experience. It is explicitly allowed to
+# trade against any entry here when the evidence justifies it, provided it
+# records the override and its reasoning. Every override is reviewed in the
+# weekly learning loop; overrides that keep working get promoted into rules,
+# and rules that keep getting overridden get demoted or deleted.
+#
+# version is bumped by the learning loop, never by hand.
+# =============================================================================
+version: 1
+updated: "2026-08-02"
+notes: "Seed playbook. No live evidence behind it yet — everything here is a prior, not a finding."
+
+mission: >
+  Find asymmetric intraday setups on QQQ options where a realistic move in the
+  underlying produces at least a 50% gain on the contract, with a defined
+  invalidation point. Fewer, better trades. A day with no trade is a valid day.
+
+# ---------------------------------------------------------------------------
+# What a high-quality setup tends to look like. Treat as patterns to recognise,
+# not boxes to tick.
+# ---------------------------------------------------------------------------
+setups:
+  - id: OR_BREAK
+    name: "Opening range break with participation"
+    description: >
+      Price breaks the 15-minute opening range with relative volume above ~1.8
+      and holds the break on a retest. Best when leaders agree and flow confirms.
+    typical_window: "09:45-11:00 ET"
+    typical_hold_minutes: 20-60
+    fails_when: "Break happens on thin volume, or price immediately re-enters the range."
+
+  - id: VWAP_RECLAIM
+    name: "VWAP reclaim after washout"
+    description: >
+      Price sells off away from VWAP, then reclaims it with momentum turning.
+      Institutions defend VWAP; reclaims often run to the session high.
+    typical_window: "10:00-14:30 ET"
+    typical_hold_minutes: 25-90
+    fails_when: "Reclaim is marginal (<0.05%) and volume is falling."
+
+  - id: FLOW_FOLLOW
+    name: "Follow aggressive institutional flow"
+    description: >
+      Repeated same-direction sweeps in near-dated QQQ contracts, total premium
+      well above the session norm, while price is coiled near a level.
+    typical_window: "any"
+    typical_hold_minutes: 15-45
+    fails_when: "Flow is a single large block that may be a hedge, not a bet."
+
+  - id: TREND_PULLBACK
+    name: "Pullback to EMA in an established trend"
+    description: >
+      In a trending regime, price pulls back to EMA9/EMA21 and resumes.
+      Lower reward than a break, but higher hit rate.
+    typical_window: "10:30-15:00 ET"
+    typical_hold_minutes: 20-60
+    fails_when: "The pullback breaks EMA50 or the trend regime has already flipped."
+
+# ---------------------------------------------------------------------------
+# Conditions that historically degrade edge. These lower confidence — they do
+# not forbid a trade.
+# ---------------------------------------------------------------------------
+caution:
+  - id: LUNCH_CHOP
+    condition: "11:45-13:15 ET with relative volume below 1.0"
+    note: "Liquidity thins, ranges compress, 0DTE theta keeps burning."
+  - id: PRE_EVENT
+    condition: "Within 20 minutes of a scheduled macro release (CPI, PPI, FOMC, NFP)"
+    note: "Implied volatility is inflated; a correct direction can still lose on the crush."
+  - id: WIDE_SPREAD
+    condition: "Contract bid-ask spread above 8% of mid"
+    note: "You pay the spread twice; a 50% target becomes a 66% target in practice."
+  - id: LATE_DAY_0DTE
+    condition: "After 15:00 ET on same-day expiry"
+    note: "Gamma cuts both ways violently; only take these with a clear catalyst."
+  - id: CONFLICTING_SIGNALS
+    condition: "Trend and flow point in opposite directions"
+    note: "Usually means a fight; wait for one side to lose."
+
+# ---------------------------------------------------------------------------
+# Contract selection preferences.
+# ---------------------------------------------------------------------------
+contract_selection:
+  preferred_dte: [0, 1]
+  preferred_delta_range: [0.30, 0.50]
+  note: >
+    Delta near 0.35-0.45 usually gives the best balance: enough leverage for a
+    50%+ move on a modest underlying push, without the total-loss profile of
+    far out-of-the-money lottery tickets. Deep OTM is allowed when flow is
+    exceptional and the move is expected to be fast.
+  min_open_interest: 200
+  min_volume: 50
+
+# ---------------------------------------------------------------------------
+# Exit management.
+# ---------------------------------------------------------------------------
+exits:
+  first_target_return_pct: 50
+  first_target_take_pct: 50
+  second_target_return_pct: 100
+  runner_policy: >
+    After the second target, trail the remainder rather than setting a fixed
+    exit. The outsized results (200%+) come entirely from runners; capping them
+    destroys the strategy's expectancy.
+  stop_loss_return_pct: -40
+  time_stop: >
+    If the thesis has not started working within the expected hold window, the
+    setup is stale. Exit and preserve capital for the next one.
+
+# ---------------------------------------------------------------------------
+# Learned lessons. Empty until the engine has a real track record — the
+# learning loop appends here with evidence attached.
+# ---------------------------------------------------------------------------
+lessons: []
