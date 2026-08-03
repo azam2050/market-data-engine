@@ -30,6 +30,7 @@ from qqq_alpha.journal import Journal
 from qqq_alpha.learning import analyse, apply_lesson, propose
 from qqq_alpha.live.engine import LiveEngine
 from qqq_alpha.live.notifier import ConsoleNotifier
+from qqq_alpha.live.preflight import run_preflight
 from qqq_alpha.live.review import load_period, review
 from qqq_alpha.live.stream import LiveBarStream, StreamAuthError, drain
 from qqq_alpha.live.telegram import FanoutNotifier, TelegramNotifier, verify_telegram
@@ -446,6 +447,27 @@ def telegram() -> None:
         console.print(f"[green]{message}[/] — check your Telegram for the test message")
     else:
         console.print(f"[red]{message}[/]")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def preflight() -> None:
+    """Test every external dependency and report. Run this before anything else."""
+    settings = get_settings()
+    _setup_logging(settings.log_level)
+
+    report = asyncio.run(run_preflight(settings))
+    for check in report.checks:
+        colour = "green" if check.ok else ("red" if check.fatal else "yellow")
+        console.print(f"[{colour}]{check.icon} {check.name}[/] — {check.detail}")
+
+    console.print()
+    if report.all_green:
+        console.print("[bold green]كل شيء سليم — جاهز للتشغيل[/]")
+    elif report.passed:
+        console.print("[yellow]يعمل، لكن راجع التحذيرات[/]")
+    else:
+        console.print("[bold red]لا يمكن التشغيل — أصلح الأخطاء الحمراء[/]")
         raise typer.Exit(code=1)
 
 

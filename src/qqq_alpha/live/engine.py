@@ -31,6 +31,7 @@ from qqq_alpha.domain import Action, Bar, Trade
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
 from qqq_alpha.live.notifier import ConsoleNotifier, Notifier
+from qqq_alpha.live.preflight import run_preflight
 from qqq_alpha.live.state import SessionState, StateStore
 from qqq_alpha.live.stream import LiveBarStream
 from qqq_alpha.memory import Memory
@@ -157,6 +158,15 @@ class LiveEngine:
             await self.notifier.note(
                 "⚠️ delayed feed: signals are for validation only, not execution"
             )
+
+        # test every external dependency and report to the operator's phone.
+        # a container has no terminal; this is how they learn it is healthy.
+        report = await run_preflight(self.settings)
+        await self.notifier.note(report.as_message())
+        if not report.passed:
+            self.status.last_error = "preflight failed"
+            log.error("preflight failed; refusing to start")
+            return
 
         await self._restore()
         self._refresh_recent()
