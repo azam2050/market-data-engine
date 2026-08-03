@@ -19,8 +19,9 @@ RUN pip install --no-cache-dir -e . && \
 USER engine
 
 # journal and session state must outlive the container: a restart with an open
-# position depends on this directory persisting
-VOLUME ["/app/var"]
+# position depends on this directory persisting. Railway's builder rejects the
+# Docker VOLUME instruction outright — persistence is configured as a Railway
+# Volume mounted at /app/var from the dashboard instead (see docs/DEPLOY.md).
 
 # shadow mode by default — the engine should never claim a track record it has
 # not earned, and switching that on must be a deliberate act
