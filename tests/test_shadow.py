@@ -18,7 +18,7 @@ from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
 from qqq_alpha.live.review import load_period, review
 from qqq_alpha.live.state import SessionState, StateStore
-from qqq_alpha.live.telegram import FanoutNotifier, TelegramNotifier
+from qqq_alpha.live.telegram import FanoutNotifier, TelegramCommandListener, TelegramNotifier
 from qqq_alpha.trades import TradeManager
 
 DAY = date(2026, 3, 2)
@@ -129,6 +129,59 @@ async def test_telegram_sends_successfully():
     assert len(seen) == 1
     assert seen[0]["chat_id"] == "chat"
     assert "متأخرة" in seen[0]["text"]
+
+
+async def test_command_listener_only_accepts_the_configured_chat():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "result": [
+                    {"update_id": 100, "message": {"chat": {"id": 999}, "text": "موافق 1"}},
+                    {"update_id": 101, "message": {"chat": {"id": 1}, "text": "موافق 2"}},
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        listener = TelegramCommandListener("token", "999", client=client)
+        commands = await listener.poll()
+
+    assert commands == ["موافق 1"]  # the other chat's message is not authorization
+
+
+async def test_command_listener_advances_the_offset_so_updates_are_not_replayed():
+    offsets_seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        offsets_seen.append(request.url.params.get("offset"))
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "result": [{"update_id": 5, "message": {"chat": {"id": 1}, "text": "رفض 1"}}],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        listener = TelegramCommandListener("token", "1", client=client)
+        await listener.poll()
+        await listener.poll()
+
+    assert offsets_seen == ["0", "6"]
+
+
+async def test_command_listener_survives_a_network_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("boom")
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        listener = TelegramCommandListener("token", "1", client=client)
+        assert await listener.poll() == []
 
 
 async def test_fanout_survives_a_broken_channel():

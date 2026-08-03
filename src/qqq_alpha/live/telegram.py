@@ -137,6 +137,55 @@ class TelegramNotifier:
             self._client = None
 
 
+class TelegramCommandListener:
+    """Long-polls for messages from the operator so lessons can be approved
+    from a phone — the engine already established that a terminal is not
+    something to assume the operator has.
+
+    Only messages from the configured chat are honoured. That is enough
+    authorization here: this is a single-operator bot, not a public one, and
+    the chat id was set up by the operator during the Railway walkthrough.
+    """
+
+    def __init__(self, token: str, chat_id: str, client: httpx.AsyncClient | None = None):
+        self.token = token
+        self.chat_id = str(chat_id)
+        self._client = client
+        self._owns_client = client is None
+        self._offset = 0
+
+    async def poll(self, timeout: int = 25) -> list[str]:
+        """Block up to ``timeout`` seconds, return any new command texts."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=timeout + 10.0)
+
+        url = f"{TELEGRAM_API}/bot{self.token}/getUpdates"
+        try:
+            response = await self._client.get(
+                url, params={"offset": self._offset, "timeout": timeout}
+            )
+            response.raise_for_status()
+        except (httpx.TransportError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+            log.warning("telegram command poll failed (%s)", exc)
+            await asyncio.sleep(2.0)  # do not spin on a persistent error
+            return []
+
+        commands: list[str] = []
+        for update in response.json().get("result", []):
+            self._offset = update["update_id"] + 1
+            message = update.get("message") or {}
+            chat = message.get("chat") or {}
+            text = message.get("text")
+            if text and str(chat.get("id")) == self.chat_id:
+                commands.append(text.strip())
+        return commands
+
+    async def aclose(self) -> None:
+        if self._owns_client and self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+
 class FanoutNotifier:
     """Sends to several destinations. One failing channel must not silence the rest."""
 

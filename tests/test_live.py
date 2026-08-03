@@ -235,6 +235,78 @@ async def test_pending_missed_checks_flush_on_session_rollover(settings, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_daily_review_lists_pending_lessons_with_reply_instructions(settings, tmp_path):
+    engine = _engine(settings, tmp_path)
+    engine._current_day = DAY
+    engine.memory.save_lesson("a real finding worth reviewing", "evidence", 12, 0.6)
+
+    await engine._run_daily_review()
+
+    combined = "\n".join(engine.notifier.notes)
+    assert "a real finding worth reviewing" in combined
+    assert "موافق" in combined and "رفض" in combined
+
+
+@pytest.mark.asyncio
+async def test_daily_review_says_so_when_nothing_is_pending(settings, tmp_path):
+    engine = _engine(settings, tmp_path)
+    engine._current_day = DAY
+
+    await engine._run_daily_review()
+
+    combined = "\n".join(engine.notifier.notes)
+    assert "موافق" not in combined  # nothing to approve, so no instructions either
+
+
+# ---------------------------------------------------------------- lesson approval by reply
+def _engine_with_writable_playbook(settings, tmp_path) -> LiveEngine:
+    scoped = settings.model_copy(update={"playbook_path": tmp_path / "playbook.yaml"})
+    return LiveEngine(
+        settings=scoped,
+        decider=HeuristicDecider(scoped),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=NullNotifier(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_approve_reply_applies_the_lesson_and_updates_the_running_playbook(
+    settings, tmp_path
+):
+    engine = _engine_with_writable_playbook(settings, tmp_path)
+    lesson_id = engine.memory.save_lesson("test claim", "some evidence", 12, 0.6)
+
+    await engine._handle_command(f"موافق {lesson_id}")
+
+    assert engine.playbook.version == 2  # the engine's own copy, not just the file
+    assert not engine.memory.pending_lessons()
+    assert engine.settings.playbook_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_reject_reply_clears_the_lesson_without_touching_the_playbook(settings, tmp_path):
+    engine = _engine_with_writable_playbook(settings, tmp_path)
+    lesson_id = engine.memory.save_lesson("test claim", "some evidence", 12, 0.6)
+
+    await engine._handle_command(f"reject {lesson_id}")
+
+    assert engine.playbook.version == 1
+    assert not engine.memory.pending_lessons()
+
+
+@pytest.mark.asyncio
+async def test_malformed_replies_are_ignored_without_raising(settings, tmp_path):
+    engine = _engine_with_writable_playbook(settings, tmp_path)
+    await engine._handle_command("hello there")
+    await engine._handle_command("موافق not-a-number")
+    await engine._handle_command("موافق 9999")  # well-formed, but no such lesson
+
+    assert engine.playbook.version == 1
+
+
+@pytest.mark.asyncio
 async def test_engine_closes_everything_at_the_bell(settings, tmp_path):
     engine = _engine(settings, tmp_path)
     engine._current_day = DAY

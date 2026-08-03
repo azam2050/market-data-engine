@@ -14,6 +14,7 @@ to act on data it knows is stale.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -30,10 +31,13 @@ from qqq_alpha.data.quality import inspect_session
 from qqq_alpha.domain import Action, Bar, MarketSnapshot, MissedOpportunity, OptionType, Trade
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
+from qqq_alpha.learning import analyse, propose
+from qqq_alpha.learning import apply_lesson as apply_pending_lesson
 from qqq_alpha.live.notifier import ConsoleNotifier, Notifier
 from qqq_alpha.live.preflight import run_preflight
 from qqq_alpha.live.state import SessionState, StateStore
 from qqq_alpha.live.stream import LiveBarStream
+from qqq_alpha.live.telegram import TelegramCommandListener
 from qqq_alpha.memory import Memory
 from qqq_alpha.trades import TradeManager
 
@@ -114,6 +118,16 @@ class LiveEngine:
         # retrospective check below always uses a time-aware model instead
         self._pending_missed: list[dict] = []
         self._attribution_pricer = BlackScholesPricer()
+        # lets the operator approve or reject a proposed lesson by replying
+        # to Telegram — there is no assumption anywhere else in this project
+        # that the operator has a terminal, and lesson approval should not be
+        # the one place that breaks that
+        self.commands = (
+            TelegramCommandListener(self.settings.telegram_bot_token, self.settings.telegram_chat_id)
+            if self.settings.telegram_bot_token and self.settings.telegram_chat_id
+            else None
+        )
+        self._command_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     def _persist(self) -> None:
@@ -176,6 +190,12 @@ class LiveEngine:
             self.status.last_error = "preflight failed"
             log.error("preflight failed; refusing to start")
             return
+
+        if self.commands is not None:
+            self._command_task = asyncio.create_task(self._command_loop())
+            await self.notifier.note(
+                'lesson approval is live — reply "موافق <رقم>" or "رفض <رقم>"'
+            )
 
         await self._restore()
         self._refresh_recent()
@@ -479,6 +499,13 @@ class LiveEngine:
             self._score_missed(pending)
         self._pending_missed = []
 
+        # a review failure must never block the actual rollover — trading
+        # state (flattening positions, resetting counters) comes first
+        try:
+            await self._run_daily_review()
+        except Exception:  # noqa: BLE001
+            log.exception("daily review failed")
+
         self.manager = TradeManager()
         self.attention.reset()
         self._refresh_recent()
@@ -491,7 +518,80 @@ class LiveEngine:
         self._persist()
         log.info("rolled into session %s", new_day)
 
+    # ------------------------------------------------------------------
+    async def _run_daily_review(self) -> None:
+        """Turn yesterday's record into a plain-language digest on Telegram.
+
+        This is what makes "learns every day" true in practice rather than in
+        theory: the operator does not need to remember to run a command from
+        a terminal they do not have — the engine brings the review to them.
+        """
+        counts = self.memory.counts()
+        report = analyse(self.memory, settings=self.settings)
+        new_ids = propose(self.memory, report) if report.has_findings else []
+        pending = self.memory.pending_lessons()
+
+        lines = [f"📊 المراجعة اليومية — {self._current_day} | دفتر التشغيل v{self.playbook.version}"]
+        if report.total_trades:
+            lines.append(
+                f"صفقات مغلقة على السجل: {counts['closed']} "
+                f"| متوسط العائد: {report.baseline_return:+.1f}%"
+            )
+        else:
+            lines.append("لا صفقات مغلقة على السجل بعد")
+        if counts["missed"]:
+            lines.append(f"فرص فائتة مُسعّرة رجعيًا: {counts['missed']}")
+
+        if new_ids:
+            lines.append(f"\n🆕 {len(new_ids)} درس جديد يقترحه التحليل:")
+        if pending:
+            for row in pending:
+                lines.append(
+                    f"#{row['id']}: {row['statement']}\n"
+                    f"   (عيّنة {row['sample_size']} | ثقة {row['confidence']})"
+                )
+            lines.append('\nرد بـ "موافق <رقم>" لاعتماده في دفتر التشغيل، أو "رفض <رقم>" لتجاهله.')
+        elif not report.has_findings and report.notes:
+            lines.append(report.notes[0])
+
+        await self.notifier.note("\n".join(lines))
+
+    async def _command_loop(self) -> None:
+        """Long-poll Telegram for lesson approve/reject replies, forever."""
+        if self.commands is None:
+            return
+        while True:
+            for text in await self.commands.poll():
+                await self._handle_command(text)
+
+    async def _handle_command(self, text: str) -> None:
+        parts = text.strip().split()
+        if len(parts) != 2 or not parts[1].isdigit():
+            return
+
+        verb, lesson_id = parts[0].strip().lower(), int(parts[1])
+        if verb in {"موافق", "apply", "approve"}:
+            try:
+                self.playbook = apply_pending_lesson(
+                    self.memory, self.playbook, lesson_id, self.settings
+                )
+                await self.notifier.note(
+                    f"✅ اعتُمد الدرس #{lesson_id} — دفتر التشغيل الآن v{self.playbook.version}"
+                )
+            except ValueError as exc:
+                await self.notifier.note(f"⚠️ تعذر اعتماد الدرس #{lesson_id}: {exc}")
+        elif verb in {"رفض", "reject"}:
+            self.memory.set_lesson_status(lesson_id, "rejected")
+            await self.notifier.note(f"🚫 رُفض الدرس #{lesson_id}")
+
     async def _shutdown(self) -> None:
+        if self._command_task is not None:
+            self._command_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._command_task
+        if self.commands is not None:
+            await self.commands.aclose()
+
         for trade in list(self.manager.open_trades):
             self.journal.log_trade(trade)
         # pending missed-opportunity checks are in-memory only; score what we
