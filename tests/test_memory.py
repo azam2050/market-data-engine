@@ -13,7 +13,7 @@ import pytest
 from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.config import MARKET_TZ, Settings
 from qqq_alpha.data.synthetic import synthetic_session
-from qqq_alpha.domain import Action, Decision, MarketRegime, OptionType, Target
+from qqq_alpha.domain import Action, Decision, MarketRegime, MissedOpportunity, OptionType, Target
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.learning import MIN_TOTAL_TRADES, analyse, apply_lesson, propose
 from qqq_alpha.memory import Memory
@@ -266,7 +266,10 @@ def test_findings_become_pending_lessons_then_reach_the_playbook(tmp_path):
     assert updated.version == 2
     assert updated.lessons[0].sample_size > 0
     assert settings.playbook_path.exists()
-    assert not memory.pending_lessons()
+    # only the applied lesson leaves pending — others found in the same pass
+    # (this fixture happens to make exit_reason perfectly predict confidence
+    # too) still await their own approval
+    assert ids[0] not in {row["id"] for row in memory.pending_lessons()}
 
 
 def test_applied_lesson_reaches_the_brains_prompt(tmp_path):
@@ -298,3 +301,82 @@ def test_rejecting_a_lesson_removes_it_from_pending(tmp_path):
 
     memory.set_lesson_status(lesson_id, "rejected")
     assert not memory.pending_lessons()
+
+
+# ---------------------------------------------------------------- missed opportunities
+def _missed(
+    regime: str = "TRENDING_UP",
+    peak: float = 80.0,
+    direction: OptionType = OptionType.CALL,
+    blocked: list[str] | None = None,
+) -> MissedOpportunity:
+    return MissedOpportunity(
+        ts=datetime(2026, 3, 2, 10, 0, tzinfo=MARKET_TZ),
+        reason="blocked before the brain could act" if blocked else "brain declined",
+        would_be_direction=direction,
+        occ_symbol="O:QQQ260302C00485000",
+        hypothetical_entry=1.0,
+        best_price_after=round(1.0 * (1 + peak / 100), 2),
+        peak_return_pct=peak,
+        blocked_by=blocked or [],
+        regime=regime,
+        session_minute=30,
+    )
+
+
+def test_missed_opportunity_round_trips(tmp_path):
+    memory = Memory(tmp_path / "memory.db")
+    memory.remember_missed(_missed())
+
+    assert memory.missed_count() == 1
+    assert memory.counts()["missed"] == 1
+
+
+def test_missed_performance_groups_by_regime_and_respects_minimum(tmp_path):
+    memory = Memory(tmp_path / "memory.db")
+    for _ in range(9):
+        memory.remember_missed(_missed(peak=80.0))
+
+    rows = memory.missed_performance_by("regime", min_sample=8)
+    assert rows and rows[0]["bucket"] == "TRENDING_UP"
+    assert rows[0]["count"] == 9
+    assert rows[0]["avg_peak"] == 80.0
+    assert memory.missed_performance_by("regime", min_sample=20) == []
+
+
+def test_cannot_group_missed_by_arbitrary_columns(tmp_path):
+    with pytest.raises(ValueError):
+        Memory(tmp_path / "memory.db").missed_performance_by("occ_symbol")
+
+
+def test_learner_flags_regimes_where_caution_is_expensive(tmp_path):
+    """A pile of declined setups that would have cleared the target is a signal."""
+    memory = Memory(tmp_path / "memory.db")
+    for _ in range(9):
+        memory.remember_missed(_missed(peak=90.0))  # well past the default 50% target
+
+    report = analyse(memory)
+    findings = [f for f in report.findings if f.key.startswith("missed:regime:")]
+    assert findings
+    assert findings[0].direction == "unfavourable"
+    assert "TRENDING_UP" in findings[0].statement
+
+
+def test_learner_ignores_missed_opportunities_that_barely_clear_the_target(tmp_path):
+    memory = Memory(tmp_path / "memory.db")
+    for _ in range(9):
+        memory.remember_missed(_missed(peak=55.0))  # clears 50%, but not by much
+
+    report = analyse(memory)
+    assert not any(f.key.startswith("missed:regime:") for f in report.findings)
+
+
+def test_missed_opportunity_findings_do_not_wait_for_closed_trades(tmp_path):
+    """Unlike trade-outcome dimensions, this one has its own sample size to trust."""
+    memory = Memory(tmp_path / "memory.db")
+    for _ in range(9):
+        memory.remember_missed(_missed(peak=90.0))
+
+    report = analyse(memory)  # zero closed trades on record
+    assert report.total_trades == 0
+    assert any(f.key.startswith("missed:regime:") for f in report.findings)

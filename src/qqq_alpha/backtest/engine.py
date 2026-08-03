@@ -29,6 +29,7 @@ from qqq_alpha.domain import (
     Bar,
     Decision,
     FlowEvent,
+    MarketSnapshot,
     MissedOpportunity,
     OptionContract,
     OptionType,
@@ -202,9 +203,7 @@ class Backtester:
                 continue
 
             if not pre.allowed:
-                self._record_missed(
-                    result, session_bars, index, snapshot.net_bias, spot, now, pre.blocks
-                )
+                self._record_missed(result, session_bars, index, snapshot, pre.blocks)
                 continue
 
             # 5. the brain decides
@@ -231,12 +230,13 @@ class Backtester:
                 )
 
             if decision.action is not Action.ENTER:
+                # the AI looked and passed on its own judgement — price it
+                # forward too, not just the setups the rails blocked
+                self._record_missed(result, session_bars, index, snapshot, [])
                 continue
 
             if not post.allowed:
-                self._record_missed(
-                    result, session_bars, index, snapshot.net_bias, spot, now, post.blocks
-                )
+                self._record_missed(result, session_bars, index, snapshot, post.blocks)
                 continue
 
             fill = self._price(decision.occ_symbol or "", now, spot)
@@ -261,6 +261,8 @@ class Backtester:
         if self.memory:
             for trade in result.trades:
                 self.memory.remember_trade(trade)
+            for missed in result.missed:
+                self.memory.remember_missed(missed)
         if self.journal:
             for trade in result.trades:
                 self.journal.log_trade(trade)
@@ -315,20 +317,22 @@ class Backtester:
         result: DayResult,
         session_bars: list[Bar],
         index: int,
-        bias: float,
-        spot: float,
-        now: datetime,
+        snapshot: MarketSnapshot,
         blocked_by: list[str],
     ) -> None:
         """Price forward what we would have made had we taken the obvious trade.
 
         Uses an at-the-money contract in the direction the evidence leaned. It is
         an estimate, not a promise — but a consistently large number here means
-        the engine is too cautious, and that is worth knowing.
+        the engine is too cautious, and that is worth knowing. Covers both a rail
+        block and the AI's own PASS — a caller passes an empty ``blocked_by`` for
+        the latter.
         """
+        bias = snapshot.net_bias
         if abs(bias) < 0.2:
             return
 
+        now, spot = snapshot.ts, snapshot.underlying.close
         direction = OptionType.CALL if bias > 0 else OptionType.PUT
         strike = round(spot)
         symbol = occ_symbol(
@@ -364,6 +368,8 @@ class Backtester:
                 best_price_after=round(best, 2),
                 peak_return_pct=peak_pct,
                 blocked_by=blocked_by,
+                regime=snapshot.regime.value,
+                session_minute=snapshot.session_minute,
             )
         )
 

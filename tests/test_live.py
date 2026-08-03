@@ -15,6 +15,7 @@ from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.config import MARKET_TZ, Settings
 from qqq_alpha.data.pricing import BlackScholesPricer
 from qqq_alpha.data.synthetic import synthetic_session
+from qqq_alpha.domain import Action, Decision, MarketSnapshot
 from qqq_alpha.journal import Journal
 from qqq_alpha.live.engine import LiveEngine
 from qqq_alpha.live.notifier import NullNotifier, format_signal
@@ -45,6 +46,15 @@ def _engine(settings, tmp_path) -> LiveEngine:
         journal=Journal(tmp_path / "journal", session_tag="test"),
         notifier=NullNotifier(),
     )
+
+
+class _AlwaysPassDecider:
+    """Never enters. Isolates missed-opportunity scoring from decision noise."""
+
+    async def decide(self, snapshot: MarketSnapshot, **kwargs) -> Decision:
+        return Decision(
+            ts=snapshot.ts, action=Action.PASS, confidence=3, thesis="test: never enters"
+        )
 
 
 # ---------------------------------------------------------------- parsing
@@ -172,6 +182,56 @@ async def test_session_rollover_flattens_and_resets(settings, tmp_path):
     assert engine.manager.open_trades == []
     assert engine.status.open_positions == 0
     assert len(engine.session_bars) == 1
+
+
+@pytest.mark.asyncio
+async def test_declined_setups_are_priced_forward_and_remembered(settings, tmp_path):
+    """The AI's own PASS gets graded too, not just rail blocks — on a delay,
+    since at decision time the engine cannot yet know what came next."""
+    fresh = settings.model_copy(update={"max_data_age_sec": 10**9})
+    engine = LiveEngine(
+        settings=fresh,
+        decider=_AlwaysPassDecider(),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=NullNotifier(),
+    )
+    engine._current_day = DAY
+    bars = synthetic_session("QQQ", DAY, seed=12, trend=0.03, volatility=0.002)
+
+    for bar in bars:
+        await engine._on_bar(bar)
+
+    assert engine.status.brain_calls > 0
+    assert engine.status.signals_sent == 0  # it never enters, by construction
+    assert engine.memory.missed_count() > 0
+
+
+@pytest.mark.asyncio
+async def test_pending_missed_checks_flush_on_session_rollover(settings, tmp_path):
+    """A decline near the close must not vanish unscored at the day boundary."""
+    fresh = settings.model_copy(update={"max_data_age_sec": 10**9})
+    engine = LiveEngine(
+        settings=fresh,
+        decider=_AlwaysPassDecider(),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=NullNotifier(),
+    )
+    engine._current_day = DAY
+    bars = synthetic_session("QQQ", DAY, seed=12, trend=0.03, volatility=0.002)
+
+    for bar in bars[:120]:
+        await engine._on_bar(bar)
+
+    assert engine._pending_missed  # a decline is queued but not yet resolvable
+
+    next_day = synthetic_session("QQQ", date(2026, 3, 3), seed=9)[0]
+    await engine._on_bar(next_day)
+
+    assert engine._pending_missed == []  # rollover must not lose it silently
 
 
 @pytest.mark.asyncio

@@ -19,15 +19,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 from qqq_alpha.brain.attention import AttentionEngine
-from qqq_alpha.brain.decider import Decider, next_expiry
+from qqq_alpha.brain.decider import Decider, next_expiry, occ_symbol
 from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.brain.rails import DayState, SafetyRails
 from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, Settings
 from qqq_alpha.data.chain import LiveChainPricer
 from qqq_alpha.data.massive import MassiveClient
-from qqq_alpha.data.pricing import OptionPricer
+from qqq_alpha.data.pricing import BlackScholesPricer, OptionPricer
 from qqq_alpha.data.quality import inspect_session
-from qqq_alpha.domain import Action, Bar, Trade
+from qqq_alpha.domain import Action, Bar, MarketSnapshot, MissedOpportunity, OptionType, Trade
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
 from qqq_alpha.live.notifier import ConsoleNotifier, Notifier
@@ -40,6 +40,9 @@ from qqq_alpha.trades import TradeManager
 log = logging.getLogger(__name__)
 
 WARMUP_BARS = 30
+# how long to wait after a decline before pricing forward what was missed —
+# long enough to catch the move, short enough to resolve within the session
+MISSED_LOOKAHEAD_MINUTES = 60
 
 
 @dataclass
@@ -105,6 +108,12 @@ class LiveEngine:
         # long-term memory lives on disk, so a restart never costs the engine
         # what it has learned — unlike the in-process list it replaced
         self.memory = Memory(self.settings.data_dir / "memory.db")
+        # declined setups awaiting a look-back price check. self.pricer is often
+        # a LiveChainPricer, which only knows the *current* quote — it cannot
+        # answer "what was this contract worth 20 minutes ago", so the
+        # retrospective check below always uses a time-aware model instead
+        self._pending_missed: list[dict] = []
+        self._attribution_pricer = BlackScholesPricer()
 
     # ------------------------------------------------------------------
     def _persist(self) -> None:
@@ -242,6 +251,7 @@ class LiveEngine:
         await self._refresh_chain(bar)
         await self._mark_open_positions(bar)
         await self._maybe_decide(bar)
+        self._resolve_pending_missed(bar)
         await self._close_if_session_over(bar)
 
     async def _mark_open_positions(self, bar: Bar) -> None:
@@ -284,6 +294,7 @@ class LiveEngine:
         pre = self.rails.pre_check(snapshot, state)
         if not pre.allowed:
             log.debug("rails blocked: %s", pre.blocks)
+            self._queue_missed_check(snapshot, pre.blocks)
             return
 
         decision = await self.decider.decide(
@@ -318,6 +329,9 @@ class LiveEngine:
         if decision.action is not Action.ENTER or not post.allowed:
             if decision.action is Action.ENTER:
                 await self.notifier.note(f"entry blocked by rails: {post.blocks}")
+            self._queue_missed_check(
+                snapshot, post.blocks if decision.action is Action.ENTER else []
+            )
             return
 
         # you pay the offer; pricing an entry at the mid invents profit that
@@ -336,6 +350,94 @@ class LiveEngine:
         # position recoverable, never announced-but-forgotten
         self._persist()
         await self.notifier.signal(trade, self._delayed)
+
+    # ------------------------------------------------------------------
+    def _queue_missed_check(self, snapshot: MarketSnapshot, blocked_by: list[str]) -> None:
+        """Remember a declined setup so it can be priced forward later.
+
+        Scoring happens on a delay, not here: at the moment of the decision we
+        do not yet know what the market did next. A flat or ambiguous bias is
+        skipped — there is no "obvious trade" to grade it against.
+        """
+        if abs(snapshot.net_bias) < 0.2:
+            return
+        self._pending_missed.append(
+            {
+                "ts": snapshot.ts,
+                "index": len(self.session_bars) - 1,
+                "bias": snapshot.net_bias,
+                "regime": snapshot.regime.value,
+                "session_minute": snapshot.session_minute,
+                "blocked_by": blocked_by,
+            }
+        )
+
+    def _resolve_pending_missed(self, bar: Bar) -> None:
+        """Grade declined setups once enough time has passed to judge them."""
+        if not self._pending_missed:
+            return
+
+        session_over = bar.ts.astimezone(MARKET_TZ).time() >= REGULAR_CLOSE
+        still_pending = []
+        for pending in self._pending_missed:
+            elapsed_min = (bar.ts - pending["ts"]).total_seconds() / 60
+            if elapsed_min < MISSED_LOOKAHEAD_MINUTES and not session_over:
+                still_pending.append(pending)
+                continue
+            self._score_missed(pending)
+        self._pending_missed = still_pending
+
+    def _score_missed(self, pending: dict) -> None:
+        """Price forward what the declined setup would have made.
+
+        Uses a labelled Black-Scholes approximation, not ``self.pricer``: the
+        live chain only ever knows the *current* quote, so it cannot answer
+        what a contract was worth at each minute since the decision — only a
+        time-aware model can replay that window.
+        """
+        index = pending["index"]
+        window = [b for b in self.session_bars[index:] if b.ts >= pending["ts"]]
+        if len(window) < 2:
+            return
+
+        direction = OptionType.CALL if pending["bias"] > 0 else OptionType.PUT
+        strike = round(window[0].close)
+        symbol = occ_symbol(
+            self.settings.primary_symbol,
+            next_expiry(pending["ts"].date(), 0),
+            direction,
+            strike,
+        )
+        entry = self._attribution_pricer.price_at(symbol, window[0].ts, window[0].close)
+        if entry is None or entry <= 0:
+            return
+
+        best = entry
+        for future in window[1:]:
+            price = self._attribution_pricer.price_at(symbol, future.ts, future.close)
+            if price is not None:
+                best = max(best, price)
+
+        peak_pct = round((best - entry) / entry * 100.0, 1)
+        if peak_pct < self.settings.min_target_return_pct:
+            return
+
+        missed = MissedOpportunity(
+            ts=pending["ts"],
+            reason="blocked before the brain could act"
+            if pending["blocked_by"]
+            else "brain declined",
+            would_be_direction=direction,
+            occ_symbol=symbol,
+            hypothetical_entry=round(entry, 2),
+            best_price_after=round(best, 2),
+            peak_return_pct=peak_pct,
+            blocked_by=pending["blocked_by"],
+            regime=pending["regime"],
+            session_minute=pending["session_minute"],
+        )
+        self.journal.log_missed(missed)
+        self.memory.remember_missed(missed)
 
     async def _close_if_session_over(self, bar: Bar) -> None:
         local = bar.ts.astimezone(MARKET_TZ).time()
@@ -371,6 +473,12 @@ class LiveEngine:
             f"| realized={self.manager.realized_return_pct:+.1f}%"
         )
 
+        # score whatever declined setups are still awaiting judgement on
+        # whatever window they got, rather than losing them at the boundary
+        for pending in self._pending_missed:
+            self._score_missed(pending)
+        self._pending_missed = []
+
         self.manager = TradeManager()
         self.attention.reset()
         self._refresh_recent()
@@ -386,6 +494,11 @@ class LiveEngine:
     async def _shutdown(self) -> None:
         for trade in list(self.manager.open_trades):
             self.journal.log_trade(trade)
+        # pending missed-opportunity checks are in-memory only; score what we
+        # can rather than silently lose them to a restart
+        for pending in self._pending_missed:
+            self._score_missed(pending)
+        self._pending_missed = []
         self._persist()
         await self.notifier.note(
             f"engine stopped | signals={self.status.signals_sent} "

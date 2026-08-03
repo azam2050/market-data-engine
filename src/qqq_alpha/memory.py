@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from qqq_alpha.config import MARKET_TZ
-from qqq_alpha.domain import Decision, MarketSnapshot, Trade
+from qqq_alpha.domain import Decision, MarketSnapshot, MissedOpportunity, Trade
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +95,27 @@ CREATE TABLE IF NOT EXISTS lessons (
     confidence  REAL,
     status      TEXT NOT NULL DEFAULT 'pending'
 );
+
+-- setups the engine declined (rail-blocked or the AI's own PASS), priced
+-- forward after the fact. Without this table the engine can only grade its
+-- winners and losers, never its caution.
+CREATE TABLE IF NOT EXISTS missed_opportunities (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                  TEXT NOT NULL,
+    session_day         TEXT NOT NULL,
+    reason              TEXT,
+    would_be_direction  TEXT,
+    occ_symbol          TEXT,
+    hypothetical_entry  REAL,
+    best_price_after    REAL,
+    peak_return_pct     REAL,
+    blocked_by          TEXT,
+    regime              TEXT,
+    session_minute      INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_missed_day    ON missed_opportunities(session_day);
+CREATE INDEX IF NOT EXISTS idx_missed_regime ON missed_opportunities(regime);
 """
 
 # how much each dimension counts when judging "did the market look like this?"
@@ -273,6 +294,71 @@ class Memory:
             )
             conn.commit()
 
+    def remember_missed(self, missed: MissedOpportunity) -> None:
+        """Record a declined setup that would have paid, priced forward.
+
+        Covers both reasons a trade never happened: the rails blocked it, or
+        the AI itself looked and passed. Both matter to the same question —
+        is the engine's caution earning its keep?
+        """
+        with closing(self._connect()) as conn:
+            conn.execute(
+                """INSERT INTO missed_opportunities
+                   (ts, session_day, reason, would_be_direction, occ_symbol,
+                    hypothetical_entry, best_price_after, peak_return_pct,
+                    blocked_by, regime, session_minute)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    missed.ts.isoformat(),
+                    missed.ts.astimezone(MARKET_TZ).date().isoformat(),
+                    missed.reason,
+                    missed.would_be_direction.value,
+                    missed.occ_symbol,
+                    missed.hypothetical_entry,
+                    missed.best_price_after,
+                    missed.peak_return_pct,
+                    json.dumps(missed.blocked_by, ensure_ascii=False),
+                    missed.regime,
+                    missed.session_minute,
+                ),
+            )
+            conn.commit()
+
+    def missed_performance_by(self, column: str, min_sample: int = 3) -> list[dict[str, Any]]:
+        """Aggregate missed-opportunity cost grouped by regime or direction."""
+        if column not in {"regime", "would_be_direction", "reason"}:
+            raise ValueError(f"cannot group missed opportunities by {column}")
+
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                f"""SELECT {column} AS bucket,
+                           COUNT(*)             AS count,
+                           AVG(peak_return_pct) AS avg_peak,
+                           MAX(peak_return_pct) AS best,
+                           MIN(peak_return_pct) AS worst
+                    FROM missed_opportunities
+                    WHERE {column} IS NOT NULL
+                    GROUP BY bucket
+                    HAVING count >= ?
+                    ORDER BY avg_peak DESC""",
+                (min_sample,),
+            ).fetchall()
+
+        return [
+            {
+                "bucket": row["bucket"],
+                "count": row["count"],
+                "avg_peak": round(row["avg_peak"], 1),
+                "best": round(row["best"], 1),
+                "worst": round(row["worst"], 1),
+            }
+            for row in rows
+        ]
+
+    def missed_count(self) -> int:
+        with closing(self._connect()) as conn:
+            return conn.execute("SELECT COUNT(*) FROM missed_opportunities").fetchone()[0]
+
     # ------------------------------------------------------------------
     def recent_trades(self, limit: int = 15, closed_only: bool = True) -> list[RecalledTrade]:
         clause = "WHERE closed_at IS NOT NULL" if closed_only else ""
@@ -397,11 +483,13 @@ class Memory:
             ).fetchone()[0]
             decisions = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
             days = conn.execute("SELECT COUNT(DISTINCT session_day) FROM trades").fetchone()[0]
+            missed = conn.execute("SELECT COUNT(*) FROM missed_opportunities").fetchone()[0]
         return {
             "trades": trades,
             "closed": closed,
             "decisions": decisions,
             "session_days": days,
+            "missed": missed,
         }
 
     def sessions(self) -> list[date]:

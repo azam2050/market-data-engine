@@ -401,10 +401,12 @@ def learn(
         console.print(f"[yellow]lesson {reject} rejected[/]")
         return
 
-    report = analyse(store)
+    report = analyse(store, settings=settings)
+    missed = store.missed_count()
     console.print(
         f"[cyan]analysed {report.total_trades} closed trades "
-        f"(baseline {report.baseline_return:+.1f}% per trade)[/]"
+        f"(baseline {report.baseline_return:+.1f}% per trade) "
+        f"| {missed} declined setups priced forward[/]"
     )
 
     for note in report.notes:

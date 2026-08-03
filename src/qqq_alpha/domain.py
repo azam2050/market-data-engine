@@ -275,3 +275,7 @@ class MissedOpportunity(BaseModel):
     best_price_after: float
     peak_return_pct: float
     blocked_by: list[str] = Field(default_factory=list)
+    # market fingerprint at the moment declined, so the learning loop can ask
+    # "which regime is caution costing us the most in?"
+    regime: str | None = None
+    session_minute: int | None = None

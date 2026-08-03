@@ -71,10 +71,53 @@ def _confidence(sample: int, effect: float) -> float:
     return round(min(0.3 + 0.45 * sample_factor + 0.25 * effect_factor, 0.9), 2)
 
 
-def analyse(memory: Memory, since: date | None = None) -> LearningReport:
+def _consider_missed(memory: Memory, settings: Settings) -> list[Finding]:
+    """Is the engine's caution earning its keep, or leaving money on the table?
+
+    A declined setup — blocked by the rails, or the AI's own PASS — is graded
+    against the same bar a taken trade must clear: the configured minimum
+    target return. A regime where declines routinely would have cleared it by
+    a wide margin is a regime where the engine is saying no too readily.
+    """
+    findings: list[Finding] = []
+    for row in memory.missed_performance_by("regime", MIN_SAMPLE):
+        effect = round(row["avg_peak"] - settings.min_target_return_pct, 1)
+        if effect < MIN_EFFECT_PCT:
+            continue
+        findings.append(
+            Finding(
+                key=f"missed:regime:{row['bucket']}",
+                statement=(
+                    f"In the {row['bucket']} regime, {row['count']} declined setups would "
+                    f"have cleared the target by an average of {effect:.0f} extra points if "
+                    "taken. Caution here is costing real opportunities — consider a lower "
+                    "bar for entry confidence in this regime."
+                ),
+                evidence=(
+                    f"{row['count']} declined setups, avg peak {row['avg_peak']:+.1f}% vs a "
+                    f"{settings.min_target_return_pct:+.0f}% target, best {row['best']:+.1f}%"
+                ),
+                sample_size=row["count"],
+                effect_pct=effect,
+                confidence=_confidence(row["count"], effect),
+                direction="unfavourable",  # unfavourable to the current caution level
+            )
+        )
+    return findings
+
+
+def analyse(
+    memory: Memory, since: date | None = None, settings: Settings | None = None
+) -> LearningReport:
     """Find what the trade record actually supports. No AI involved — just maths."""
+    settings = settings or Settings()
     trades = memory.closed_trades(since=since)
     report = LearningReport(total_trades=len(trades))
+
+    # independent of the closed-trade count below: a handful of declined
+    # setups that clearly would have paid is its own kind of evidence, and
+    # waiting for 20 taken trades to say so would waste it
+    report.findings.extend(_consider_missed(memory, settings))
 
     if len(trades) < MIN_TOTAL_TRADES:
         report.notes.append(
@@ -175,24 +218,18 @@ def analyse(memory: Memory, since: date | None = None) -> LearningReport:
                 )
             )
 
-    # --- which exits are doing the damage? ---
-    for row in memory.performance_by("exit_reason", MIN_SAMPLE):
-        if row["bucket"] == "time_stop" and row["avg_return"] < baseline - MIN_EFFECT_PCT:
-            report.findings.append(
-                Finding(
-                    key="exit:time_stop",
-                    statement=(
-                        "Trades exited on the time stop average "
-                        f"{row['avg_return']:+.1f}% — theses that need longer than expected "
-                        "are not slow, they are wrong. Consider cutting them sooner."
-                    ),
-                    evidence=f"{row['trades']} time-stopped trades, win rate {row['win_rate']:.0f}%",
-                    sample_size=row["trades"],
-                    effect_pct=round(row["avg_return"] - baseline, 1),
-                    confidence=_confidence(row["trades"], row["avg_return"] - baseline),
-                    direction="unfavourable",
-                )
-            )
+    # --- which exits are doing the damage? every reason, not just the time stop ---
+    _consider(
+        "exit",
+        "exit_reason",
+        memory.performance_by("exit_reason", MIN_SAMPLE),
+        "Trades exited via {bucket} have outperformed by {effect:.0f} points — whatever "
+        "triggers this exit is catching genuine strength. Let it run further before this "
+        "point where the setup allows.",
+        "Trades exited via {bucket} have underperformed by {effect:.0f} points — theses "
+        "that end this way are not unlucky, they are wrong going in. Consider tightening "
+        "entry criteria that lead here, or cutting these positions sooner.",
+    )
 
     hours = memory.performance_by_hour(MIN_SAMPLE)
     if hours:
