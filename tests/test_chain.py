@@ -170,3 +170,87 @@ def test_rails_can_now_reject_an_illiquid_contract():
     verdict = SafetyRails(Settings()).post_check(decision, wide)
     assert not verdict.allowed
     assert any("spread_too_wide" in block for block in verdict.blocks)
+
+
+# ------------------------------------------------------------- brain responses
+class _Block:
+    def __init__(self, type_, **kw):
+        self.type = type_
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+class _Response:
+    def __init__(self, stop_reason="tool_use", content=None, stop_details=None):
+        self.stop_reason = stop_reason
+        self.content = content or []
+        self.stop_details = stop_details
+        self.usage = None
+
+
+class _FakeClient:
+    def __init__(self, response):
+        self._response = response
+        self.messages = self
+        self.kwargs = None
+
+    async def create(self, **kwargs):
+        self.kwargs = kwargs
+        return self._response
+
+
+def _snapshot():
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    bars = synthetic_session("QQQ", date(2026, 3, 2), seed=5)
+    return SnapshotBuilder("QQQ").build(bars[:80])
+
+
+def _decider(response):
+    from qqq_alpha.brain.decider import AIDecider
+
+    settings = Settings(anthropic_api_key="k", anthropic_model="test-model")
+    client = _FakeClient(response)
+    return AIDecider(settings, client=client), client
+
+
+async def _decide(decider, snapshot):
+    from qqq_alpha.brain.playbook import Playbook
+
+    return await decider.decide(snapshot, Playbook(), [], [], [], "test")
+
+
+async def test_refusal_becomes_a_pass_not_a_crash():
+    """A declined request returns HTTP 200 with empty content — indexing it would crash."""
+    from qqq_alpha.domain import Action
+
+    response = _Response(stop_reason="refusal", content=[], stop_details=_Block("refusal", category="cyber"))
+    decider, _ = _decider(response)
+
+    decision = await _decide(decider, _snapshot())
+    assert decision.action is Action.PASS
+    assert "declined" in decision.thesis
+
+
+async def test_truncated_response_passes_rather_than_acting_on_half_a_plan():
+    from qqq_alpha.domain import Action
+
+    response = _Response(stop_reason="max_tokens", content=[])
+    decider, _ = _decider(response)
+
+    decision = await _decide(decider, _snapshot())
+    assert decision.action is Action.PASS
+    assert "truncated" in decision.thesis
+
+
+async def test_request_carries_effort_caching_and_a_generous_token_budget():
+    response = _Response(content=[_Block("tool_use", input={"action": "PASS", "confidence": 3, "thesis": "quiet"})])
+    decider, client = _decider(response)
+
+    await _decide(decider, _snapshot())
+
+    assert client.kwargs["output_config"] == {"effort": "high"}
+    assert client.kwargs["max_tokens"] >= 8000  # thinking shares this budget
+    assert client.kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert client.kwargs["tool_choice"]["name"] == "submit_decision"

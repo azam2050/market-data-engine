@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = ""
     anthropic_fast_model: str = ""
+    # thinking is on by default on current models and shares this budget with the
+    # response, so it must be generous — a tight cap truncates mid-decision
+    anthropic_max_tokens: int = 8000
+    # how hard the model thinks: low | medium | high | xhigh | max.
+    # a trade decision is intelligence-sensitive, so the floor is high
+    anthropic_effort: str = "high"
 
     # universe
     primary_symbol: str = "QQQ"

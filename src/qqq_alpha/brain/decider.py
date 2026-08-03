@@ -105,14 +105,20 @@ class AIDecider:
         client = self._get_client()
         response = await client.messages.create(
             model=self.settings.anthropic_model,
-            max_tokens=2000,
+            # thinking and the response share this budget on current models, so
+            # it is deliberately generous — truncating mid-decision would produce
+            # a malformed trade plan rather than an honest PASS
+            max_tokens=self.settings.anthropic_max_tokens,
             system=[
                 {
                     "type": "text",
                     "text": SYSTEM_PROMPT,
+                    # the system prompt and playbook are stable across a session;
+                    # caching them is most of the per-decision cost
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
+            output_config={"effort": self.settings.anthropic_effort},
             tools=[DECISION_TOOL],
             tool_choice={"type": "tool", "name": "submit_decision"},
             messages=[{"role": "user", "content": prompt}],
@@ -124,6 +130,28 @@ class AIDecider:
                 "input_tokens": getattr(usage, "input_tokens", 0),
                 "output_tokens": getattr(usage, "output_tokens", 0),
             }
+
+        # a safety classifier can decline a request outright: HTTP 200, empty
+        # content, no exception. Reading content[0] blindly would crash here.
+        if getattr(response, "stop_reason", None) == "refusal":
+            detail = getattr(response, "stop_details", None)
+            category = getattr(detail, "category", None) if detail else None
+            log.warning("brain declined to answer (category=%s); passing", category)
+            return Decision(
+                ts=snapshot.ts,
+                action=Action.PASS,
+                thesis=f"model declined to respond (category={category})",
+            )
+
+        if getattr(response, "stop_reason", None) == "max_tokens":
+            # the plan was cut off mid-thought; acting on half a plan is worse
+            # than not acting
+            log.error("brain hit the token ceiling; passing rather than acting on a partial plan")
+            return Decision(
+                ts=snapshot.ts,
+                action=Action.PASS,
+                thesis="response truncated at max_tokens; raise ANTHROPIC_MAX_TOKENS",
+            )
 
         payload: dict[str, Any] | None = None
         for block in response.content:
