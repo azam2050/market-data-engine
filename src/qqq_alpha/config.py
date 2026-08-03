@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MARKET_TZ = ZoneInfo("America/New_York")
@@ -40,11 +40,12 @@ class Settings(BaseSettings):
 
     # universe
     primary_symbol: str = "QQQ"
-    leader_symbols: list[str] = Field(
-        default_factory=lambda: [
-            "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",
-            "META", "AVGO", "TSLA", "NFLX", "AMD",
-        ]
+    # plain str, not list[str]: pydantic-settings JSON-decodes env values for
+    # complex-typed fields before any validator runs, so a comma-separated
+    # LEADER_SYMBOLS would crash on boot with "Expecting value: line 1 column 1"
+    leader_symbols_csv: str = Field(
+        default="AAPL,MSFT,NVDA,AMZN,GOOGL,META,AVGO,TSLA,NFLX,AMD",
+        validation_alias="LEADER_SYMBOLS",
     )
 
     # operating limits — soft by design, see brain/rails.py
@@ -70,12 +71,9 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    @field_validator("leader_symbols", mode="before")
-    @classmethod
-    def _split_symbols(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [s.strip().upper() for s in value.split(",") if s.strip()]
-        return value
+    @property
+    def leader_symbols(self) -> list[str]:
+        return [s.strip().upper() for s in self.leader_symbols_csv.split(",") if s.strip()]
 
     @property
     def last_entry_time(self) -> time:
