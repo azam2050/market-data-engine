@@ -30,6 +30,7 @@ from qqq_alpha.domain import Action, Bar, Trade
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
 from qqq_alpha.live.notifier import ConsoleNotifier, Notifier
+from qqq_alpha.live.state import SessionState, StateStore
 from qqq_alpha.live.stream import LiveBarStream
 from qqq_alpha.trades import TradeManager
 
@@ -97,6 +98,46 @@ class LiveEngine:
         self.leader_bars: dict[str, list[Bar]] = {}
         self.recent_trades: list[Trade] = []
         self._current_day: date | None = None
+        self.store = StateStore(self.settings.journal_dir / "session-state.json")
+
+    # ------------------------------------------------------------------
+    def _persist(self) -> None:
+        """Snapshot the session to disk. Called after anything that changes it."""
+        self.store.save(
+            SessionState(
+                session_day=self._current_day,
+                trades_today=self.status.trades_today,
+                realized_pct=self.manager.realized_return_pct,
+                signals_sent=self.status.signals_sent,
+                brain_calls=self.status.brain_calls,
+                open_trades=list(self.manager.open_trades),
+                closed_trades=list(self.manager.closed_trades),
+            )
+        )
+
+    async def _restore(self) -> None:
+        """Resume an interrupted session so open positions are never orphaned."""
+        today = datetime.now(MARKET_TZ).date()
+        state = self.store.load(expected_day=today)
+        if state is None:
+            return
+
+        self.manager.open_trades = list(state.open_trades)
+        self.manager.closed_trades = list(state.closed_trades)
+        self.status.trades_today = state.trades_today
+        self.status.signals_sent = state.signals_sent
+        self.status.brain_calls = state.brain_calls
+        self.status.open_positions = len(state.open_trades)
+        self._current_day = state.session_day
+
+        if state.open_trades:
+            symbols = ", ".join(t.occ_symbol for t in state.open_trades)
+            await self.notifier.note(
+                f"♻️ resumed session {state.session_day}: "
+                f"{len(state.open_trades)} open position(s) restored — {symbols}"
+            )
+        else:
+            await self.notifier.note(f"♻️ resumed session {state.session_day} (flat)")
 
     # ------------------------------------------------------------------
     async def run(self) -> None:
@@ -112,6 +153,7 @@ class LiveEngine:
                 "⚠️ delayed feed: signals are for validation only, not execution"
             )
 
+        await self._restore()
         await self._warm_start()
 
         try:
@@ -194,6 +236,7 @@ class LiveEngine:
             if update is not None:
                 await self.notifier.update(trade, update, self._delayed)
                 self.journal.log_trade(trade)
+                self._persist()
 
         self.status.open_positions = len(self.manager.open_trades)
         self.status.realized_pct = self.manager.realized_return_pct
@@ -253,6 +296,9 @@ class LiveEngine:
         self.status.trades_today += 1
         self.status.signals_sent += 1
         self.journal.log_trade(trade)
+        # persist before publishing: a crash between the two must leave the
+        # position recoverable, never announced-but-forgotten
+        self._persist()
         await self.notifier.signal(trade, self._delayed)
 
     async def _close_if_session_over(self, bar: Bar) -> None:
@@ -264,6 +310,7 @@ class LiveEngine:
             update = self.manager.force_close(trade, price, bar.ts, "session_close")
             await self.notifier.update(trade, update, self._delayed)
             self.journal.log_trade(trade)
+            self._persist()
 
     async def _roll_session(self, new_day: date) -> None:
         """New session: flatten, archive, reset counters."""
@@ -292,11 +339,14 @@ class LiveEngine:
         self.status.trades_today = 0
         self.status.realized_pct = 0.0
         self.status.open_positions = 0
+        self._current_day = new_day
+        self._persist()
         log.info("rolled into session %s", new_day)
 
     async def _shutdown(self) -> None:
         for trade in list(self.manager.open_trades):
             self.journal.log_trade(trade)
+        self._persist()
         await self.notifier.note(
             f"engine stopped | signals={self.status.signals_sent} "
             f"| open positions left unmanaged: {len(self.manager.open_trades)}"

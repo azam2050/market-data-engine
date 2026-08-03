@@ -1,0 +1,13 @@
+services:
+  engine:
+    build: .
+    env_file: .env
+    # the market runs whether or not the process is healthy; always come back
+    restart: unless-stopped
+    volumes:
+      - ./var:/app/var
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

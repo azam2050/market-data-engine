@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 
 from qqq_alpha.backtest.engine import Backtester, prior_day_map
 from qqq_alpha.backtest.report import render_report
@@ -27,7 +28,9 @@ from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
 from qqq_alpha.live.engine import LiveEngine
 from qqq_alpha.live.notifier import ConsoleNotifier
+from qqq_alpha.live.review import load_period, review
 from qqq_alpha.live.stream import LiveBarStream, StreamAuthError, drain
+from qqq_alpha.live.telegram import FanoutNotifier, TelegramNotifier, verify_telegram
 
 app = typer.Typer(add_completion=False, help="QQQ Alpha — AI options research engine")
 console = Console()
@@ -205,13 +208,26 @@ def live(
             )
         )
 
+    notifier = ConsoleNotifier(console)
+    if settings.telegram_bot_token and settings.telegram_chat_id:
+        notifier = FanoutNotifier(
+            notifier,
+            TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id),
+        )
+        console.print("[green]Telegram delivery enabled[/]")
+    else:
+        console.print(
+            "[yellow]Telegram not configured — signals print here only. "
+            "You will miss them when away from this screen.[/]"
+        )
+
     engine = LiveEngine(
         settings=settings,
         decider=build_decider(settings, mode),
         pricer=BlackScholesPricer(volatility),
         playbook=load_playbook(settings.playbook_path),
         journal=Journal(settings.journal_dir, session_tag="live"),
-        notifier=ConsoleNotifier(console),
+        notifier=notifier,
         dry_run=shadow,
     )
 
@@ -220,6 +236,100 @@ def live(
     except KeyboardInterrupt:
         console.print("\n[dim]stopped by user[/]")
         console.print(engine.status.as_dict())
+
+
+@app.command()
+def report(
+    since: str = typer.Option(None, help="Start date YYYY-MM-DD (default: everything)"),
+    until: str = typer.Option(None, help="End date YYYY-MM-DD"),
+) -> None:
+    """Review the shadow period: what the engine did, and whether it was any good."""
+    settings = get_settings()
+    period = load_period(
+        settings.journal_dir,
+        since=date.fromisoformat(since) if since else None,
+        until=date.fromisoformat(until) if until else None,
+    )
+    stats = review(period)
+
+    head = Table(title="Shadow Period Review", show_header=False, box=None)
+    head.add_column(style="cyan", width=30)
+    head.add_column(style="bold")
+    head.add_row("Sessions observed", str(stats.sessions))
+    head.add_row("Sessions with a signal", str(stats.sessions_with_signal))
+    head.add_row("Signals published", str(stats.signals))
+    head.add_row("Closed / still open", f"{stats.closed} / {stats.still_open}")
+    head.add_row("Passed / waited", f"{stats.passes} / {stats.waits}")
+    head.add_row("Playbook overrides", str(stats.overrides))
+    console.print(head)
+
+    if stats.closed:
+        perf = Table(title="Performance", show_header=False, box=None)
+        perf.add_column(style="cyan", width=30)
+        perf.add_column(style="bold")
+        perf.add_row("Win rate", f"{stats.win_rate}% ({stats.wins}W / {stats.losses}L)")
+        perf.add_row("Expectancy per trade", f"{stats.expectancy_pct:+.1f}%")
+        perf.add_row("Median trade", f"{stats.median_pct:+.1f}%")
+        perf.add_row("Average win / loss", f"{stats.avg_win_pct:+.1f}% / {stats.avg_loss_pct:+.1f}%")
+        perf.add_row("Profit factor", str(stats.profit_factor or "—"))
+        perf.add_row("Best / worst", f"{stats.best_pct:+.0f}% / {stats.worst_pct:+.0f}%")
+        perf.add_row("Touched +50%", f"{stats.hit_50} of {stats.closed}")
+        perf.add_row("Ran past +100%", str(stats.ran_100))
+        perf.add_row("Average hold", f"{stats.avg_hold_min:.0f} min")
+        console.print(perf)
+
+        if stats.by_confidence:
+            conf = Table(title="Is the confidence score real?")
+            conf.add_column("Confidence")
+            conf.add_column("Trades", justify="right")
+            conf.add_column("Avg return", justify="right")
+            for level, (count, avg) in stats.by_confidence.items():
+                conf.add_row(str(level), str(count), f"{avg:+.1f}%")
+            console.print(conf)
+
+        if stats.by_hour:
+            hours = Table(title="Best hours to trade (ET)")
+            hours.add_column("Hour")
+            hours.add_column("Trades", justify="right")
+            hours.add_column("Avg return", justify="right")
+            for hour, (count, avg) in stats.by_hour.items():
+                hours.add_row(f"{hour:02d}:00", str(count), f"{avg:+.1f}%")
+            console.print(hours)
+
+        if stats.by_exit:
+            exits = Table(title="How trades ended")
+            exits.add_column("Reason")
+            exits.add_column("Count", justify="right")
+            for reason, count in sorted(stats.by_exit.items(), key=lambda kv: -kv[1]):
+                exits.add_row(reason, str(count))
+            console.print(exits)
+
+    if stats.warnings:
+        console.print(
+            Panel(
+                "\n".join(f"• {w}" for w in stats.warnings),
+                title="⚠ read this before drawing conclusions",
+                border_style="yellow",
+            )
+        )
+
+
+@app.command()
+def telegram() -> None:
+    """Verify the Telegram bot can reach your chat before a session depends on it."""
+    settings = get_settings()
+    if not settings.telegram_bot_token or not settings.telegram_chat_id:
+        console.print("[red]TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must both be set[/]")
+        raise typer.Exit(code=1)
+
+    ok, message = asyncio.run(
+        verify_telegram(settings.telegram_bot_token, settings.telegram_chat_id)
+    )
+    if ok:
+        console.print(f"[green]{message}[/] — check your Telegram for the test message")
+    else:
+        console.print(f"[red]{message}[/]")
+        raise typer.Exit(code=1)
 
 
 @app.command()

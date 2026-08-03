@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     journal_dir: Path = Path("./var/journal")
     playbook_path: Path = Path("./src/qqq_alpha/brain/playbook.yaml")
 
+    # delivery — personal chat during the shadow period, subscriber bots later
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
     log_level: str = "INFO"
 
     @field_validator("leader_symbols", mode="before")
