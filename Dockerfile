@@ -18,6 +18,11 @@ RUN pip install --no-cache-dir -e . && \
 
 USER engine
 
+# documentation only — Railway routes to whatever $PORT the process actually
+# listens on; the dashboard is off by default until ADMIN_USERNAME/PASSWORD
+# are set (see qqq_alpha/config.py)
+EXPOSE 8080
+
 # journal and session state must outlive the container: a restart with an open
 # position depends on this directory persisting. Railway's builder rejects the
 # Docker VOLUME instruction outright — persistence is configured as a Railway

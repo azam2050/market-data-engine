@@ -435,6 +435,28 @@ def learn(
 
 
 @app.command()
+def dashboard(
+    port: int = typer.Option(None, help="Overrides DASHBOARD_PORT / PORT for a local run"),
+) -> None:
+    """Run the admin dashboard standalone — reads the same journal and memory
+    the live engine writes, without needing the engine itself running."""
+    import uvicorn
+
+    from qqq_alpha.dashboard.app import create_app
+
+    settings = get_settings()
+    if not settings.admin_username or not settings.admin_password:
+        console.print(
+            "[red]ADMIN_USERNAME and ADMIN_PASSWORD must both be set — see .env.example[/]"
+        )
+        raise typer.Exit(code=1)
+
+    app_ = create_app(settings)
+    console.print(f"[green]dashboard on http://0.0.0.0:{port or settings.dashboard_port}[/]")
+    uvicorn.run(app_, host="0.0.0.0", port=port or settings.dashboard_port, log_level="warning")  # noqa: S104
+
+
+@app.command()
 def telegram() -> None:
     """Verify the Telegram bot can reach your chat before a session depends on it."""
     settings = get_settings()

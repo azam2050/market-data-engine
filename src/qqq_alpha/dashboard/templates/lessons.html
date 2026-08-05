@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}الدروس — QQQ Alpha{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>دروس بانتظار قرارك ({{ pending|length }}) — دفتر التشغيل الحالي v{{ playbook_version }}</h2>
+  {% if pending %}
+  {% for row in pending %}
+  <div class="lesson-card">
+    <p><strong>#{{ row.id }}</strong> — {{ row.statement }}</p>
+    <p class="small muted">الدليل: {{ row.evidence }}</p>
+    <p class="small muted">عيّنة: {{ row.sample_size }} | ثقة: {{ row.confidence }} | اقترح في: {{ row.created_at }}</p>
+    <form class="inline" method="post" action="/lessons/{{ row.id }}/approve">
+      <button type="submit">✅ اعتماد</button>
+    </form>
+    <form class="inline" method="post" action="/lessons/{{ row.id }}/reject">
+      <button type="submit" class="reject">🚫 رفض</button>
+    </form>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="empty">لا توجد دروس بانتظار موافقتك حاليًا</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>دروس مُعتمدة سابقًا ({{ applied|length }})</h2>
+  {% if applied %}
+  {% for lesson in applied %}
+  <div class="lesson-card" style="opacity:.85;">
+    <p><strong>{{ lesson.id }}</strong> ({{ lesson.learned_on }}) — {{ lesson.statement }}</p>
+    <p class="small muted">عيّنة: {{ lesson.sample_size }} | ثقة: {{ lesson.confidence }}</p>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="empty">دفتر التشغيل ما زال بالإعداد الأولي — ما فيه دروس مُعتمدة بعد</div>
+  {% endif %}
+</div>
+
+{% endblock %}

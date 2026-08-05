@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}التقارير — QQQ Alpha{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>
+    <a class="daylink" href="/reports?day={{ prev_day }}">◀ اليوم السابق</a>
+    &nbsp;|&nbsp; تقرير يوم {{ target_day }} &nbsp;|&nbsp;
+    <a class="daylink" href="/reports?day={{ next_day }}">اليوم التالي ▶</a>
+  </h2>
+</div>
+
+{% macro stats_block(title, s) %}
+<div class="card">
+  <h2>{{ title }}</h2>
+  <div class="grid">
+    <div class="stat"><div class="n">{{ s.closed }}</div><div class="l">صفقات مغلقة</div></div>
+    <div class="stat"><div class="n">{{ s.win_rate }}%</div><div class="l">نسبة الربح</div></div>
+    <div class="stat"><div class="n {{ 'pos' if s.expectancy_pct > 0 else 'neg' }}">{{ "%+.1f"|format(s.expectancy_pct) }}%</div><div class="l">متوسط العائد للصفقة</div></div>
+    <div class="stat"><div class="n">{{ s.profit_factor if s.profit_factor is not none else "—" }}</div><div class="l">عامل الربح</div></div>
+    <div class="stat"><div class="n">{{ "%+.0f"|format(s.best_pct) }}% / {{ "%+.0f"|format(s.worst_pct) }}%</div><div class="l">أفضل / أسوأ صفقة</div></div>
+    <div class="stat"><div class="n">{{ s.ran_100 }}</div><div class="l">صفقات تجاوزت +100%</div></div>
+    <div class="stat"><div class="n">{{ s.passes }}</div><div class="l">مرات PASS</div></div>
+    <div class="stat"><div class="n">{{ s.missed }}</div><div class="l">فرص فائتة</div></div>
+    <div class="stat"><div class="n">{{ "%.0f"|format(s.avg_hold_min) }} د</div><div class="l">متوسط مدة الصفقة</div></div>
+  </div>
+
+  {% if s.by_exit %}
+  <h2 style="margin-top:16px;">أسباب الخروج</h2>
+  <table>
+    <tr><th>السبب</th><th>العدد</th></tr>
+    {% for reason, count in s.by_exit.items() %}
+    <tr><td>{{ reason or "—" }}</td><td>{{ count }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if s.warnings %}
+  <div style="margin-top:14px;">
+    {% for w in s.warnings %}
+    <p class="small" style="color: var(--yellow);">⚠️ {{ w }}</p>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{{ stats_block("اليوم المحدد", daily) }}
+{{ stats_block("آخر ٧ أيام", weekly) }}
+
+{% endblock %}

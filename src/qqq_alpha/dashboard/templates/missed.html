@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}الفرص الفائتة — QQQ Alpha{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>فرص فائتة سُعّرت رجعيًا ({{ missed|length }})</h2>
+  <p class="small muted">إعدادات تعليمية عن ثمن الحذر — هل رفض الذكاء فرصة كانت ستربح؟ لا تُدخَل تلقائيًا، بس تُقاس.</p>
+  {% if missed %}
+  <table>
+    <tr><th>الوقت</th><th>الاتجاه المفترض</th><th>العقد</th><th>السبب</th><th>أقصى ربح لو دخلنا</th><th>النظام السائد</th></tr>
+    {% for m in missed %}
+    <tr>
+      <td class="small muted">{{ m.ts }}</td>
+      <td>{{ "CALL 📈" if m.would_be_direction == "CALL" else "PUT 📉" }}</td>
+      <td class="small">{{ m.occ_symbol }}</td>
+      <td class="small">{{ "رفضته الحواجز" if m.blocked_by else "رفضه الذكاء بنفسه" }}</td>
+      <td class="pos">+{{ "%.0f"|format(m.peak_return_pct) }}%</td>
+      <td class="small muted">{{ m.regime or "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">لا توجد فرص فائتة مسجّلة بعد</div>
+  {% endif %}
+</div>
+{% endblock %}

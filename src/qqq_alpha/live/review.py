@@ -35,7 +35,7 @@ class ReviewPeriod:
         return [t for t in self.trades if t.get("return_pct") is not None]
 
 
-def _read_jsonl(paths: list[Path]) -> list[dict]:
+def read_jsonl(paths: list[Path]) -> list[dict]:
     rows: list[dict] = []
     for path in paths:
         if not path.exists():
@@ -66,9 +66,9 @@ def load_period(
     """Gather every journalled trade and decision inside a date range."""
     period = ReviewPeriod(since=since, until=until)
 
-    trades = _read_jsonl(sorted(journal_dir.glob("trades-*.jsonl")))
-    decisions = _read_jsonl(sorted(journal_dir.glob("decisions-*.jsonl")))
-    missed = _read_jsonl(sorted(journal_dir.glob("missed-*.jsonl")))
+    trades = read_jsonl(sorted(journal_dir.glob("trades-*.jsonl")))
+    decisions = read_jsonl(sorted(journal_dir.glob("decisions-*.jsonl")))
+    missed = read_jsonl(sorted(journal_dir.glob("missed-*.jsonl")))
 
     # the journal is append-only, so a trade appears once per update; keep the
     # last record for each id, which is its final state

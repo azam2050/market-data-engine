@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}الصفقات — QQQ Alpha{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>سجل الصفقات ({{ trades|length }})</h2>
+  {% if trades %}
+  <table>
+    <tr>
+      <th>الوقت</th><th>العقد</th><th>الاتجاه</th><th>دخول</th><th>خروج</th>
+      <th>العائد</th><th>أقصى ربح وصله</th><th>المدة</th><th>سبب الخروج</th><th>القراءة السلوكية</th>
+    </tr>
+    {% for t in trades %}
+    <tr>
+      <td class="small muted">{{ t.opened_at }}</td>
+      <td>{{ t.occ_symbol }}</td>
+      <td>{{ "CALL 📈" if t.decision.direction == "CALL" else "PUT 📉" }}</td>
+      <td>${{ "%.2f"|format(t.entry_price) }}</td>
+      <td>{{ "$%.2f"|format(t.exit_price) if t.exit_price else "—" }}</td>
+      <td class="{{ 'pos' if (t.return_pct or 0) > 0 else 'neg' if (t.return_pct or 0) < 0 else '' }}">
+        {{ "%+.1f%%"|format(t.return_pct) if t.return_pct is not none else "مفتوحة" }}
+      </td>
+      <td class="pos">{{ "+%.0f%%"|format(t.max_favorable_pct) if t.max_favorable_pct else "—" }}</td>
+      <td class="small">{{ "%.0f د"|format(t.hold_minutes) if t.hold_minutes else "—" }}</td>
+      <td class="small muted">{{ t.exit_reason or "—" }}</td>
+      <td class="small">
+        {{ t.behavior }}
+        {% if t.entry_note %}<br><span class="muted">{{ t.entry_note }}</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">لا توجد صفقات مسجّلة بعد</div>
+  {% endif %}
+</div>
+{% endblock %}

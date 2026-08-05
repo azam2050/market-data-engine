@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # admin dashboard — off unless both credentials are set, since an
+    # unauthenticated view of every trade thesis and lesson is not a risk
+    # worth taking by default
+    admin_username: str = ""
+    admin_password: str = ""
+    # Railway injects PORT for whatever the container should listen on
+    dashboard_port: int = Field(default=8080, validation_alias="PORT")
+
     log_level: str = "INFO"
 
     @property

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}نظرة عامة — QQQ Alpha{% endblock %}
+{% block content %}
+
+{% if status %}
+<div class="card">
+  <h2>حالة المحرك الآن</h2>
+  <div class="grid">
+    <div class="stat"><div class="n">{{ "🟢 يعمل" if not status.last_error else "🔴 " + status.last_error }}</div><div class="l">الحالة</div></div>
+    <div class="stat"><div class="n">{{ status.trades_today }}</div><div class="l">صفقات اليوم</div></div>
+    <div class="stat"><div class="n">{{ status.open_positions }}</div><div class="l">مراكز مفتوحة</div></div>
+    <div class="stat"><div class="n">{{ "%.1f"|format(status.realized_pct) }}%</div><div class="l">عائد اليوم المحقق</div></div>
+    <div class="stat"><div class="n">{{ status.brain_calls }}</div><div class="l">مرات سؤال الذكاء</div></div>
+    <div class="stat"><div class="n">{{ status.bars_received }}</div><div class="l">شموع مستلمة</div></div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>ملخص السجل الكامل</h2>
+  <div class="grid">
+    <div class="stat"><div class="n">{{ counts.trades }}</div><div class="l">إجمالي الصفقات</div></div>
+    <div class="stat"><div class="n">{{ counts.closed }}</div><div class="l">صفقات مغلقة</div></div>
+    <div class="stat"><div class="n">{{ counts.decisions }}</div><div class="l">قرارات مسجّلة</div></div>
+    <div class="stat"><div class="n">{{ counts.missed }}</div><div class="l">فرص فائتة مُسعّرة</div></div>
+    <div class="stat"><div class="n">{{ counts.session_days }}</div><div class="l">أيام تداول</div></div>
+    <div class="stat"><div class="n">{{ pending_count }}</div><div class="l">دروس بانتظار موافقتك</div></div>
+  </div>
+</div>
+
+{% if pending_count > 0 %}
+<div class="card" style="border-color: var(--yellow);">
+  <h2 style="color: var(--yellow);">⚠️ فيه {{ pending_count }} درس بانتظار قرارك</h2>
+  <p class="small muted">راجعهم من صفحة <a class="daylink" href="/lessons">الدروس</a> واعتمد أو ارفض كل واحد.</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>مراكز مفتوحة الآن</h2>
+  {% if open_trades %}
+  <table>
+    <tr><th>العقد</th><th>الاتجاه</th><th>سعر الدخول</th><th>وقت الفتح</th><th>الثقة</th></tr>
+    {% for t in open_trades %}
+    <tr>
+      <td>{{ t.occ_symbol }}</td>
+      <td>{{ "CALL 📈" if t.decision.direction == "CALL" else "PUT 📉" }}</td>
+      <td>${{ "%.2f"|format(t.entry_price) }}</td>
+      <td class="small muted">{{ t.opened_at }}</td>
+      <td>{{ t.decision.confidence }}/10</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">لا يوجد مركز مفتوح حاليًا</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>آخر ١٠ قرارات</h2>
+  {% if recent_decisions %}
+  <table>
+    <tr><th>الوقت</th><th>القرار</th><th>الثقة</th><th>السبب</th></tr>
+    {% for d in recent_decisions %}
+    <tr>
+      <td class="small muted">{{ d.ts }}</td>
+      <td><span class="pill {{ d.action|lower }}">{{ d.action }}</span></td>
+      <td>{{ d.confidence }}/10</td>
+      <td class="thesis small">{{ d.thesis }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">لا توجد قرارات مسجّلة بعد</div>
+  {% endif %}
+</div>
+
+{% endblock %}

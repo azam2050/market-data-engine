@@ -128,6 +128,7 @@ class LiveEngine:
             else None
         )
         self._command_task: asyncio.Task | None = None
+        self._dashboard_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     def _persist(self) -> None:
@@ -195,6 +196,12 @@ class LiveEngine:
             self._command_task = asyncio.create_task(self._command_loop())
             await self.notifier.note(
                 'lesson approval is live — reply "موافق <رقم>" or "رفض <رقم>"'
+            )
+
+        if self.settings.admin_username and self.settings.admin_password:
+            self._dashboard_task = asyncio.create_task(self._run_dashboard())
+            await self.notifier.note(
+                f"📊 لوحة التحكم شغّالة على المنفذ {self.settings.dashboard_port}"
             )
 
         await self._restore()
@@ -584,7 +591,40 @@ class LiveEngine:
             self.memory.set_lesson_status(lesson_id, "rejected")
             await self.notifier.note(f"🚫 رُفض الدرس #{lesson_id}")
 
+    async def _run_dashboard(self) -> None:
+        """Serve the admin dashboard for the life of the session.
+
+        Runs embedded in this same process so it shares the event loop and
+        reads ``self.status`` live, without a second deployment or a second
+        copy of the data to keep in sync.
+        """
+        import uvicorn
+
+        from qqq_alpha.dashboard.app import create_app
+
+        def _apply_playbook(book: Playbook) -> None:
+            self.playbook = book
+
+        app = create_app(self.settings, status=self.status, on_lesson_applied=_apply_playbook)
+        config = uvicorn.Config(
+            app,
+            host="0.0.0.0",  # noqa: S104 - intentional: this is the container's only network interface
+            port=self.settings.dashboard_port,
+            log_level="warning",
+            access_log=False,
+        )
+        server = uvicorn.Server(config)
+        try:
+            await server.serve()
+        except asyncio.CancelledError:
+            await server.shutdown()
+            raise
+
     async def _shutdown(self) -> None:
+        if self._dashboard_task is not None:
+            self._dashboard_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._dashboard_task
         if self._command_task is not None:
             self._command_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

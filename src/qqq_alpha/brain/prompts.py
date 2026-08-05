@@ -40,6 +40,9 @@ HONESTY REQUIREMENTS
 - If the data looks wrong or incomplete, say so and PASS.
 - You have no verified track record yet. Do not reason as though the playbook's setups are proven.
 
+LANGUAGE
+The operator reads Arabic, and every field the operator will actually read — thesis, risks, invalidation, overrides — must be written in Arabic. Write full Arabic sentences; do not translate standard trading/technical terms that professional Arabic-speaking traders use in English as-is (delta, VWAP, EMA, RSI, ATR, gamma, theta, spread, rel-volume, and similar). Forcing those into Arabic loses precision instead of adding clarity. Numbers, tickers, and OCC symbols stay as-is.
+
 You must respond by calling the `submit_decision` tool. No prose outside it."""
 
 
@@ -90,7 +93,10 @@ DECISION_TOOL: dict[str, Any] = {
             },
             "invalidation": {
                 "type": "string",
-                "description": "The price or condition in the UNDERLYING that proves the thesis wrong.",
+                "description": (
+                    "The price or condition in the UNDERLYING that proves the thesis wrong. "
+                    "Write in Arabic (technical terms may stay in English)."
+                ),
             },
             "expected_hold_minutes": {"type": "integer"},
             "confidence": {
@@ -103,13 +109,17 @@ DECISION_TOOL: dict[str, Any] = {
                 "type": "string",
                 "description": (
                     "Why this trade, in plain language a trader would accept. Include the "
-                    "arithmetic linking the expected underlying move to the target return."
+                    "arithmetic linking the expected underlying move to the target return. "
+                    "Write in Arabic (technical terms may stay in English)."
                 ),
             },
             "risks": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "What could go wrong, specifically.",
+                "description": (
+                    "What could go wrong, specifically. Write each item in Arabic "
+                    "(technical terms may stay in English)."
+                ),
             },
             "playbook_refs": {
                 "type": "array",

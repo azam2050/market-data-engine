@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}قرارات AI — QQQ Alpha{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>كل قرار اتخذه الذكاء ({{ decisions|length }}) — بما فيها PASS</h2>
+  <p class="small muted">هنا السبب الكامل وراء كل قرار، حتى لو ما نتج عنه صفقة. هذا ما يفرّق نظام يفكر عن نظام قواعد جامدة.</p>
+  {% if decisions %}
+  {% for d in decisions %}
+  <div class="lesson-card">
+    <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+      <span><span class="pill {{ d.action|lower }}">{{ d.action }}</span>
+        {% if d.direction %} — {{ d.direction }} @ {{ d.occ_symbol }}{% endif %}</span>
+      <span class="small muted">{{ d.ts }} | الثقة {{ d.confidence }}/10 | انتباه {{ "%.2f"|format(d.attention_score) if d.attention_score is not none else "—" }}</span>
+    </div>
+    <p class="thesis">{{ d.thesis }}</p>
+    {% if d.risks %}
+    <p class="small muted">⚠️ المخاطر: {{ d.risks|join(" · ") }}</p>
+    {% endif %}
+    {% if d.overrides %}
+    <p class="small" style="color: var(--yellow);">⚡ مخالفة لدفتر التشغيل: {{ d.overrides|join(" · ") }}</p>
+    {% endif %}
+    {% if d.rail_blocks %}
+    <p class="small neg">🚫 منعته الحواجز: {{ d.rail_blocks|join(" · ") }}</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="empty">لا توجد قرارات مسجّلة بعد</div>
+  {% endif %}
+</div>
+{% endblock %}

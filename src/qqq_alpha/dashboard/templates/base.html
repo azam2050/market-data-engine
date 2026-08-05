@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}لوحة تحكم QQQ Alpha{% endblock %}</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1e222b; --border: #2a2f3a;
+    --text: #e7e9ee; --muted: #8b93a3; --accent: #4f8cff;
+    --green: #35c78a; --red: #ef5f6b; --yellow: #e0b23e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; line-height: 1.6;
+  }
+  header {
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 14px 24px; display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 10px;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  nav { display: flex; gap: 6px; flex-wrap: wrap; }
+  nav a {
+    color: var(--muted); text-decoration: none; padding: 8px 14px; border-radius: 8px;
+    font-size: 14px;
+  }
+  nav a:hover, nav a.active { background: var(--panel-2); color: var(--text); }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 18px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 16px; color: var(--muted); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .stat { background: var(--panel-2); border-radius: 10px; padding: 12px 14px; }
+  .stat .n { font-size: 22px; font-weight: 700; }
+  .stat .l { font-size: 12px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 9px 8px; text-align: right; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr:hover td { background: var(--panel-2); }
+  .pos { color: var(--green); font-weight: 600; }
+  .neg { color: var(--red); font-weight: 600; }
+  .pill {
+    display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px;
+    background: var(--panel-2); border: 1px solid var(--border);
+  }
+  .pill.enter { color: var(--green); border-color: var(--green); }
+  .pill.pass { color: var(--muted); }
+  .pill.wait { color: var(--yellow); border-color: var(--yellow); }
+  .thesis { color: var(--text); max-width: 420px; white-space: pre-wrap; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  form.inline { display: inline; }
+  button {
+    background: var(--accent); color: white; border: none; border-radius: 8px;
+    padding: 7px 14px; font-size: 13px; cursor: pointer;
+  }
+  button.reject { background: var(--panel-2); border: 1px solid var(--red); color: var(--red); }
+  .lesson-card { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; background: var(--panel-2); }
+  .empty { color: var(--muted); text-align: center; padding: 30px; }
+  a.daylink { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📊 QQQ Alpha — لوحة التحكم</h1>
+  <nav>
+    <a href="/">نظرة عامة</a>
+    <a href="/trades">الصفقات</a>
+    <a href="/decisions">قرارات AI</a>
+    <a href="/missed">الفرص الفائتة</a>
+    <a href="/lessons">الدروس</a>
+    <a href="/reports">التقارير</a>
+  </nav>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
