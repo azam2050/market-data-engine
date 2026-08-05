@@ -194,9 +194,27 @@ class MassiveClient:
     async def option_chain(
         self, underlying: str, expiry: date, option_type: OptionType | None = None
     ) -> list[OptionContract]:
-        params: dict[str, Any] = {"expiration_date": expiry.isoformat(), "limit": 250}
-        if option_type is not None:
-            params["contract_type"] = option_type.value.lower()
+        """Fetch the chain for one expiry, optionally scoped to one side.
+
+        Each request is capped at 250 contracts by the API. A 0DTE index chain
+        routinely has more than 250 strikes across both sides combined, so an
+        unfiltered request silently truncates — in production this showed up
+        as the brain repeatedly reporting "no PUT available" while calls were
+        plentiful. Fetching each side with its own budget guarantees neither
+        one is starved by the other filling the shared cap.
+        """
+        if option_type is None:
+            calls, puts = await asyncio.gather(
+                self.option_chain(underlying, expiry, OptionType.CALL),
+                self.option_chain(underlying, expiry, OptionType.PUT),
+            )
+            return calls + puts
+
+        params: dict[str, Any] = {
+            "expiration_date": expiry.isoformat(),
+            "limit": 250,
+            "contract_type": option_type.value.lower(),
+        }
 
         payload = await self._get(f"/v3/snapshot/options/{underlying}", params)
         contracts: list[OptionContract] = []
