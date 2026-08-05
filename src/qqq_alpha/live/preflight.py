@@ -170,15 +170,25 @@ async def _check_stream(settings: Settings) -> CheckResult:
 
 
 async def _check_brain(settings: Settings) -> CheckResult:
-    """One minimal call. Costs a fraction of a cent and proves the key works."""
+    """One minimal call. Costs a fraction of a cent and proves the key works.
+
+    Retries briefly on failure: a transient overload on Anthropic's side
+    (HTTP 529) has been seen to outlast the SDK's own internal retries and
+    should not, by itself, stop an otherwise-healthy engine from starting.
+    """
     try:
         from anthropic import AsyncAnthropic
 
+        from qqq_alpha.brain.resilience import call_with_retry
+
         client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-        await client.messages.create(
-            model=settings.anthropic_model,
-            max_tokens=1,
-            messages=[{"role": "user", "content": "ok"}],
+        await call_with_retry(
+            lambda: client.messages.create(
+                model=settings.anthropic_model,
+                max_tokens=1,
+                messages=[{"role": "user", "content": "ok"}],
+            ),
+            label="preflight brain check",
         )
     except Exception as exc:  # noqa: BLE001
         return CheckResult("محرك القرار", False, f"فشل: {exc}"[:200], fatal=True)

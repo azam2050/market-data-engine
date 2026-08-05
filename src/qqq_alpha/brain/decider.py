@@ -18,6 +18,7 @@ from typing import Any, Protocol
 
 from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.brain.prompts import DECISION_TOOL, SYSTEM_PROMPT, build_user_prompt
+from qqq_alpha.brain.resilience import call_with_retry
 from qqq_alpha.config import Settings
 from qqq_alpha.domain import (
     Action,
@@ -103,26 +104,42 @@ class AIDecider:
         )
 
         client = self._get_client()
-        response = await client.messages.create(
-            model=self.settings.anthropic_model,
-            # thinking and the response share this budget on current models, so
-            # it is deliberately generous — truncating mid-decision would produce
-            # a malformed trade plan rather than an honest PASS
-            max_tokens=self.settings.anthropic_max_tokens,
-            system=[
-                {
-                    "type": "text",
-                    "text": SYSTEM_PROMPT,
-                    # the system prompt and playbook are stable across a session;
-                    # caching them is most of the per-decision cost
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            output_config={"effort": self.settings.anthropic_effort},
-            tools=[DECISION_TOOL],
-            tool_choice={"type": "tool", "name": "submit_decision"},
-            messages=[{"role": "user", "content": prompt}],
-        )
+        try:
+            response = await call_with_retry(
+                lambda: client.messages.create(
+                    model=self.settings.anthropic_model,
+                    # thinking and the response share this budget on current
+                    # models, so it is deliberately generous — truncating
+                    # mid-decision would produce a malformed trade plan
+                    # rather than an honest PASS
+                    max_tokens=self.settings.anthropic_max_tokens,
+                    system=[
+                        {
+                            "type": "text",
+                            "text": SYSTEM_PROMPT,
+                            # the system prompt and playbook are stable across
+                            # a session; caching them is most of the
+                            # per-decision cost
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                    output_config={"effort": self.settings.anthropic_effort},
+                    tools=[DECISION_TOOL],
+                    tool_choice={"type": "tool", "name": "submit_decision"},
+                    messages=[{"role": "user", "content": prompt}],
+                ),
+                label="brain decision call",
+            )
+        except Exception as exc:  # noqa: BLE001 - a transient outage must not crash the engine
+            log.error("brain call failed after retries: %s", exc)
+            return Decision(
+                ts=snapshot.ts,
+                action=Action.PASS,
+                thesis=(
+                    f"فشل تقني بالاتصال بمحرك القرار ({type(exc).__name__}) بعد "
+                    "محاولات إعادة — تم تجاوز هذه اللحظة بأمان"
+                ),
+            )
 
         usage = getattr(response, "usage", None)
         if usage is not None:

@@ -199,6 +199,35 @@ class _FakeClient:
         return self._response
 
 
+class _FailThenSucceedClient:
+    """Raises on the first N calls (simulating a transient 529), then returns
+    a real response — proves the retry path actually recovers."""
+
+    def __init__(self, response, fail_times: int):
+        self._response = response
+        self._fail_times = fail_times
+        self.calls = 0
+        self.messages = self
+
+    async def create(self, **kwargs):
+        self.calls += 1
+        if self.calls <= self._fail_times:
+            raise RuntimeError("Error code: 529 - {'type': 'overloaded_error'}")
+        return self._response
+
+
+class _AlwaysFailingClient:
+    """Every call raises — simulates a sustained outage that outlasts retries."""
+
+    def __init__(self):
+        self.calls = 0
+        self.messages = self
+
+    async def create(self, **kwargs):
+        self.calls += 1
+        raise RuntimeError("Error code: 529 - {'type': 'overloaded_error'}")
+
+
 def _snapshot():
     from qqq_alpha.data.synthetic import synthetic_session
     from qqq_alpha.features.snapshot import SnapshotBuilder
@@ -254,3 +283,46 @@ async def test_request_carries_effort_caching_and_a_generous_token_budget():
     assert client.kwargs["max_tokens"] >= 8000  # thinking shares this budget
     assert client.kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert client.kwargs["tool_choice"]["name"] == "submit_decision"
+
+
+# ------------------------------------------------------------- transient-outage resilience
+async def test_transient_overload_recovers_on_retry(monkeypatch):
+    """A 529 that clears up on retry must still produce a real decision."""
+    from qqq_alpha.domain import Action
+
+    async def _no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("qqq_alpha.brain.resilience.asyncio.sleep", _no_sleep)
+
+    response = _Response(content=[_Block("tool_use", input={"action": "PASS", "confidence": 3, "thesis": "quiet"})])
+    client = _FailThenSucceedClient(response, fail_times=1)
+    decider, _ = _decider(response)
+    decider._client = client
+
+    decision = await _decide(decider, _snapshot())
+
+    assert decision.action is Action.PASS
+    assert client.calls == 2  # one failure, one recovery — no crash in between
+
+
+async def test_sustained_overload_becomes_a_safe_pass_not_a_crash(monkeypatch):
+    """A 529 that never clears up must not take down the whole engine."""
+    from qqq_alpha.domain import Action
+
+    async def _no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("qqq_alpha.brain.resilience.asyncio.sleep", _no_sleep)
+
+    client = _AlwaysFailingClient()
+    settings = Settings(anthropic_api_key="k", anthropic_model="test-model")
+    from qqq_alpha.brain.decider import AIDecider
+
+    decider = AIDecider(settings, client=client)
+
+    decision = await _decide(decider, _snapshot())
+
+    assert decision.action is Action.PASS
+    assert "فشل تقني" in decision.thesis
+    assert client.calls == 3  # 1 initial attempt + 2 retries, then gives up honestly
