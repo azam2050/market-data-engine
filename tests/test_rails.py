@@ -61,6 +61,15 @@ def test_rails_hold_no_market_opinion(settings, snapshot):
     assert verdict.allowed
 
 
+def test_pre_check_no_longer_blocks_purely_on_clock_time(settings, snapshot):
+    """The late-entry cutoff moved to post_check, where the chosen contract's
+    actual expiry is known — pre_check cannot yet tell 0DTE from 1DTE."""
+    snapshot.data_age_sec = 5
+    snapshot.ts = snapshot.ts.replace(hour=15, minute=45)  # past the old cutoff
+    verdict = SafetyRails(settings).pre_check(snapshot, DayState())
+    assert verdict.allowed, verdict.blocks
+
+
 def _decision(**overrides):
     base = dict(
         ts=datetime(2026, 3, 2, 15, 0, tzinfo=MARKET_TZ),
@@ -116,6 +125,27 @@ def test_post_check_warns_but_allows_low_target(settings):
     verdict = SafetyRails(settings).post_check(decision, _contract())
     assert verdict.allowed
     assert any("below_target_bar" in w for w in verdict.warnings)
+
+
+def test_post_check_blocks_a_same_day_contract_entered_past_the_cutoff(settings):
+    """A broker restricts trading a same-day contract as it nears expiry —
+    this is the case the cutoff exists for."""
+    late = _decision(ts=datetime(2026, 3, 2, 15, 45, tzinfo=MARKET_TZ))
+    verdict = SafetyRails(settings).post_check(late, _contract(expiry=date(2026, 3, 2)))
+    assert not verdict.allowed
+    assert any(b.startswith("late_0dte_entry") for b in verdict.blocks)
+
+
+def test_post_check_allows_a_next_day_contract_at_the_same_late_clock_time(settings):
+    """The same clock time is not restricted for a contract expiring tomorrow
+    — that used to be blocked too, which was the actual bug."""
+    late = _decision(
+        ts=datetime(2026, 3, 2, 15, 45, tzinfo=MARKET_TZ),
+        occ_symbol="O:QQQ260303C00485000",
+    )
+    contract = _contract(occ_symbol="O:QQQ260303C00485000", expiry=date(2026, 3, 3))
+    verdict = SafetyRails(settings).post_check(late, contract)
+    assert verdict.allowed, verdict.blocks
 
 
 def test_attention_wakes_on_activity_and_respects_cooldown():
