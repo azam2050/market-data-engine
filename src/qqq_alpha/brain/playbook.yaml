@@ -9,9 +9,13 @@
 #
 # version is bumped by the learning loop, never by hand.
 # =============================================================================
-version: 1
-updated: "2026-08-02"
-notes: "Seed playbook. No live evidence behind it yet — everything here is a prior, not a finding."
+version: 2
+updated: "2026-08-07"
+notes: >
+  Seed playbook plus the first live-evidence entries. The 2026-08-06 session
+  (15 consecutive WAIT/PASS through a V-reversal rally, then one losing
+  power-hour chase) is baked into CAPITULATION_REVERSAL, PERFECT_ENTRY_TRAP
+  and LATE_COMPENSATION_CHASE.
 
 mission: >
   Find asymmetric intraday setups on QQQ options where a realistic move in the
@@ -59,6 +63,20 @@ setups:
     typical_hold_minutes: 20-60
     fails_when: "The pullback breaks EMA50 or the trend regime has already flipped."
 
+  - id: CAPITULATION_REVERSAL
+    name: "V-reversal after an opening flush"
+    description: >
+      A sharp opening sell-off on extreme volume that immediately V-recovers,
+      reclaims VWAP, and flips the short timeframes bullish. On these days the
+      pullback you are waiting for tends never to come — the shallow higher-low
+      IS the pullback. Enter on the first 1m/5m higher-low above VWAP, not on a
+      deep retest that trend days rarely offer.
+    typical_window: "09:35-11:00 ET"
+    typical_hold_minutes: 20-90
+    fails_when: >
+      The recovery stalls below VWAP, or the bounce is on fading volume and
+      price re-enters the flush range.
+
 # ---------------------------------------------------------------------------
 # Conditions that historically degrade edge. These lower confidence — they do
 # not forbid a trade.
@@ -79,6 +97,26 @@ caution:
   - id: CONFLICTING_SIGNALS
     condition: "Trend and flow point in opposite directions"
     note: "Usually means a fight; wait for one side to lose."
+  - id: PERFECT_ENTRY_TRAP
+    condition: >
+      You have said WAIT or PASS on 3+ consecutive wakes in the same direction
+      while price kept trending, each time citing "extended above VWAP" or
+      "waiting for a pullback/confirmation"
+    note: >
+      This is the signature of a trend day being missed one perfect-entry demand
+      at a time. Evidence 2026-08-06: 15 consecutive WAIT/PASS during a V-reversal
+      rally; 27 declined setups later priced at +50% to +254% while the one trade
+      actually taken lost. On a trend day the shallow higher-low is the pullback —
+      re-read CAPITULATION_REVERSAL and judge the trend itself, not the distance
+      from VWAP.
+  - id: LATE_COMPENSATION_CHASE
+    condition: "First ENTER of the day comes after 15:00 ET following a day of WAIT/PASS decisions"
+    note: >
+      Entering late to make up for a missed day is compensation, not analysis.
+      Evidence 2026-08-06: the only trade of the day was a 15:08 ET 0DTE chase
+      against the LATE_DAY_0DTE caution — stopped out in 6 minutes at -47.7%.
+      If the day was missed, missing it is the cheaper outcome; a 1DTE entry or
+      no entry both beat a power-hour 0DTE chase.
 
 # ---------------------------------------------------------------------------
 # Contract selection preferences.
