@@ -31,6 +31,25 @@ class Notifier(Protocol):
     async def note(self, text: str) -> None: ...
 
 
+def human_contract(occ_symbol: str, as_of) -> str:
+    """A trader-readable label, e.g. "QQQ 702 CALL 0DTE" — the raw OCC symbol
+    (``O:QQQ260805C00702000``) is exact but not something anyone reads at a
+    glance. Falls back to the raw symbol if it cannot be parsed, since a
+    slightly ugly label beats a missing one."""
+    from qqq_alpha.data.massive import parse_occ_symbol
+
+    try:
+        underlying, expiry, option_type, strike = parse_occ_symbol(occ_symbol)
+    except (ValueError, IndexError):
+        return occ_symbol
+
+    direction_word = "CALL" if option_type.value == "CALL" else "PUT"
+    strike_label = f"{strike:.0f}" if strike == int(strike) else f"{strike:.1f}"
+    dte = (expiry - as_of.astimezone(MARKET_TZ).date()).days
+    dte_label = "0DTE" if dte <= 0 else f"{dte}DTE"
+    return f"{underlying} {strike_label} {direction_word} {dte_label}"
+
+
 def format_signal(trade: Trade, delayed: bool) -> str:
     decision: Decision = trade.decision
     local = trade.opened_at.astimezone(MARKET_TZ)
@@ -39,7 +58,7 @@ def format_signal(trade: Trade, delayed: bool) -> str:
     lines = [
         f"🎯 توصية جديدة | {trade.snapshot_at_entry.underlying.symbol if trade.snapshot_at_entry else 'QQQ'}",
         "",
-        f"العقد: {trade.occ_symbol}",
+        f"العقد: {human_contract(trade.occ_symbol, trade.opened_at)}",
         f"الاتجاه: {direction}",
         f"سعر العقد الآن: ${trade.entry_price:.2f}",
     ]
@@ -91,7 +110,7 @@ def format_update(trade: Trade, update: TradeUpdate, delayed: bool) -> str:
     sign = "✅" if update.return_pct > 0 else "❌"
 
     lines = [
-        f"{icon} {title} | {trade.occ_symbol}",
+        f"{icon} {title} | {human_contract(trade.occ_symbol, trade.opened_at)}",
         f"السعر الآن: ${update.price:.2f} ({update.return_pct:+.1f}%) {sign}",
         update.note,
     ]

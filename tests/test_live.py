@@ -18,7 +18,7 @@ from qqq_alpha.data.synthetic import synthetic_session
 from qqq_alpha.domain import Action, Decision, MarketSnapshot
 from qqq_alpha.journal import Journal
 from qqq_alpha.live.engine import LiveEngine
-from qqq_alpha.live.notifier import NullNotifier, format_signal
+from qqq_alpha.live.notifier import NullNotifier, format_signal, format_update, human_contract
 from qqq_alpha.live.stream import LiveBarStream
 from qqq_alpha.trades import TradeManager
 
@@ -360,11 +360,43 @@ def test_signal_message_contains_the_full_trade_plan():
     """A subscriber must never receive an entry without targets and a stop."""
     message = format_signal(_sample_trade(), delayed=False)
 
-    assert "O:QQQ260302C00485000" in message
+    # a trader-readable label, not the raw OCC symbol nobody reads at a glance
+    assert "QQQ 485 CALL 0DTE" in message
     assert "$1.50" in message  # +50% target, priced off the fill
     assert "$0.60" in message  # -40% stop
     assert "الثقة: 7/10" in message
     assert "يُلغى إذا" in message
+
+
+# ---------------------------------------------------------------- human_contract
+def test_human_contract_labels_a_same_day_call():
+    as_of = datetime(2026, 3, 2, 10, 0, tzinfo=MARKET_TZ)
+    assert human_contract("O:QQQ260302C00485000", as_of) == "QQQ 485 CALL 0DTE"
+
+
+def test_human_contract_labels_a_next_day_put():
+    as_of = datetime(2026, 3, 2, 15, 45, tzinfo=MARKET_TZ)
+    assert human_contract("O:QQQ260303P00720000", as_of) == "QQQ 720 PUT 1DTE"
+
+
+def test_human_contract_keeps_a_fractional_strike():
+    as_of = datetime(2026, 3, 2, 10, 0, tzinfo=MARKET_TZ)
+    assert human_contract("O:QQQ260302C00484500", as_of) == "QQQ 484.5 CALL 0DTE"
+
+
+def test_human_contract_falls_back_to_the_raw_symbol_if_unparseable():
+    as_of = datetime(2026, 3, 2, 10, 0, tzinfo=MARKET_TZ)
+    assert human_contract("not-a-real-symbol", as_of) == "not-a-real-symbol"
+
+
+def test_update_message_uses_the_human_label_too():
+    from qqq_alpha.domain import TradeUpdate
+
+    trade = _sample_trade()
+    update = TradeUpdate(ts=trade.opened_at, price=1.5, return_pct=50.0, note="target:T1 reached")
+
+    message = format_update(trade, update, delayed=False)
+    assert "QQQ 485 CALL 0DTE" in message
 
 
 def test_status_is_serialisable(settings, tmp_path):
