@@ -192,7 +192,20 @@ async def _check_stream(settings: Settings) -> CheckResult:
                     if message.get("ev") != "status":
                         continue
                     if message.get("status") == "auth_success":
-                        return CheckResult("البث اللحظي", True, "المصادقة نجحت")
+                        detail = "المصادقة نجحت"
+                        if (
+                            settings.massive_feed_mode != "real_time"
+                            and "delayed" not in settings.massive_ws_stocks_url
+                        ):
+                            # the real-time cluster rejects keys that are not
+                            # entitled to it — success here while the mode says
+                            # delayed means the label is wrong, not the data
+                            detail += (
+                                " — الخادم اللحظي قَبِل مفتاحك لكن الوضع مضبوط "
+                                "delayed: اضبط MASSIVE_FEED_MODE=real_time في Railway "
+                                "حتى تتوقف الإشارات عن وصف نفسها بأنها متأخرة"
+                            )
+                        return CheckResult("البث اللحظي", True, detail)
                     if message.get("status") in ("auth_failed", "error"):
                         return CheckResult(
                             "البث اللحظي",
