@@ -45,6 +45,11 @@ def _setup_logging(level: str) -> None:
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
     )
+    # httpx logs the full request URL at INFO, including API keys and bot
+    # tokens carried in query strings and paths — keep those out of Railway's
+    # log history.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 @app.command()
