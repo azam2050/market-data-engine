@@ -156,6 +156,7 @@ def build_user_prompt(
     attention_note: str = "",
     similar_trades: list | None = None,
     chain: list | None = None,
+    options_pulse: list | None = None,
 ) -> str:
     sections: list[str] = []
 
@@ -217,6 +218,19 @@ def build_user_prompt(
         sections.append(
             "=== INSTITUTIONAL OPTIONS FLOW ===\nUNAVAILABLE — no options tape on the current "
             "data plan. Weight your read on price and volume accordingly, and lower confidence."
+        )
+
+    if options_pulse:
+        sections.append(
+            "=== OPTIONS PULSE (cumulative day volume by strike — NOT the live tape) ===\n"
+            "Where today's options money is concentrating, for the index and its "
+            "heavyweight leaders. The top-volume strike is the day's magnet price. "
+            "Read the leaders against the index: if the leaders' money leans CALL at "
+            "strikes above spot while the index itself is selling off, the leaders are "
+            "voting for a bottom — watch for the reversal instead of chasing the move "
+            "down, and the reverse holds too. This is cumulative volume without "
+            "aggressor side, so treat it as directional context, not confirmation.\n"
+            + _compact(options_pulse)
         )
 
     if snapshot.leaders:

@@ -27,6 +27,7 @@ from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, Settings
 from qqq_alpha.data.chain import LiveChainPricer
 from qqq_alpha.data.massive import MassiveClient
 from qqq_alpha.data.pricing import BlackScholesPricer, OptionPricer
+from qqq_alpha.data.pulse import PulseTracker, chain_pulse
 from qqq_alpha.data.quality import inspect_session
 from qqq_alpha.domain import Action, Bar, MarketSnapshot, MissedOpportunity, OptionType, Trade
 from qqq_alpha.features.snapshot import SnapshotBuilder
@@ -129,6 +130,9 @@ class LiveEngine:
         )
         self._command_task: asyncio.Task | None = None
         self._dashboard_task: asyncio.Task | None = None
+        # "price of the day": where options money is concentrating, for QQQ and
+        # the leaders — the closest thing to flow the current data plan offers
+        self.pulse = PulseTracker(self.settings)
 
     # ------------------------------------------------------------------
     def _persist(self) -> None:
@@ -337,6 +341,7 @@ class LiveEngine:
                 if isinstance(self.pricer, LiveChainPricer)
                 else None
             ),
+            options_pulse=await self._options_pulse(bar),
         )
         self.status.brain_calls += 1
 
@@ -377,6 +382,30 @@ class LiveEngine:
         # position recoverable, never announced-but-forgotten
         self._persist()
         await self.notifier.signal(trade, self._delayed)
+
+    # ------------------------------------------------------------------
+    async def _options_pulse(self, bar: Bar) -> list[dict] | None:
+        """The options-money picture shown to the brain alongside each decision.
+
+        QQQ's pulse comes free from the chain the pricer already holds; the
+        leaders are fetched on a slow cache. Runs only when the brain is about
+        to be asked, and never blocks a decision on a failed fetch.
+        """
+        if not isinstance(self.pricer, LiveChainPricer):
+            # without a live chain there is no live options data to summarise —
+            # and this keeps model-priced runs (tests, offline replays) off the network
+            return None
+        primary = (
+            chain_pulse(
+                self.settings.primary_symbol,
+                list(self.pricer.snapshot.contracts.values()),
+            )
+            if self.pricer.snapshot is not None
+            else None
+        )
+        await self.pulse.refresh_leaders(bar.ts.astimezone(MARKET_TZ).date())
+        rows = self.pulse.rows(primary)
+        return rows or None
 
     # ------------------------------------------------------------------
     def _queue_missed_check(self, snapshot: MarketSnapshot, blocked_by: list[str]) -> None:
