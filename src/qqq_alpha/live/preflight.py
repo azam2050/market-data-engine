@@ -133,6 +133,42 @@ async def _check_option_chain(settings: Settings) -> CheckResult:
     )
 
 
+async def _check_flow_tape(settings: Settings) -> CheckResult:
+    """Does the plan include the options trades endpoint (the flow feed)?
+
+    Not fatal either way: the engine trades without the tape, it just says so.
+    The probe asks for one contract's prints over the last day — an empty
+    result outside market hours still proves the entitlement.
+    """
+    from qqq_alpha.brain.decider import next_expiry
+    from qqq_alpha.data.chain import LiveChainPricer
+    from qqq_alpha.data.massive import MassiveClient
+
+    try:
+        pricer = LiveChainPricer(settings)
+        expiry = next_expiry(datetime.now(MARKET_TZ).date(), 0)
+        if not await pricer.refresh(expiry, force=True) or pricer.snapshot is None:
+            return CheckResult(
+                "شريط صفقات الأوبشنز", False, "تعذر جلب سلسلة للفحص — سيُعاد فحصه أثناء التشغيل"
+            )
+        probe = next(iter(pricer.snapshot.contracts))
+        async with MassiveClient(settings) as client:
+            await client.option_trades_since(probe, datetime.now(MARKET_TZ) - timedelta(days=1))
+    except Exception as exc:  # noqa: BLE001
+        message = str(exc)
+        if "403" in message or "NOT_AUTHORIZED" in message.upper():
+            return CheckResult(
+                "شريط صفقات الأوبشنز",
+                False,
+                "غير مشمول في الباقة — التدفق المؤسسي سيبقى غير متاح (المحرك يعمل رغم ذلك)",
+            )
+        return CheckResult("شريط صفقات الأوبشنز", False, f"فشل الفحص: {message}"[:200])
+
+    return CheckResult(
+        "شريط صفقات الأوبشنز", True, "متاح — كشف الـ sweeps/blocks المؤسسي مفعّل"
+    )
+
+
 async def _check_stream(settings: Settings) -> CheckResult:
     """Authenticate only. A full data test is meaningless outside market hours."""
     import json
@@ -222,7 +258,12 @@ async def run_preflight(settings: Settings, include_brain: bool = True) -> Prefl
         # nothing else can be tested without credentials
         return report
 
-    checks = [_check_market_data(settings), _check_option_chain(settings), _check_stream(settings)]
+    checks = [
+        _check_market_data(settings),
+        _check_option_chain(settings),
+        _check_flow_tape(settings),
+        _check_stream(settings),
+    ]
     if include_brain:
         checks.append(_check_brain(settings))
     checks.append(_check_delivery(settings))

@@ -34,6 +34,7 @@ from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
 from qqq_alpha.learning import analyse, propose
 from qqq_alpha.learning import apply_lesson as apply_pending_lesson
+from qqq_alpha.live.flowfeed import LiveFlowFeed
 from qqq_alpha.live.notifier import ConsoleNotifier, Notifier
 from qqq_alpha.live.preflight import run_preflight
 from qqq_alpha.live.state import SessionState, StateStore
@@ -131,8 +132,16 @@ class LiveEngine:
         self._command_task: asyncio.Task | None = None
         self._dashboard_task: asyncio.Task | None = None
         # "price of the day": where options money is concentrating, for QQQ and
-        # the leaders — the closest thing to flow the current data plan offers
+        # the leaders — context even when the tape itself is quiet
         self.pulse = PulseTracker(self.settings)
+        # the real tape: near-the-money prints classified into sweeps/blocks.
+        # Only meaningful with a live chain; disables itself if the plan
+        # turns out not to cover the trades endpoint
+        self.flow_feed = (
+            LiveFlowFeed(self.settings, self.pricer)
+            if isinstance(self.pricer, LiveChainPricer)
+            else None
+        )
 
     # ------------------------------------------------------------------
     def _persist(self) -> None:
@@ -302,10 +311,18 @@ class LiveEngine:
         self.status.realized_pct = self.manager.realized_return_pct
 
     async def _maybe_decide(self, bar: Bar) -> None:
+        # the tape is polled before the snapshot is built because attention
+        # wakes on flow urgency — a sweep barrage must be able to trigger a
+        # look even when price itself is quiet
+        flow_events: list | None = None
+        if self.flow_feed is not None and not self.flow_feed.disabled:
+            flow_events = await self.flow_feed.poll(bar.ts, bar.close)
+
         quality = inspect_session(self.session_bars)
         snapshot = self.builder.build(
             session_bars=self.session_bars,
             leader_bars=self.leader_bars or None,
+            flow_events=flow_events,
             now=bar.ts,
             quality=quality,
         )

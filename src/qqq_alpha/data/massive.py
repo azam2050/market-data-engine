@@ -275,6 +275,26 @@ class MassiveClient:
             for row in payload.get("results") or []
         ]
 
+    async def option_trades_since(
+        self, occ_symbol: str, since: datetime, limit: int = 5_000
+    ) -> list[dict[str, Any]]:
+        """Raw prints for one contract since a timestamp — the live flow feed's
+        incremental pull. Returns raw rows: converting a print into a classified
+        FlowEvent needs the contract's current quote, which the caller holds.
+
+        Requires a plan with options trades (Developer tier or above).
+        """
+        payload = await self._get(
+            f"/v3/trades/{occ_symbol}",
+            {
+                "timestamp.gte": int(since.timestamp() * 1_000_000_000),
+                "limit": min(limit, 50_000),
+                "sort": "timestamp",
+                "order": "asc",
+            },
+        )
+        return payload.get("results") or []
+
     async def option_trades(
         self, occ_symbol: str, day: date, limit: int = 50_000
     ) -> list[FlowEvent]:

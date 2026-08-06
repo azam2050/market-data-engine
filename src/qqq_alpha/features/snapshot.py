@@ -73,7 +73,10 @@ class SnapshotBuilder:
         }
 
         lvl = levels.compute_levels(session_bars, prior_day, overnight_high, overnight_low)
-        flow = summarize_flow(flow_events or [], now) if flow_events else None
+        # None means "no tape on this run" and renders as UNAVAILABLE; an empty
+        # list means "tape is live but quiet" and renders as zeros — the brain
+        # must be able to tell those apart
+        flow = summarize_flow(flow_events, now) if flow_events is not None else None
 
         leaders_last: list[Bar] = []
         leader_alignment = 0.0
