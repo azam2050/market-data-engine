@@ -434,3 +434,52 @@ def test_an_infeasible_decline_is_never_queued_as_missed(settings, tmp_path):
 
     engine._queue_missed_check(snapshot, ["daily_trade_cap: 2/2"])
     assert len(engine._pending_missed) == 1
+
+
+def test_prompt_renders_recalled_trades_from_durable_memory():
+    """Regression: at boot and at each session roll the engine reloads recent
+    trades as RecalledTrade summaries, not full Trade objects. Assuming the
+    full shape crashed the engine mid-session the first day the memory
+    actually had a trade to reload."""
+    from qqq_alpha.brain.prompts import build_user_prompt
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+    from qqq_alpha.memory import RecalledTrade
+
+    bars = synthetic_session("QQQ", DAY, seed=12)
+    snapshot = SnapshotBuilder("QQQ").build(bars[:120])
+    recalled = RecalledTrade(
+        trade_id="t1",
+        opened_at="2026-08-06T19:08:00+00:00",
+        direction="CALL",
+        return_pct=-47.7,
+        max_favorable_pct=7.0,
+        confidence=6,
+        regime="VOLATILE_CHOP",
+        thesis="دخول جريء",
+        exit_reason="stop_hit",
+    )
+    prompt = build_user_prompt(snapshot, Playbook(), recent_trades=[recalled])
+    assert "RECENT TRADES" in prompt
+    assert "-47.7" in prompt
+
+
+@pytest.mark.asyncio
+async def test_a_broken_prompt_becomes_a_safe_pass_not_a_crash(settings):
+    """Anything that breaks while assembling the decision context must degrade
+    to a PASS the operator can read about, never kill the engine."""
+    from qqq_alpha.brain.decider import AIDecider
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    bars = synthetic_session("QQQ", DAY, seed=12)
+    snapshot = SnapshotBuilder("QQQ").build(bars[:120])
+
+    decision = await AIDecider(settings).decide(
+        snapshot=snapshot,
+        playbook=Playbook(),
+        open_trades=[],
+        recent_trades=[object()],  # wrong shape, guaranteed to break rendering
+        rail_warnings=[],
+        attention_note="",
+    )
+    assert decision.action is Action.PASS
+    assert "فشل تقني" in decision.thesis

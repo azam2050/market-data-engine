@@ -261,8 +261,14 @@ def build_user_prompt(
         sections.append("=== CURRENTLY OPEN ===\n" + _compact(rows))
 
     if recent_trades:
+        # two shapes arrive here: live Trade objects, and the RecalledTrade
+        # summaries the engine reloads from durable memory at boot and at each
+        # session roll. Assuming the full shape crashed the engine mid-session
+        # the first day the memory actually had a trade to reload.
         rows = [
-            {
+            t.as_prompt_row()
+            if hasattr(t, "as_prompt_row")
+            else {
                 "opened_at": t.opened_at,
                 "contract": t.occ_symbol,
                 "result_pct": t.return_pct,

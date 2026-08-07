@@ -49,6 +49,9 @@ WARMUP_BARS = 30
 # how long to wait after a decline before pricing forward what was missed —
 # long enough to catch the move, short enough to resolve within the session
 MISSED_LOOKAHEAD_MINUTES = 60
+# a lone bad bar is skipped and logged; this many in a row is not a glitch,
+# it is a broken engine that should stop loudly instead of trading blind
+MAX_CONSECUTIVE_BAR_FAILURES = 10
 
 
 @dataclass
@@ -221,10 +224,34 @@ class LiveEngine:
         self._refresh_recent()
         await self._warm_start()
 
+        # one bad bar must not kill a desk with open positions: the failure is
+        # logged and the next bar gets a clean attempt. Only a persistent
+        # streak — a systemic problem, not a glitch — stops the engine, and a
+        # restart-per-crash loop (as produced by the RecalledTrade bug) is
+        # strictly worse than skipping a minute.
+        consecutive_failures = 0
         try:
             async for bar in stream.bars():
                 self.status.reconnects = stream.reconnects
-                await self._on_bar(bar)
+                try:
+                    await self._on_bar(bar)
+                    consecutive_failures = 0
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    consecutive_failures += 1
+                    self.status.last_error = f"bar handling: {exc}"
+                    log.exception(
+                        "bar handling failed (%d in a row)", consecutive_failures
+                    )
+                    if consecutive_failures == 1:
+                        # first of a streak only — a broken minute is worth one
+                        # message, not one per minute
+                        await self.notifier.note(
+                            f"⚠️ خطأ في معالجة شمعة — المحرك مستمر ({exc})"
+                        )
+                    if consecutive_failures >= MAX_CONSECUTIVE_BAR_FAILURES:
+                        raise
         except asyncio.CancelledError:
             await self._shutdown()
             raise

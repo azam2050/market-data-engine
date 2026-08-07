@@ -94,17 +94,31 @@ class AIDecider:
         if not self.settings.anthropic_model:
             raise RuntimeError("ANTHROPIC_MODEL is not configured (see .env.example)")
 
-        prompt = build_user_prompt(
-            snapshot=snapshot,
-            playbook=playbook,
-            open_trades=open_trades,
-            recent_trades=recent_trades,
-            rail_warnings=rail_warnings,
-            attention_note=attention_note,
-            similar_trades=similar_trades,
-            chain=chain,
-            options_pulse=options_pulse,
-        )
+        # assembling the prompt touches every data shape the engine produces;
+        # a bug in any of them must degrade to a safe PASS, not kill the
+        # engine mid-session — that exact crash has happened once already
+        try:
+            prompt = build_user_prompt(
+                snapshot=snapshot,
+                playbook=playbook,
+                open_trades=open_trades,
+                recent_trades=recent_trades,
+                rail_warnings=rail_warnings,
+                attention_note=attention_note,
+                similar_trades=similar_trades,
+                chain=chain,
+                options_pulse=options_pulse,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception("prompt assembly failed")
+            return Decision(
+                ts=snapshot.ts,
+                action=Action.PASS,
+                thesis=(
+                    f"فشل تقني في تجهيز سياق القرار ({type(exc).__name__}: {exc}) "
+                    "— تم تجاوز هذه اللحظة بأمان، راجع السجلات"
+                ),
+            )
 
         client = self._get_client()
         try:
