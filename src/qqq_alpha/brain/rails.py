@@ -30,6 +30,23 @@ from qqq_alpha.domain import (
 
 MAX_ACCEPTABLE_SPREAD_PCT = 15.0
 
+# blocks that mean the trade was physically impossible — market closed, data
+# broken — as opposed to a policy choice (caps, circuit breaker) or a judgement
+# call. Pricing a "missed opportunity" behind one of these is fiction: nobody
+# can buy an option before the open, so nothing was missed. In production this
+# fiction fed the learning loop a whole bucket of pre-open "misses" and got it
+# to propose loosening entry confidence over trades that never could have existed.
+INFEASIBLE_BLOCK_PREFIXES = ("outside_session", "stale_data", "unusable_data")
+
+
+def infeasible(blocks: list[str]) -> bool:
+    """True when a decline was impossibility, not caution."""
+    return any(
+        block.startswith(prefix)
+        for block in blocks
+        for prefix in INFEASIBLE_BLOCK_PREFIXES
+    )
+
 
 @dataclass
 class DayState:

@@ -380,3 +380,21 @@ def test_missed_opportunity_findings_do_not_wait_for_closed_trades(tmp_path):
     report = analyse(memory)  # zero closed trades on record
     assert report.total_trades == 0
     assert any(f.key.startswith("missed:regime:") for f in report.findings)
+
+
+def test_infeasible_missed_rows_are_purged_on_open(tmp_path):
+    """A pre-open "miss" is fiction — nobody can buy an option before the open.
+
+    Early builds stored them anyway, and the learning loop proposed loosening
+    entry confidence over trades that never could have existed. The purge runs
+    on every open, so an existing poisoned database heals itself on restart.
+    """
+    path = tmp_path / "memory.db"
+    memory = Memory(path)
+    memory.remember_missed(_missed(blocked=["outside_session: 09:29 ET"]))
+    memory.remember_missed(_missed(blocked=["daily_trade_cap: 2/2"]))  # policy: keep
+    memory.remember_missed(_missed())  # the AI's own PASS: keep
+    assert memory.missed_count() == 3
+
+    reopened = Memory(path)
+    assert reopened.missed_count() == 2

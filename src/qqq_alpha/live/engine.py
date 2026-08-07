@@ -22,7 +22,7 @@ from datetime import UTC, date, datetime
 from qqq_alpha.brain.attention import AttentionEngine
 from qqq_alpha.brain.decider import Decider, next_expiry, occ_symbol
 from qqq_alpha.brain.playbook import Playbook
-from qqq_alpha.brain.rails import DayState, SafetyRails
+from qqq_alpha.brain.rails import DayState, SafetyRails, infeasible
 from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, Settings
 from qqq_alpha.data.chain import LiveChainPricer
 from qqq_alpha.data.massive import MassiveClient
@@ -430,9 +430,11 @@ class LiveEngine:
 
         Scoring happens on a delay, not here: at the moment of the decision we
         do not yet know what the market did next. A flat or ambiguous bias is
-        skipped — there is no "obvious trade" to grade it against.
+        skipped — there is no "obvious trade" to grade it against. So is an
+        infeasible decline (market closed, broken data): a trade that could not
+        exist was not missed, and counting it poisons the learning loop.
         """
-        if abs(snapshot.net_bias) < 0.2:
+        if abs(snapshot.net_bias) < 0.2 or infeasible(blocked_by):
             return
         self._pending_missed.append(
             {

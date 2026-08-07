@@ -213,3 +213,15 @@ def test_trade_manager_stops_and_targets():
     assert update is not None and "closed:stop_hit" in update.note
     assert not trade.is_open
     assert trade.return_pct == -45.0
+
+
+def test_infeasible_separates_impossibility_from_caution():
+    from qqq_alpha.brain.rails import infeasible
+
+    assert infeasible(["outside_session: 09:29 ET"])
+    assert infeasible(["stale_data: last bar is 999s old"])
+    assert infeasible(["unusable_data: gaps"])
+    # policy blocks are choices, and choices deserve to be graded
+    assert not infeasible(["daily_trade_cap: 2/2"])
+    assert not infeasible(["circuit_breaker: day at -40.0%"])
+    assert not infeasible([])

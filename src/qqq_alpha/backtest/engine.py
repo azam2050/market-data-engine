@@ -20,7 +20,7 @@ from datetime import date, datetime
 from qqq_alpha.brain.attention import AttentionEngine
 from qqq_alpha.brain.decider import Decider, next_expiry, occ_symbol
 from qqq_alpha.brain.playbook import Playbook
-from qqq_alpha.brain.rails import DayState, SafetyRails
+from qqq_alpha.brain.rails import DayState, SafetyRails, infeasible
 from qqq_alpha.config import Settings
 from qqq_alpha.data.pricing import OptionPricer
 from qqq_alpha.data.quality import inspect_session
@@ -326,10 +326,11 @@ class Backtester:
         an estimate, not a promise — but a consistently large number here means
         the engine is too cautious, and that is worth knowing. Covers both a rail
         block and the AI's own PASS — a caller passes an empty ``blocked_by`` for
-        the latter.
+        the latter. An infeasible decline (market closed, broken data) is not
+        recorded at all: a trade that could not exist was not missed.
         """
         bias = snapshot.net_bias
-        if abs(bias) < 0.2:
+        if abs(bias) < 0.2 or infeasible(blocked_by):
             return
 
         now, spot = snapshot.ts, snapshot.underlying.close

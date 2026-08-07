@@ -213,7 +213,28 @@ class Memory:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as conn:
             conn.executescript(SCHEMA)
+            self._purge_infeasible_missed(conn)
             conn.commit()
+
+    @staticmethod
+    def _purge_infeasible_missed(conn: sqlite3.Connection) -> None:
+        """Remove "missed opportunities" that were never opportunities.
+
+        Early builds recorded rail declines even when the block meant the trade
+        was impossible (market closed, broken data). Those rows fed the learning
+        loop a bucket of pre-open "misses" and got it to propose loosening entry
+        confidence over trades nobody could have taken. Idempotent, runs on
+        every open, and the writers no longer produce such rows.
+        """
+        from qqq_alpha.brain.rails import INFEASIBLE_BLOCK_PREFIXES
+
+        for prefix in INFEASIBLE_BLOCK_PREFIXES:
+            removed = conn.execute(
+                "DELETE FROM missed_opportunities WHERE blocked_by LIKE ?",
+                (f'%"{prefix}%',),
+            ).rowcount
+            if removed:
+                log.info("purged %d infeasible '%s' missed rows", removed, prefix)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=10.0)

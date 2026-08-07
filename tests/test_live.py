@@ -409,3 +409,28 @@ def test_status_is_serialisable(settings, tmp_path):
 
 def _unused(_: timedelta) -> None:  # pragma: no cover
     return None
+
+
+def test_an_infeasible_decline_is_never_queued_as_missed(settings, tmp_path):
+    """Nobody can buy an option before the open — a pre-open rail block is not
+    a missed opportunity, and pricing it forward poisons the learning loop."""
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    engine = LiveEngine(
+        settings=settings,
+        decider=_AlwaysPassDecider(),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=NullNotifier(),
+    )
+    bars = synthetic_session("QQQ", DAY, seed=12, trend=0.03, volatility=0.002)
+    snapshot = SnapshotBuilder("QQQ").build(bars[:120])
+    for obs in snapshot.observations:
+        obs.score = 1.0  # a strong bias, so only the block reason decides
+
+    engine._queue_missed_check(snapshot, ["outside_session: 09:29 ET"])
+    assert engine._pending_missed == []
+
+    engine._queue_missed_check(snapshot, ["daily_trade_cap: 2/2"])
+    assert len(engine._pending_missed) == 1
