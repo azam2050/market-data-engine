@@ -9,13 +9,15 @@
 #
 # version is bumped by the learning loop, never by hand.
 # =============================================================================
-version: 2
-updated: "2026-08-07"
+version: 3
+updated: "2026-08-11"
 notes: >
-  Seed playbook plus the first live-evidence entries. The 2026-08-06 session
-  (15 consecutive WAIT/PASS through a V-reversal rally, then one losing
-  power-hour chase) is baked into CAPITULATION_REVERSAL, PERFECT_ENTRY_TRAP
-  and LATE_COMPENSATION_CHASE.
+  Seed playbook plus live-evidence entries. The 2026-08-06 session (15
+  consecutive WAIT/PASS through a V-reversal rally, then one losing power-hour
+  chase) is baked into CAPITULATION_REVERSAL, PERFECT_ENTRY_TRAP and
+  LATE_COMPENSATION_CHASE. v3 adds EXHAUSTED_EXTREME_ENTRY after the second
+  real trade (2026-08-10) died the same way as the first, mirrored: late
+  confirmation taken at the session extreme, stopped within 7 minutes.
 
 mission: >
   Find asymmetric intraday setups on QQQ options where a realistic move in the
@@ -117,6 +119,20 @@ caution:
       against the LATE_DAY_0DTE caution — stopped out in 6 minutes at -47.7%.
       If the day was missed, missing it is the cheaper outcome; a 1DTE entry or
       no entry both beat a power-hour 0DTE chase.
+  - id: EXHAUSTED_EXTREME_ENTRY
+    condition: >
+      The confirmation you waited for arrives only when price is AT the session
+      extreme, RSI(15m) is beyond 25/75, and/or institutional flow is leaning
+      the other way
+    note: >
+      Late confirmation at an extreme is not confirmation — it is the crowd's
+      last push before the turn. Both real trades so far died exactly this way,
+      each stopped within 7 minutes at ~-47%: 2026-08-06 bought the power-hour
+      top after refusing entries all day; 2026-08-10 sold the opening-flush low
+      at RSI(15m) 24, three minutes after writing that institutional CALL sweeps
+      (+2.85M net) were hunting that very bottom. If the setup is real, the
+      retest after the extreme offers a better fill — demand the retest, or
+      trade the reversal the flow is voting for instead of fighting it.
 
 # ---------------------------------------------------------------------------
 # Contract selection preferences.
