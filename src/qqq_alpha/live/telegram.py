@@ -249,6 +249,13 @@ class TelegramCommandListener:
                     "disable_web_page_preview": True,
                 },
             )
+            if response.status_code != 200:
+                # Telegram's refusal reason (blocked bot, bad chat id, …)
+                # must land in the logs — a bare False hides the funnel break
+                log.warning(
+                    "telegram reply to %s rejected (%s): %s",
+                    chat_id, response.status_code, response.text[:200]
+                )
             return response.status_code == 200
         except (httpx.TransportError, httpx.TimeoutException) as exc:
             log.warning("telegram reply to %s failed (%s)", chat_id, exc)

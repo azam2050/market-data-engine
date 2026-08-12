@@ -698,6 +698,10 @@ class LiveEngine:
 
         now = datetime.now(UTC)
         row = self.memory.subscriber(message.chat_id)
+        log.info(
+            "inbound from non-operator chat %s (%s): %r",
+            message.chat_id, message.username or message.first_name, message.text
+        )
 
         if row is None:
             if not message.text.lower().startswith("/start"):
@@ -709,14 +713,17 @@ class LiveEngine:
                 joined_at=now,
                 expires_at=now + timedelta(days=self.settings.trial_days),
             )
-            await self.commands.send(
+            delivered = await self.commands.send(
                 message.chat_id, welcome_message(self.settings.trial_days)
             )
             active = len(self.memory.active_subscriber_ids(now))
             name = message.username or message.first_name or message.chat_id
-            await self.notifier.note(
-                f"👤 مشترك تجريبي جديد: {name} — النشطون الآن: {active}"
-            )
+            note = f"👤 مشترك تجريبي جديد: {name} — النشطون الآن: {active}"
+            if not delivered:
+                # the sign-up worked but Telegram refused the welcome — the
+                # operator must hear about it, or the funnel fails silently
+                note += "\n⚠️ لكن تعذر إرسال رسالة الترحيب له — تحقق من سجلات Railway"
+            await self.notifier.note(note)
             return
 
         expires = datetime.fromisoformat(row["expires_at"])
@@ -748,7 +755,22 @@ class LiveEngine:
 
     async def _handle_command(self, text: str) -> None:
         parts = text.strip().split()
+        if parts and parts[0].strip().lower() in {"مشتركين", "subscribers"}:
+            counts = self.memory.subscriber_counts()
+            await self.notifier.note(
+                f"👥 المشتركون — تجريبي نشط: {counts.get('trial', 0)}"
+                f" | منتهي: {counts.get('expired', 0)}"
+            )
+            return
         if len(parts) != 2 or not parts[1].isdigit():
+            # any other operator text gets an answer on purpose: it is the
+            # operator's one-tap proof that the inbound path is alive at all —
+            # for weeks a stale webhook made replies vanish with zero symptom
+            await self.notifier.note(
+                "✅ وصلتني رسالتك — استقبال الرسائل شغال.\n"
+                'الأوامر: "موافق <رقم>" / "رفض <رقم>" لقرارات الدروس، '
+                '"مشتركين" لعدد المشتركين.'
+            )
             return
 
         verb, lesson_id = parts[0].strip().lower(), int(parts[1])

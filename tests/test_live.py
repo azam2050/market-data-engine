@@ -604,3 +604,44 @@ async def test_strangers_without_start_are_ignored(settings, tmp_path):
 
     assert engine.memory.subscriber("888") is None
     assert engine.commands.sent == []
+
+
+@pytest.mark.asyncio
+async def test_any_operator_message_gets_a_reception_receipt(settings, tmp_path):
+    """The operator's one-tap health check: text the bot anything, get an
+    answer. Silence here once hid a dead inbound path for weeks."""
+    engine = _subscriber_engine(settings, tmp_path)
+    await engine._handle_command("هل انت شغال؟")
+
+    assert any("استقبال الرسائل شغال" in note for note in engine.notifier.notes)
+
+
+@pytest.mark.asyncio
+async def test_operator_can_ask_for_subscriber_counts(settings, tmp_path):
+    from datetime import UTC
+
+    engine = _subscriber_engine(settings, tmp_path)
+    now = datetime(2026, 8, 12, tzinfo=UTC)
+    engine.memory.add_subscriber("111", "a", "A", now, now + timedelta(days=30))
+
+    await engine._handle_command("مشتركين")
+
+    assert any("تجريبي نشط: 1" in note for note in engine.notifier.notes)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_welcome_is_escalated_to_the_operator(settings, tmp_path):
+    """Registration succeeding while the welcome bounces is a silent funnel
+    break — the operator note must carry the warning."""
+    from qqq_alpha.live.telegram import InboundMessage
+
+    engine = _subscriber_engine(settings, tmp_path)
+
+    async def refuse(chat_id, text):
+        return False
+
+    engine.commands.send = refuse
+    await engine._handle_subscriber(InboundMessage("444", "/start", username="friend"))
+
+    assert engine.memory.subscriber("444") is not None  # sign-up still counted
+    assert any("تعذر إرسال رسالة الترحيب" in note for note in engine.notifier.notes)
