@@ -530,3 +530,77 @@ async def test_todays_decisions_accumulate_and_reset_at_rollover(settings, tmp_p
     next_day = synthetic_session("QQQ", date(2026, 3, 3), seed=9)[0]
     await engine._on_bar(next_day)
     assert engine._today_decisions == []  # yesterday's plans are not today's
+
+
+class _FakeCommands:
+    """Captures direct replies instead of hitting Telegram."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+
+    async def send(self, chat_id: str, text: str) -> bool:
+        self.sent.append((chat_id, text))
+        return True
+
+
+def _subscriber_engine(settings, tmp_path) -> LiveEngine:
+    scoped = settings.model_copy(
+        update={"trial_days": 30, "post_trial_channel_url": "https://t.me/qqq_free"}
+    )
+    engine = LiveEngine(
+        settings=scoped,
+        decider=HeuristicDecider(scoped),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=NullNotifier(),
+    )
+    engine.commands = _FakeCommands()
+    return engine
+
+
+@pytest.mark.asyncio
+async def test_start_registers_a_trial_and_welcomes(settings, tmp_path):
+    from qqq_alpha.live.telegram import InboundMessage
+
+    engine = _subscriber_engine(settings, tmp_path)
+    await engine._handle_subscriber(InboundMessage("555", "/start", username="trader1"))
+
+    row = engine.memory.subscriber("555")
+    assert row is not None and row["status"] == "trial"
+    assert engine.commands.sent and engine.commands.sent[0][0] == "555"
+    assert "30" in engine.commands.sent[0][1]  # the trial length is stated
+    # the operator is told about the new sign-up
+    assert any("مشترك" in note for note in engine.notifier.notes)
+
+
+@pytest.mark.asyncio
+async def test_expired_subscriber_is_pointed_at_the_next_channel(settings, tmp_path):
+    from datetime import UTC
+
+    from qqq_alpha.live.telegram import InboundMessage
+
+    engine = _subscriber_engine(settings, tmp_path)
+    long_ago = datetime(2026, 1, 1, tzinfo=UTC)
+    engine.memory.add_subscriber("777", "old", "Old", long_ago, long_ago + timedelta(days=30))
+
+    await engine._expire_subscribers()
+
+    assert engine.memory.subscriber("777")["status"] == "expired"
+    assert any("t.me/qqq_free" in text for _, text in engine.commands.sent)
+
+    # and if they message again later, they get the channel link, not signals
+    engine.commands.sent.clear()
+    await engine._handle_subscriber(InboundMessage("777", "/start"))
+    assert any("t.me/qqq_free" in text for _, text in engine.commands.sent)
+
+
+@pytest.mark.asyncio
+async def test_strangers_without_start_are_ignored(settings, tmp_path):
+    from qqq_alpha.live.telegram import InboundMessage
+
+    engine = _subscriber_engine(settings, tmp_path)
+    await engine._handle_subscriber(InboundMessage("888", "hello?"))
+
+    assert engine.memory.subscriber("888") is None
+    assert engine.commands.sent == []

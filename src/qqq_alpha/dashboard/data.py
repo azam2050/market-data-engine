@@ -75,7 +75,10 @@ def pending_lessons(settings: Settings) -> list[dict[str, Any]]:
 
 
 def memory_counts(settings: Settings) -> dict[str, int]:
-    return Memory(settings.data_dir / "memory.db").counts()
+    memory = Memory(settings.data_dir / "memory.db")
+    counts = memory.counts()
+    counts["subscribers"] = memory.subscriber_counts()["trial"]
+    return counts
 
 
 def daily_report(settings: Settings, day: date) -> ReviewStats:

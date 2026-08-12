@@ -434,3 +434,27 @@ def test_a_rejected_lesson_stays_rejected(tmp_path):
         memory.set_lesson_status(lesson_id, "rejected")
 
     assert propose(memory, analyse(memory)) == []
+
+
+def test_subscriber_trial_lifecycle(tmp_path):
+    """Sign-up, broadcast list, expiry — and /start never resets the clock."""
+    from datetime import UTC
+
+    memory = Memory(tmp_path / "memory.db")
+    now = datetime(2026, 8, 12, 10, 0, tzinfo=UTC)
+    expires = now + timedelta(days=30)
+
+    assert memory.add_subscriber("111", "abu_azam", "Azam", now, expires)
+    # a second /start must not extend the trial
+    assert not memory.add_subscriber("111", "abu_azam", "Azam", now, expires + timedelta(days=99))
+    assert memory.subscriber("111")["expires_at"] == expires.isoformat()
+
+    assert memory.active_subscriber_ids(now + timedelta(days=29)) == ["111"]
+    assert memory.active_subscriber_ids(now + timedelta(days=31)) == []
+
+    due = memory.expire_due_subscribers(now + timedelta(days=31))
+    assert [row["chat_id"] for row in due] == ["111"]
+    assert memory.subscriber("111")["status"] == "expired"
+    # already expired: not returned twice, so the farewell is sent only once
+    assert memory.expire_due_subscribers(now + timedelta(days=32)) == []
+    assert memory.subscriber_counts() == {"trial": 0, "expired": 1}

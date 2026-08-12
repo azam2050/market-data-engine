@@ -17,11 +17,17 @@ import asyncio
 import contextlib
 import html
 import logging
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import httpx
 
 from qqq_alpha.domain import Trade, TradeUpdate
-from qqq_alpha.live.notifier import format_signal, format_update
+from qqq_alpha.live.notifier import DISCLAIMER, format_signal, format_update
+
+if TYPE_CHECKING:
+    from qqq_alpha.memory import Memory
 
 log = logging.getLogger(__name__)
 
@@ -50,13 +56,13 @@ class TelegramNotifier:
         self.silent_notes = silent_notes
         self.failures = 0
 
-    async def _post(self, text: str, silent: bool = False) -> bool:
+    async def _post(self, text: str, silent: bool = False, chat_id: str | None = None) -> bool:
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=20.0)
 
         url = f"{TELEGRAM_API}/bot{self.token}/sendMessage"
         payload = {
-            "chat_id": self.chat_id,
+            "chat_id": chat_id or self.chat_id,
             "text": text,
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
@@ -113,10 +119,12 @@ class TelegramNotifier:
             chunks.append("\n".join(current))
         return chunks
 
-    async def _send(self, text: str, silent: bool = False) -> bool:
+    async def _send(
+        self, text: str, silent: bool = False, chat_id: str | None = None
+    ) -> bool:
         ok = True
         for chunk in self._chunks(f"<pre>{html.escape(text)}</pre>"):
-            ok = await self._post(chunk, silent=silent) and ok
+            ok = await self._post(chunk, silent=silent, chat_id=chat_id) and ok
         return ok
 
     # ------------------------------------------------------------------
@@ -137,14 +145,23 @@ class TelegramNotifier:
             self._client = None
 
 
-class TelegramCommandListener:
-    """Long-polls for messages from the operator so lessons can be approved
-    from a phone — the engine already established that a terminal is not
-    something to assume the operator has.
+@dataclass
+class InboundMessage:
+    """One private message received by the bot, from anyone."""
 
-    Only messages from the configured chat are honoured. That is enough
-    authorization here: this is a single-operator bot, not a public one, and
-    the chat id was set up by the operator during the Railway walkthrough.
+    chat_id: str
+    text: str
+    username: str = ""
+    first_name: str = ""
+
+
+class TelegramCommandListener:
+    """Long-polls the bot's inbox.
+
+    Two kinds of sender arrive on the same stream: the operator (lesson
+    approvals, from the configured chat) and would-be subscribers pressing
+    /start. The listener reports both and the engine routes — authorization
+    for operator commands is enforced there by chat id, never here.
     """
 
     def __init__(self, token: str, chat_id: str, client: httpx.AsyncClient | None = None):
@@ -154,8 +171,8 @@ class TelegramCommandListener:
         self._owns_client = client is None
         self._offset = 0
 
-    async def poll(self, timeout: int = 25) -> list[str]:
-        """Block up to ``timeout`` seconds, return any new command texts."""
+    async def poll(self, timeout: int = 25) -> list[InboundMessage]:
+        """Block up to ``timeout`` seconds, return any new inbound messages."""
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=timeout + 10.0)
 
@@ -170,20 +187,112 @@ class TelegramCommandListener:
             await asyncio.sleep(2.0)  # do not spin on a persistent error
             return []
 
-        commands: list[str] = []
+        messages: list[InboundMessage] = []
         for update in response.json().get("result", []):
             self._offset = update["update_id"] + 1
             message = update.get("message") or {}
             chat = message.get("chat") or {}
+            sender = message.get("from") or {}
             text = message.get("text")
-            if text and str(chat.get("id")) == self.chat_id:
-                commands.append(text.strip())
-        return commands
+            # only private chats: the bot has no business reading groups
+            if text and chat.get("id") is not None and chat.get("type", "private") == "private":
+                messages.append(
+                    InboundMessage(
+                        chat_id=str(chat["id"]),
+                        text=text.strip(),
+                        username=sender.get("username") or "",
+                        first_name=sender.get("first_name") or "",
+                    )
+                )
+        return messages
+
+    async def send(self, chat_id: str, text: str) -> bool:
+        """A direct reply to one chat — welcomes, trial status, farewells."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=20.0)
+        url = f"{TELEGRAM_API}/bot{self.token}/sendMessage"
+        try:
+            response = await self._client.post(
+                url,
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "disable_web_page_preview": True,
+                },
+            )
+            return response.status_code == 200
+        except (httpx.TransportError, httpx.TimeoutException) as exc:
+            log.warning("telegram reply to %s failed (%s)", chat_id, exc)
+            return False
 
     async def aclose(self) -> None:
         if self._owns_client and self._client is not None:
             await self._client.aclose()
             self._client = None
+
+
+class BroadcastNotifier(TelegramNotifier):
+    """The operator's chat plus every active trial subscriber.
+
+    Signals and trade updates fan out to the whole list; system notes
+    (preflight, errors, daily reviews) stay operator-only — a subscriber pays
+    for trades, not for plumbing. One failed recipient never blocks the rest.
+    """
+
+    def __init__(
+        self,
+        token: str,
+        admin_chat_id: str,
+        memory: Memory,
+        client: httpx.AsyncClient | None = None,
+        silent_notes: bool = True,
+    ):
+        super().__init__(token, admin_chat_id, client=client, silent_notes=silent_notes)
+        self.memory = memory
+
+    async def _broadcast(self, text: str, silent: bool) -> None:
+        await self._send(text, silent=silent)  # the operator, always first
+        for chat_id in self.memory.active_subscriber_ids(datetime.now(UTC)):
+            if chat_id == self.chat_id:
+                continue
+            try:
+                await self._send(text, silent=silent, chat_id=chat_id)
+            except Exception:  # noqa: BLE001 - one blocked user must not stop the list
+                log.exception("broadcast to %s failed", chat_id)
+            await asyncio.sleep(0.05)  # stay under Telegram's ~30 msg/s ceiling
+
+    async def signal(self, trade: Trade, delayed: bool) -> None:
+        await self._broadcast(format_signal(trade, delayed), silent=False)
+
+    async def update(self, trade: Trade, update: TradeUpdate, delayed: bool) -> None:
+        noteworthy = update.note.startswith(("closed:", "target:"))
+        await self._broadcast(format_update(trade, update, delayed), silent=not noteworthy)
+
+
+def welcome_message(trial_days: int) -> str:
+    return (
+        "أهلاً بك في QQQ Alpha 👋\n\n"
+        f"تم تفعيل فترتك التجريبية المجانية لمدة {trial_days} يوماً.\n"
+        "ستصلك توصيات الخيارات الحية على QQQ فور صدورها: العقد، الاتجاه، "
+        "الأهداف، وقف الخسارة، وسبب الدخول كاملاً — ومتابعة كل صفقة حتى إغلاقها.\n\n"
+        f"⚠️ {DISCLAIMER}"
+    )
+
+
+def trial_status_message(days_left: int) -> str:
+    return (
+        f"فترتك التجريبية فعّالة — المتبقي {max(days_left, 0)} يوماً.\n"
+        "التوصيات تصلك تلقائياً فور صدورها، لا يلزمك أي إجراء."
+    )
+
+
+def farewell_message(channel_url: str) -> str:
+    lines = [
+        "انتهت فترتك التجريبية المجانية في QQQ Alpha — شكراً لمتابعتك معنا 🙏",
+    ]
+    if channel_url:
+        lines.append(f"\nللاستمرار ومتابعة الجديد، انضم إلينا هنا:\n{channel_url}")
+    return "\n".join(lines)
 
 
 class FanoutNotifier:

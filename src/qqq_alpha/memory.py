@@ -100,6 +100,18 @@ CREATE TABLE IF NOT EXISTS lessons (
     key         TEXT
 );
 
+-- trial subscribers: anyone who /started the bot. Durable, because cutting a
+-- paying-funnel trial short (or extending it forever) on every redeploy is
+-- exactly the kind of silent bug the volume outage already taught us about.
+CREATE TABLE IF NOT EXISTS subscribers (
+    chat_id     TEXT PRIMARY KEY,
+    username    TEXT,
+    first_name  TEXT,
+    joined_at   TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'trial'
+);
+
 -- setups the engine declined (rail-blocked or the AI's own PASS), priced
 -- forward after the fact. Without this table the engine can only grade its
 -- winners and losers, never its caution.
@@ -575,6 +587,77 @@ class Memory:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    # ------------------------------------------------------------------
+    def add_subscriber(
+        self,
+        chat_id: str,
+        username: str,
+        first_name: str,
+        joined_at: datetime,
+        expires_at: datetime,
+    ) -> bool:
+        """Register a new trial. Returns False if the chat already signed up —
+        re-/starting the bot must never reset someone's trial clock."""
+        with closing(self._connect()) as conn:
+            cursor = conn.execute(
+                """INSERT OR IGNORE INTO subscribers
+                   (chat_id, username, first_name, joined_at, expires_at)
+                   VALUES (?,?,?,?,?)""",
+                (
+                    str(chat_id),
+                    username,
+                    first_name,
+                    joined_at.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def subscriber(self, chat_id: str) -> dict[str, Any] | None:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT * FROM subscribers WHERE chat_id = ?", (str(chat_id),)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def active_subscriber_ids(self, now: datetime) -> list[str]:
+        """Everyone whose trial is still running — the broadcast list."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT chat_id FROM subscribers WHERE status = 'trial' AND expires_at > ?",
+                (now.isoformat(),),
+            ).fetchall()
+        return [row["chat_id"] for row in rows]
+
+    def expire_due_subscribers(self, now: datetime) -> list[dict[str, Any]]:
+        """Flip finished trials to expired and return them for the farewell."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT * FROM subscribers WHERE status = 'trial' AND expires_at <= ?",
+                (now.isoformat(),),
+            ).fetchall()
+            due = [dict(row) for row in rows]
+            if due:
+                conn.execute(
+                    "UPDATE subscribers SET status = 'expired' "
+                    "WHERE status = 'trial' AND expires_at <= ?",
+                    (now.isoformat(),),
+                )
+                conn.commit()
+        return due
+
+    def subscriber_counts(self) -> dict[str, int]:
+        with closing(self._connect()) as conn:
+            trial = conn.execute(
+                "SELECT COUNT(*) FROM subscribers WHERE status = 'trial'"
+            ).fetchone()[0]
+            expired = conn.execute(
+                "SELECT COUNT(*) FROM subscribers WHERE status = 'expired'"
+            ).fetchone()[0]
+        return {"trial": trial, "expired": expired}
+
+    # ------------------------------------------------------------------
     def applied_lessons(self) -> list[dict[str, Any]]:
         """Operator-approved lessons — the durable half of the live playbook."""
         with closing(self._connect()) as conn:

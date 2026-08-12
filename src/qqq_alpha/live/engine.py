@@ -17,7 +17,7 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from qqq_alpha.brain.attention import AttentionEngine
 from qqq_alpha.brain.decider import Decider, next_expiry, occ_symbol
@@ -235,6 +235,7 @@ class LiveEngine:
             )
 
         await self._restore()
+        await self._expire_subscribers()
         self._refresh_recent()
         await self._warm_start()
 
@@ -617,6 +618,7 @@ class LiveEngine:
         self.status.open_positions = 0
         self._current_day = new_day
         self._persist()
+        await self._expire_subscribers()
         log.info("rolled into session %s", new_day)
 
     # ------------------------------------------------------------------
@@ -658,12 +660,85 @@ class LiveEngine:
         await self.notifier.note("\n".join(lines))
 
     async def _command_loop(self) -> None:
-        """Long-poll Telegram for lesson approve/reject replies, forever."""
+        """Long-poll the bot's inbox forever, routing by sender.
+
+        The operator's chat gets the lesson approve/reject verbs; everyone
+        else is a would-be subscriber. A bad message from a stranger must
+        never take down the loop that also carries operator commands.
+        """
         if self.commands is None:
             return
         while True:
-            for text in await self.commands.poll():
-                await self._handle_command(text)
+            for message in await self.commands.poll():
+                try:
+                    if message.chat_id == str(self.settings.telegram_chat_id):
+                        await self._handle_command(message.text)
+                    else:
+                        await self._handle_subscriber(message)
+                except Exception:  # noqa: BLE001
+                    log.exception("inbound message handling failed")
+
+    async def _handle_subscriber(self, message) -> None:
+        """The trial funnel: /start begins a free month, expiry hands the
+        subscriber to the follow-up channel."""
+        from qqq_alpha.live.telegram import (
+            farewell_message,
+            trial_status_message,
+            welcome_message,
+        )
+
+        if self.settings.trial_days <= 0 or self.commands is None:
+            return  # operator-only bot; strangers are ignored entirely
+
+        now = datetime.now(UTC)
+        row = self.memory.subscriber(message.chat_id)
+
+        if row is None:
+            if not message.text.lower().startswith("/start"):
+                return  # unknown chat, no sign-up intent: stay silent
+            self.memory.add_subscriber(
+                message.chat_id,
+                message.username,
+                message.first_name,
+                joined_at=now,
+                expires_at=now + timedelta(days=self.settings.trial_days),
+            )
+            await self.commands.send(
+                message.chat_id, welcome_message(self.settings.trial_days)
+            )
+            active = len(self.memory.active_subscriber_ids(now))
+            name = message.username or message.first_name or message.chat_id
+            await self.notifier.note(
+                f"👤 مشترك تجريبي جديد: {name} — النشطون الآن: {active}"
+            )
+            return
+
+        expires = datetime.fromisoformat(row["expires_at"])
+        if row["status"] == "trial" and expires > now:
+            days_left = (expires - now).days
+            await self.commands.send(message.chat_id, trial_status_message(days_left))
+        else:
+            await self.commands.send(
+                message.chat_id, farewell_message(self.settings.post_trial_channel_url)
+            )
+
+    async def _expire_subscribers(self) -> None:
+        """Flip finished trials and send each one the follow-up-channel note.
+
+        Called at boot and at every session roll — daily granularity is plenty
+        for a 30-day trial, and both hooks together survive restarts.
+        """
+        if self.commands is None:
+            return
+        from qqq_alpha.live.telegram import farewell_message
+
+        due = self.memory.expire_due_subscribers(datetime.now(UTC))
+        for row in due:
+            await self.commands.send(
+                row["chat_id"], farewell_message(self.settings.post_trial_channel_url)
+            )
+        if due:
+            await self.notifier.note(f"⏳ انتهت الفترة التجريبية لـ {len(due)} مشترك")
 
     async def _handle_command(self, text: str) -> None:
         parts = text.strip().split()

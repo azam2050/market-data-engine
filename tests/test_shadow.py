@@ -131,7 +131,11 @@ async def test_telegram_sends_successfully():
     assert "متأخرة" in seen[0]["text"]
 
 
-async def test_command_listener_only_accepts_the_configured_chat():
+async def test_command_listener_reports_every_sender_with_its_chat_id():
+    """The listener carries messages from anyone — the operator's commands and
+    would-be subscribers alike. Authorization is the engine's routing job, by
+    chat id, so the id must arrive attached to each message."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -139,7 +143,14 @@ async def test_command_listener_only_accepts_the_configured_chat():
                 "ok": True,
                 "result": [
                     {"update_id": 100, "message": {"chat": {"id": 999}, "text": "موافق 1"}},
-                    {"update_id": 101, "message": {"chat": {"id": 1}, "text": "موافق 2"}},
+                    {
+                        "update_id": 101,
+                        "message": {
+                            "chat": {"id": 1},
+                            "from": {"username": "newuser"},
+                            "text": "/start",
+                        },
+                    },
                 ],
             },
         )
@@ -147,9 +158,10 @@ async def test_command_listener_only_accepts_the_configured_chat():
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
         listener = TelegramCommandListener("token", "999", client=client)
-        commands = await listener.poll()
+        messages = await listener.poll()
 
-    assert commands == ["موافق 1"]  # the other chat's message is not authorization
+    assert [(m.chat_id, m.text) for m in messages] == [("999", "موافق 1"), ("1", "/start")]
+    assert messages[1].username == "newuser"
 
 
 async def test_command_listener_advances_the_offset_so_updates_are_not_replayed():
@@ -272,3 +284,34 @@ def test_review_keeps_only_the_final_state_of_each_trade(tmp_path):
     stats = review(load_period(tmp_path))
     assert stats.closed == 1
     assert stats.expectancy_pct == 75.0
+
+
+async def test_broadcast_reaches_operator_and_active_subscribers(tmp_path):
+    """A signal fans out to the whole trial list; system notes stay private."""
+    from datetime import UTC, datetime, timedelta
+
+    from qqq_alpha.live.telegram import BroadcastNotifier
+    from qqq_alpha.memory import Memory
+
+    memory = Memory(tmp_path / "memory.db")
+    now = datetime.now(UTC)
+    memory.add_subscriber("201", "u1", "One", now, now + timedelta(days=30))
+    memory.add_subscriber("202", "u2", "Two", now, now + timedelta(days=30))
+    memory.add_subscriber("203", "u3", "Old", now - timedelta(days=40), now - timedelta(days=10))
+
+    recipients: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        recipients.append(json.loads(request.content)["chat_id"])
+        return httpx.Response(200, json={"ok": True})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        notifier = BroadcastNotifier("token", "admin", memory, client=client)
+        await notifier.signal(_trade(), delayed=False)
+        await notifier.note("system detail")
+
+    # signal: admin + the two active trials, never the expired one
+    assert recipients[:3] == ["admin", "201", "202"]
+    # the note went to the admin only
+    assert recipients[3:] == ["admin"]

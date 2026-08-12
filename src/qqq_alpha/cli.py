@@ -33,7 +33,7 @@ from qqq_alpha.live.notifier import ConsoleNotifier
 from qqq_alpha.live.preflight import run_preflight
 from qqq_alpha.live.review import load_period, review
 from qqq_alpha.live.stream import LiveBarStream, StreamAuthError, drain
-from qqq_alpha.live.telegram import FanoutNotifier, TelegramNotifier, verify_telegram
+from qqq_alpha.live.telegram import BroadcastNotifier, FanoutNotifier, verify_telegram
 from qqq_alpha.memory import Memory
 
 app = typer.Typer(add_completion=False, help="QQQ Alpha — AI options research engine")
@@ -221,9 +221,15 @@ def live(
 
     notifier = ConsoleNotifier(console)
     if settings.telegram_bot_token and settings.telegram_chat_id:
+        # signals fan out to the operator plus every active trial subscriber;
+        # system notes stay operator-only
         notifier = FanoutNotifier(
             notifier,
-            TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id),
+            BroadcastNotifier(
+                settings.telegram_bot_token,
+                settings.telegram_chat_id,
+                Memory(settings.data_dir / "memory.db"),
+            ),
         )
         console.print("[green]Telegram delivery enabled[/]")
     else:

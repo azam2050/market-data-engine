@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # subscribers — anyone who /starts the bot gets the signals for a free
+    # trial, then is pointed at the follow-up channel and cut off. Zero days
+    # disables sign-ups entirely (operator-only bot).
+    trial_days: int = 30
+    post_trial_channel_url: str = ""
+
     # admin dashboard — off unless both credentials are set, since an
     # unauthenticated view of every trade thesis and lesson is not a risk
     # worth taking by default
