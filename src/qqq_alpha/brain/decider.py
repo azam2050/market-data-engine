@@ -61,6 +61,7 @@ class Decider(Protocol):
         similar_trades: list | None = None,
         chain: list | None = None,
         options_pulse: list | None = None,
+        recent_decisions: list | None = None,
     ) -> Decision: ...
 
 
@@ -90,6 +91,7 @@ class AIDecider:
         similar_trades: list | None = None,
         chain: list | None = None,
         options_pulse: list | None = None,
+        recent_decisions: list | None = None,
     ) -> Decision:
         if not self.settings.anthropic_model:
             raise RuntimeError("ANTHROPIC_MODEL is not configured (see .env.example)")
@@ -108,6 +110,7 @@ class AIDecider:
                 similar_trades=similar_trades,
                 chain=chain,
                 options_pulse=options_pulse,
+                recent_decisions=recent_decisions,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("prompt assembly failed")
@@ -274,6 +277,7 @@ class HeuristicDecider:
         similar_trades: list | None = None,
         chain: list | None = None,
         options_pulse: list | None = None,
+        recent_decisions: list | None = None,
     ) -> Decision:
         bias = snapshot.net_bias
         rel_vol = snapshot.indicators.get("rel_volume") or 0.0

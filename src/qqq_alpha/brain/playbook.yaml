@@ -9,15 +9,17 @@
 #
 # version is bumped by the learning loop, never by hand.
 # =============================================================================
-version: 3
-updated: "2026-08-11"
+version: 5
+updated: "2026-08-12"
 notes: >
-  Seed playbook plus live-evidence entries. The 2026-08-06 session (15
-  consecutive WAIT/PASS through a V-reversal rally, then one losing power-hour
-  chase) is baked into CAPITULATION_REVERSAL, PERFECT_ENTRY_TRAP and
-  LATE_COMPENSATION_CHASE. v3 adds EXHAUSTED_EXTREME_ENTRY after the second
-  real trade (2026-08-10) died the same way as the first, mirrored: late
-  confirmation taken at the session extreme, stopped within 7 minutes.
+  Seed playbook plus live-evidence entries. 2026-08-06 (missed V-reversal, then
+  a losing power-hour chase) is baked into CAPITULATION_REVERSAL,
+  PERFECT_ENTRY_TRAP and LATE_COMPENSATION_CHASE. EXHAUSTED_EXTREME_ENTRY came
+  from the second trade (2026-08-10) dying the same way mirrored. v5 adds
+  TREND_DAY_CONTINUATION and the counter-rule after 2026-08-11: a clean trend
+  day traded zero times because the extreme-entry caution was cited at the lows
+  all day while every shallow failed bounce — the actual entry — went untaken.
+  (v4 was the operator-approved lesson L002.)
 
 mission: >
   Find asymmetric intraday setups on QQQ options where a realistic move in the
@@ -64,6 +66,25 @@ setups:
     typical_window: "10:30-15:00 ET"
     typical_hold_minutes: 20-60
     fails_when: "The pullback breaks EMA50 or the trend regime has already flipped."
+
+  - id: TREND_DAY_CONTINUATION
+    name: "Failed bounce in an established trend day"
+    description: >
+      On a day where trend, momentum and flow agree, price spends most of its
+      time NEAR the session extreme — that is what trending means. The entry is
+      neither the fresh extreme (EXHAUSTED_EXTREME_ENTRY) nor nothing
+      (PERFECT_ENTRY_TRAP): it is the failed counter-move — the weak bounce
+      toward VWAP/EMA9-21 that stalls and rolls back over. Enter with the trend
+      as the bounce fails, stop above the bounce high. Evidence 2026-08-11: a
+      clean TRENDING_DOWN session, 20+ declined PUT setups later priced at +51%
+      to +109%, zero trades — every wake either refused the extreme or waited
+      for a retest it had already watched come and go (the 14:0x bounce to
+      ~721.8 WAS the retest, and it passed on that too).
+    typical_window: "10:00-15:00 ET"
+    typical_hold_minutes: 20-60
+    fails_when: >
+      The "bounce" reclaims VWAP with expanding volume — that is a reversal,
+      not a pullback; stand down or flip.
 
   - id: CAPITULATION_REVERSAL
     name: "V-reversal after an opening flush"
@@ -133,6 +154,12 @@ caution:
       (+2.85M net) were hunting that very bottom. If the setup is real, the
       retest after the extreme offers a better fill — demand the retest, or
       trade the reversal the flow is voting for instead of fighting it.
+      THE COUNTER-RULE, from 2026-08-11: this caution is about WHERE you enter,
+      never WHETHER. On a trend day the retest is shallow and comes to you as a
+      failed bounce (see TREND_DAY_CONTINUATION) — if you cite this caution on
+      3+ consecutive wakes while trend and flow stay aligned, you are no longer
+      avoiding the extreme, you are avoiding the trade: take the next failed
+      bounce with the trend.
 
 # ---------------------------------------------------------------------------
 # Contract selection preferences.

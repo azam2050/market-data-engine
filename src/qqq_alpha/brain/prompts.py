@@ -157,6 +157,7 @@ def build_user_prompt(
     similar_trades: list | None = None,
     chain: list | None = None,
     options_pulse: list | None = None,
+    recent_decisions: list | None = None,
 ) -> str:
     sections: list[str] = []
 
@@ -282,6 +283,26 @@ def build_user_prompt(
         sections.append(
             "=== THIS ENGINE'S RECENT TRADES (your own track record — learn from it) ===\n"
             + _compact(rows)
+        )
+
+    if recent_decisions:
+        decision_rows = [
+            {
+                "ts": d.ts,
+                "action": d.action.value,
+                "confidence": d.confidence,
+                "thesis": (d.thesis or "")[:400],
+            }
+            for d in recent_decisions
+        ]
+        sections.append(
+            "=== YOUR EARLIER DECISIONS THIS SESSION ===\n"
+            "The plans you announced on previous wakes. If a trigger you named has "
+            "since been met, follow through or state explicitly what changed — a full "
+            "session of WAITs that each names a trigger and then quietly re-derives a "
+            "new reason to wait is how 2026-08-11 produced zero trades on a clean "
+            "trend day. Consistency between what you said and what you would do is "
+            "part of being a professional desk.\n" + _compact(decision_rows)
         )
 
     if chain:

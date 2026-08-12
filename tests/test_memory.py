@@ -15,7 +15,13 @@ from qqq_alpha.config import MARKET_TZ, Settings
 from qqq_alpha.data.synthetic import synthetic_session
 from qqq_alpha.domain import Action, Decision, MarketRegime, MissedOpportunity, OptionType, Target
 from qqq_alpha.features.snapshot import SnapshotBuilder
-from qqq_alpha.learning import MIN_TOTAL_TRADES, analyse, apply_lesson, propose
+from qqq_alpha.learning import (
+    MIN_TOTAL_TRADES,
+    analyse,
+    apply_lesson,
+    propose,
+    with_applied_lessons,
+)
 from qqq_alpha.memory import Memory
 from qqq_alpha.trades import TradeManager
 
@@ -265,11 +271,20 @@ def test_findings_become_pending_lessons_then_reach_the_playbook(tmp_path):
 
     assert updated.version == 2
     assert updated.lessons[0].sample_size > 0
-    assert settings.playbook_path.exists()
     # only the applied lesson leaves pending — others found in the same pass
     # (this fixture happens to make exit_reason perfectly predict confidence
     # too) still await their own approval
     assert ids[0] not in {row["id"] for row in memory.pending_lessons()}
+
+    # the approval must survive a redeploy: recomposing from the seed plus
+    # durable memory — with no playbook file on disk at all — keeps the lesson
+    rebooted = with_applied_lessons(Playbook(version=1), Memory(tmp_path / "memory.db"))
+    assert rebooted.version == 2
+    assert rebooted.lessons and rebooted.lessons[0].statement == updated.lessons[0].statement
+
+    # and an applied lesson must never be re-proposed just because the
+    # underlying numbers drifted — L002 came back the morning after approval
+    assert propose(memory, analyse(memory)) == []
 
 
 def test_applied_lesson_reaches_the_brains_prompt(tmp_path):
@@ -398,3 +413,24 @@ def test_infeasible_missed_rows_are_purged_on_open(tmp_path):
 
     reopened = Memory(path)
     assert reopened.missed_count() == 2
+
+
+def test_a_rejected_lesson_stays_rejected(tmp_path):
+    """The operator said no. Re-proposing it every morning is nagging."""
+    memory = Memory(tmp_path / "memory.db")
+    snapshot = _snapshot()
+    for index in range(10):
+        memory.remember_trade(
+            _make_trade(snapshot, f"hi{index}", -40.0, confidence=9, day_offset=index), snapshot
+        )
+    for index in range(10):
+        memory.remember_trade(
+            _make_trade(snapshot, f"lo{index}", 60.0, confidence=4, day_offset=index + 20),
+            snapshot,
+        )
+
+    ids = propose(memory, analyse(memory))
+    for lesson_id in ids:
+        memory.set_lesson_status(lesson_id, "rejected")
+
+    assert propose(memory, analyse(memory)) == []

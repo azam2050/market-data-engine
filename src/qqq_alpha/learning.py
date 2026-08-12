@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from statistics import mean
 
-from qqq_alpha.brain.playbook import Lesson, Playbook, append_lesson, save_playbook
+from qqq_alpha.brain.playbook import Lesson, Playbook, append_lesson
 from qqq_alpha.config import Settings
 from qqq_alpha.memory import Memory
 
@@ -265,12 +265,20 @@ def analyse(
 
 
 def propose(memory: Memory, report: LearningReport) -> list[int]:
-    """Store findings as pending lessons awaiting approval."""
+    """Store findings as pending lessons awaiting approval.
+
+    Deduplicated by finding key against everything ever proposed — pending,
+    applied or rejected. The statements carry live numbers that drift as data
+    accumulates, so an already-approved lesson would otherwise come back the
+    very next morning wearing slightly different figures (this happened: L002
+    was approved on 2026-08-10 and re-proposed verbatim-in-spirit on 08-11).
+    """
     ids: list[int] = []
-    existing = {row["statement"] for row in memory.pending_lessons()}
+    seen_keys = memory.lesson_keys()
+    seen_statements = {row["statement"] for row in memory.pending_lessons()}
 
     for finding in report.findings:
-        if finding.statement in existing:
+        if finding.key in seen_keys or finding.statement in seen_statements:
             continue
         ids.append(
             memory.save_lesson(
@@ -278,32 +286,55 @@ def propose(memory: Memory, report: LearningReport) -> list[int]:
                 evidence=finding.evidence,
                 sample_size=finding.sample_size,
                 confidence=finding.confidence,
+                key=finding.key,
             )
         )
     return ids
 
 
+def _lesson_from_row(row: dict) -> Lesson:
+    return Lesson(
+        id=f"L{row['id']:03d}",
+        learned_on=datetime.fromisoformat(row["created_at"]).date(),
+        statement=row["statement"],
+        evidence=row["evidence"] or "",
+        sample_size=row["sample_size"] or 0,
+        confidence=row["confidence"] or 0.0,
+    )
+
+
+def with_applied_lessons(playbook: Playbook, memory: Memory) -> Playbook:
+    """The seed playbook plus every operator-approved lesson from durable memory.
+
+    Approved lessons used to be written into the playbook *file*, which lives
+    on the container's ephemeral filesystem — one redeploy and the operator's
+    approval silently vanished. The database is the durable record, so the
+    playbook is composed from it on every boot instead: the file in the repo
+    stays a seed, and the lessons ride on top.
+    """
+    updated = playbook
+    for row in memory.applied_lessons():
+        updated = append_lesson(updated, _lesson_from_row(row))
+    return updated
+
+
 def apply_lesson(
     memory: Memory, playbook: Playbook, lesson_id: int, settings: Settings
 ) -> Playbook:
-    """Promote an approved lesson into the playbook and bump its version."""
+    """Promote an approved lesson into the live playbook.
+
+    The durable act is the status flip in memory; the returned playbook is
+    recomposed seed+lessons so the caller can swap it in without ever
+    double-appending.
+    """
     pending = {row["id"]: row for row in memory.pending_lessons()}
-    row = pending.get(lesson_id)
-    if row is None:
+    if lesson_id not in pending:
         raise ValueError(f"lesson {lesson_id} is not pending")
 
-    lesson = Lesson(
-        id=f"L{lesson_id:03d}",
-        learned_on=datetime.fromisoformat(row["created_at"]).date(),
-        statement=row["statement"],
-        evidence=row["evidence"],
-        sample_size=row["sample_size"],
-        confidence=row["confidence"],
-    )
-
-    updated = append_lesson(playbook, lesson)
-    updated.updated = datetime.now().date().isoformat()
-    save_playbook(updated, settings.playbook_path)
     memory.set_lesson_status(lesson_id, "applied")
-    log.info("playbook advanced to v%s with lesson %s", updated.version, lesson.id)
+    from qqq_alpha.brain.playbook import load_playbook
+
+    updated = with_applied_lessons(load_playbook(settings.playbook_path), memory)
+    updated.updated = datetime.now().date().isoformat()
+    log.info("playbook advanced to v%s with lesson L%03d", updated.version, lesson_id)
     return updated

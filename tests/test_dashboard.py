@@ -140,7 +140,7 @@ def test_overview_shows_pending_lesson_count(tmp_path):
 
 
 # ---------------------------------------------------------------- lesson approval
-def test_approving_a_lesson_writes_the_playbook_and_clears_it_from_pending(tmp_path):
+def test_approving_a_lesson_keeps_it_durably_and_clears_it_from_pending(tmp_path):
     settings = _settings(tmp_path)
     lesson_id = _seed(settings)
     applied: list = []
@@ -152,9 +152,14 @@ def test_approving_a_lesson_writes_the_playbook_and_clears_it_from_pending(tmp_p
 
     assert response.status_code == 303
     assert response.headers["location"] == "/lessons"
-    assert settings.playbook_path.exists()
     assert applied and applied[0].version == 2
-    assert not Memory(settings.data_dir / "memory.db").pending_lessons()
+    memory = Memory(settings.data_dir / "memory.db")
+    assert not memory.pending_lessons()
+    # durability is the database, not the (ephemeral) playbook file: the
+    # lessons page must still show the approval with no file on disk
+    assert not settings.playbook_path.exists()
+    assert "دروس" in client.get("/lessons", auth=AUTH).text
+    assert memory.applied_lessons()
 
 
 def test_rejecting_a_lesson_clears_it_without_writing_the_playbook(tmp_path):

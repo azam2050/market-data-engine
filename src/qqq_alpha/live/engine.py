@@ -29,10 +29,18 @@ from qqq_alpha.data.massive import MassiveClient
 from qqq_alpha.data.pricing import BlackScholesPricer, OptionPricer
 from qqq_alpha.data.pulse import PulseTracker, chain_pulse
 from qqq_alpha.data.quality import inspect_session
-from qqq_alpha.domain import Action, Bar, MarketSnapshot, MissedOpportunity, OptionType, Trade
+from qqq_alpha.domain import (
+    Action,
+    Bar,
+    Decision,
+    MarketSnapshot,
+    MissedOpportunity,
+    OptionType,
+    Trade,
+)
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
-from qqq_alpha.learning import analyse, propose
+from qqq_alpha.learning import analyse, propose, with_applied_lessons
 from qqq_alpha.learning import apply_lesson as apply_pending_lesson
 from qqq_alpha.live.flowfeed import LiveFlowFeed
 from qqq_alpha.live.notifier import ConsoleNotifier, Notifier
@@ -117,12 +125,18 @@ class LiveEngine:
         # long-term memory lives on disk, so a restart never costs the engine
         # what it has learned — unlike the in-process list it replaced
         self.memory = Memory(self.settings.data_dir / "memory.db")
+        # operator-approved lessons live in durable memory, not in the seed
+        # playbook file (which is wiped on every redeploy) — compose them in
+        self.playbook = with_applied_lessons(self.playbook, self.memory)
         # declined setups awaiting a look-back price check. self.pricer is often
         # a LiveChainPricer, which only knows the *current* quote — it cannot
         # answer "what was this contract worth 20 minutes ago", so the
         # retrospective check below always uses a time-aware model instead
         self._pending_missed: list[dict] = []
         self._attribution_pricer = BlackScholesPricer()
+        # today's decisions, shown back to the brain for plan continuity —
+        # in-process only; a mid-session restart starts the thread afresh
+        self._today_decisions: list[Decision] = []
         # lets the operator approve or reject a proposed lesson by replying
         # to Telegram — there is no assumption anywhere else in this project
         # that the operator has a terminal, and lesson approval should not be
@@ -386,8 +400,12 @@ class LiveEngine:
                 else None
             ),
             options_pulse=await self._options_pulse(bar),
+            recent_decisions=self._today_decisions[-4:],
         )
         self.status.brain_calls += 1
+        # shown back to the brain on later wakes so an announced plan is
+        # followed through (or explicitly revised), not silently re-derived
+        self._today_decisions.append(decision)
 
         # with a live chain we can validate the real contract: spread, liquidity,
         # whether it exists at all
@@ -592,6 +610,7 @@ class LiveEngine:
         self.attention.reset()
         self._refresh_recent()
         self.session_bars = []
+        self._today_decisions = []
         self.leader_bars = {}
         self.status.trades_today = 0
         self.status.realized_pct = 0.0

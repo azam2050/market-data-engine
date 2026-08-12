@@ -22,7 +22,7 @@ from qqq_alpha.brain.playbook import Playbook, load_playbook
 from qqq_alpha.config import Settings
 from qqq_alpha.dashboard import data
 from qqq_alpha.dashboard.auth import require_login
-from qqq_alpha.learning import apply_lesson
+from qqq_alpha.learning import apply_lesson, with_applied_lessons
 from qqq_alpha.memory import Memory
 
 log = logging.getLogger(__name__)
@@ -84,7 +84,11 @@ def create_app(
 
     @app.get("/lessons")
     def lessons(request: Request, _: str = Depends(login)):
-        book = load_playbook(settings.playbook_path)
+        # approved lessons come from durable memory, not the (ephemeral) file
+        book = with_applied_lessons(
+            load_playbook(settings.playbook_path),
+            Memory(settings.data_dir / "memory.db"),
+        )
         return templates.TemplateResponse(
             request,
             "lessons.html",

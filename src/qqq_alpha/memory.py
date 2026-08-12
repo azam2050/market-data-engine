@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from contextlib import closing
+from contextlib import closing, suppress
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -93,7 +93,11 @@ CREATE TABLE IF NOT EXISTS lessons (
     evidence    TEXT,
     sample_size INTEGER,
     confidence  REAL,
-    status      TEXT NOT NULL DEFAULT 'pending'
+    status      TEXT NOT NULL DEFAULT 'pending',
+    -- the finding key (e.g. "missed:regime:TRENDING_UP") — statements carry
+    -- live numbers that drift as data accumulates, so text comparison cannot
+    -- recognise "the same lesson again"; the key can
+    key         TEXT
 );
 
 -- setups the engine declined (rail-blocked or the AI's own PASS), priced
@@ -213,8 +217,15 @@ class Memory:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
             self._purge_infeasible_missed(conn)
             conn.commit()
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Bring an existing database up to the current schema. Idempotent."""
+        with suppress(sqlite3.OperationalError):  # column already exists
+            conn.execute("ALTER TABLE lessons ADD COLUMN key TEXT")
 
     @staticmethod
     def _purge_infeasible_missed(conn: sqlite3.Connection) -> None:
@@ -533,13 +544,26 @@ class Memory:
 
     # ------------------------------------------------------------------
     def save_lesson(
-        self, statement: str, evidence: str, sample_size: int, confidence: float
+        self,
+        statement: str,
+        evidence: str,
+        sample_size: int,
+        confidence: float,
+        key: str = "",
     ) -> int:
         with closing(self._connect()) as conn:
             cursor = conn.execute(
-                """INSERT INTO lessons (created_at, statement, evidence, sample_size, confidence)
-                   VALUES (?,?,?,?,?)""",
-                (datetime.now().isoformat(), statement, evidence, sample_size, confidence),
+                """INSERT INTO lessons
+                   (created_at, statement, evidence, sample_size, confidence, key)
+                   VALUES (?,?,?,?,?,?)""",
+                (
+                    datetime.now().isoformat(),
+                    statement,
+                    evidence,
+                    sample_size,
+                    confidence,
+                    key,
+                ),
             )
             conn.commit()
             return int(cursor.lastrowid or 0)
@@ -550,6 +574,27 @@ class Memory:
                 "SELECT * FROM lessons WHERE status = 'pending' ORDER BY id"
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def applied_lessons(self) -> list[dict[str, Any]]:
+        """Operator-approved lessons — the durable half of the live playbook."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT * FROM lessons WHERE status = 'applied' ORDER BY id"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def lesson_keys(self) -> set[str]:
+        """Every finding key ever proposed, regardless of what became of it.
+
+        An approved lesson is already in the playbook, and a rejected one was
+        turned down by the operator — re-proposing either every morning because
+        the underlying numbers drifted is nagging, not learning.
+        """
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT key FROM lessons WHERE key IS NOT NULL AND key != ''"
+            ).fetchall()
+        return {row["key"] for row in rows}
 
     def set_lesson_status(self, lesson_id: int, status: str) -> None:
         with closing(self._connect()) as conn:

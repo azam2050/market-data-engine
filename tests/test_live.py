@@ -280,9 +280,13 @@ async def test_approve_reply_applies_the_lesson_and_updates_the_running_playbook
 
     await engine._handle_command(f"موافق {lesson_id}")
 
-    assert engine.playbook.version == 2  # the engine's own copy, not just the file
+    assert engine.playbook.version == 2  # the engine's own running copy
     assert not engine.memory.pending_lessons()
-    assert engine.settings.playbook_path.exists()
+    # durability lives in memory, not the (ephemeral) playbook file: a fresh
+    # engine over the same data dir must boot with the lesson already in place
+    rebooted = _engine_with_writable_playbook(settings, tmp_path)
+    assert rebooted.playbook.version == 2
+    assert rebooted.playbook.lessons and rebooted.playbook.lessons[0].statement == "test claim"
 
 
 @pytest.mark.asyncio
@@ -483,3 +487,46 @@ async def test_a_broken_prompt_becomes_a_safe_pass_not_a_crash(settings):
     )
     assert decision.action is Action.PASS
     assert "فشل تقني" in decision.thesis
+
+
+def test_prompt_carries_todays_earlier_decisions():
+    """Plan continuity: 2026-08-11 produced zero trades on a clean trend day
+    because every wake named a trigger and the next wake quietly re-derived a
+    new reason to wait. The brain now sees what it said earlier today."""
+    from qqq_alpha.brain.prompts import build_user_prompt
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    bars = synthetic_session("QQQ", DAY, seed=12)
+    snapshot = SnapshotBuilder("QQQ").build(bars[:120])
+    earlier = Decision(
+        ts=snapshot.ts,
+        action=Action.WAIT,
+        confidence=4,
+        thesis="أنتظر كسر 718.40 مع rel-volume أعلى من 1.2 ثم أدخل PUT",
+    )
+    prompt = build_user_prompt(snapshot, Playbook(), recent_decisions=[earlier])
+    assert "YOUR EARLIER DECISIONS THIS SESSION" in prompt
+    assert "718.40" in prompt
+
+
+@pytest.mark.asyncio
+async def test_todays_decisions_accumulate_and_reset_at_rollover(settings, tmp_path):
+    fresh = settings.model_copy(update={"max_data_age_sec": 10**9})
+    engine = LiveEngine(
+        settings=fresh,
+        decider=_AlwaysPassDecider(),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=NullNotifier(),
+    )
+    engine._current_day = DAY
+    bars = synthetic_session("QQQ", DAY, seed=12, trend=0.03, volatility=0.002)
+    for bar in bars[:200]:
+        await engine._on_bar(bar)
+
+    assert engine._today_decisions  # plans are being carried forward
+
+    next_day = synthetic_session("QQQ", date(2026, 3, 3), seed=9)[0]
+    await engine._on_bar(next_day)
+    assert engine._today_decisions == []  # yesterday's plans are not today's
