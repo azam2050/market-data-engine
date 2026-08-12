@@ -137,6 +137,10 @@ async def test_command_listener_reports_every_sender_with_its_chat_id():
     chat id, so the id must arrive attached to each message."""
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("getWebhookInfo"):
+            return httpx.Response(200, json={"ok": True, "result": {"url": ""}})
+        if request.url.path.endswith("deleteWebhook"):
+            return httpx.Response(200, json={"ok": True, "result": True})
         return httpx.Response(
             200,
             json={
@@ -168,6 +172,10 @@ async def test_command_listener_advances_the_offset_so_updates_are_not_replayed(
     offsets_seen: list[str | None] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("getWebhookInfo"):
+            return httpx.Response(200, json={"ok": True, "result": {"url": ""}})
+        if request.url.path.endswith("deleteWebhook"):
+            return httpx.Response(200, json={"ok": True, "result": True})
         offsets_seen.append(request.url.params.get("offset"))
         return httpx.Response(
             200,
@@ -315,3 +323,59 @@ async def test_broadcast_reaches_operator_and_active_subscribers(tmp_path):
     assert recipients[:3] == ["admin", "201", "202"]
     # the note went to the admin only
     assert recipients[3:] == ["admin"]
+
+
+async def test_listener_claims_the_inbox_from_a_stale_webhook():
+    """A webhook left by any past integration starves getUpdates forever
+    (409) — sending works, receiving never does. The listener must detect
+    and delete it before its first poll."""
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path.split("/")[-1])
+        if request.url.path.endswith("getWebhookInfo"):
+            return httpx.Response(
+                200, json={"ok": True, "result": {"url": "https://old-integration.example/hook"}}
+            )
+        if request.url.path.endswith("deleteWebhook"):
+            return httpx.Response(200, json={"ok": True, "result": True})
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "result": [{"update_id": 7, "message": {"chat": {"id": 5}, "text": "/start"}}],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        listener = TelegramCommandListener("token", "1", client=client)
+        first = await listener.poll()
+        await listener.poll()
+
+    assert calls[:3] == ["getWebhookInfo", "deleteWebhook", "getUpdates"]
+    assert calls[3:] == ["getUpdates"]  # claimed once, not on every poll
+    assert first and first[0].text == "/start"
+
+
+async def test_a_409_conflict_triggers_a_reclaim_on_the_next_poll():
+    state = {"conflict": True, "claims": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("getWebhookInfo"):
+            return httpx.Response(200, json={"ok": True, "result": {"url": ""}})
+        if request.url.path.endswith("deleteWebhook"):
+            state["claims"] += 1
+            return httpx.Response(200, json={"ok": True, "result": True})
+        if state["conflict"]:
+            state["conflict"] = False
+            return httpx.Response(409, json={"ok": False, "description": "Conflict"})
+        return httpx.Response(200, json={"ok": True, "result": []})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        listener = TelegramCommandListener("token", "1", client=client)
+        assert await listener.poll() == []  # the 409 pass
+        await listener.poll()  # must re-claim before this one
+
+    assert state["claims"] == 2

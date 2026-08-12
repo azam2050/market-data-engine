@@ -224,9 +224,15 @@ class LiveEngine:
 
         if self.commands is not None:
             self._command_task = asyncio.create_task(self._command_loop())
-            await self.notifier.note(
-                'lesson approval is live — reply "موافق <رقم>" or "رفض <رقم>"'
-            )
+            note = 'lesson approval is live — reply "موافق <رقم>" or "رفض <رقم>"'
+            if self.settings.trial_days > 0:
+                # doubles as visible proof of which build is running: this
+                # line only exists in versions that accept subscribers
+                note += (
+                    f"\n🎁 التسجيل التجريبي مفعّل: أي شخص يضغط Start "
+                    f"يحصل على {self.settings.trial_days} يوماً مجاناً"
+                )
+            await self.notifier.note(note)
 
         if self.settings.admin_username and self.settings.admin_password:
             self._dashboard_task = asyncio.create_task(self._run_dashboard())

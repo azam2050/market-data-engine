@@ -170,11 +170,35 @@ class TelegramCommandListener:
         self._client = client
         self._owns_client = client is None
         self._offset = 0
+        self._webhook_cleared = False
+
+    async def _claim_inbox(self) -> None:
+        """Delete any webhook so getUpdates actually receives messages.
+
+        Telegram delivers a bot's inbox to exactly one place: a webhook, or
+        getUpdates — never both. If any past experiment or integration ever
+        registered a webhook on this token, every getUpdates call 409s
+        *forever*, silently: sending still works, receiving never does. This
+        showed up in production as /start and operator replies vanishing into
+        nowhere. Claiming the inbox at startup is idempotent and instant.
+        """
+        try:
+            info = await self._client.get(f"{TELEGRAM_API}/bot{self.token}/getWebhookInfo")
+            result = info.json().get("result")
+            webhook_url = result.get("url", "") if isinstance(result, dict) else ""
+            if webhook_url:
+                log.warning("a webhook was hijacking the bot inbox (%s); removing it", webhook_url)
+            await self._client.post(f"{TELEGRAM_API}/bot{self.token}/deleteWebhook")
+            self._webhook_cleared = True
+        except Exception as exc:  # noqa: BLE001 - claiming must never block polling
+            log.warning("could not verify/clear the bot webhook (%s); will retry", exc)
 
     async def poll(self, timeout: int = 25) -> list[InboundMessage]:
         """Block up to ``timeout`` seconds, return any new inbound messages."""
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=timeout + 10.0)
+        if not self._webhook_cleared:
+            await self._claim_inbox()
 
         url = f"{TELEGRAM_API}/bot{self.token}/getUpdates"
         try:
@@ -183,7 +207,12 @@ class TelegramCommandListener:
             )
             response.raise_for_status()
         except (httpx.TransportError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-            log.warning("telegram command poll failed (%s)", exc)
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 409:
+                # a webhook (or a second engine instance) took the inbox back
+                log.error("getUpdates conflict (409): another consumer holds the inbox")
+                self._webhook_cleared = False  # re-claim on the next pass
+            else:
+                log.warning("telegram command poll failed (%s)", exc)
             await asyncio.sleep(2.0)  # do not spin on a persistent error
             return []
 
@@ -331,6 +360,15 @@ async def verify_telegram(token: str, chat_id: str) -> tuple[bool, str]:
             sent = await notifier._send("✅ QQQ Alpha متصل بنجاح — هذه رسالة اختبار")
             if not sent:
                 return False, f"bot @{name} works, but cannot post to chat {chat_id}"
-            return True, f"connected as @{name}"
+
+            # sending is only half the job: a webhook left behind by any past
+            # integration silently starves getUpdates (409) so /start and
+            # operator replies never arrive. Surface it — the engine clears
+            # it at startup, but the operator deserves to know it was there.
+            detail = f"connected as @{name}"
+            info = await client.get(f"{TELEGRAM_API}/bot{token}/getWebhookInfo")
+            if (info.json().get("result") or {}).get("url"):
+                detail += " — ⚠️ كان فيه webhook يسرق رسائل البوت الواردة، سيُزال تلقائياً"
+            return True, detail
         except httpx.HTTPError as exc:
             return False, f"network error: {exc}"
