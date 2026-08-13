@@ -63,7 +63,7 @@ def test_dashboard_accepts_correct_credentials(tmp_path):
 # ---------------------------------------------------------------- pages, empty state
 def test_every_page_renders_with_no_data_on_record(tmp_path):
     client = TestClient(create_app(_settings(tmp_path)))
-    for path in ("/", "/trades", "/decisions", "/missed", "/lessons", "/reports"):
+    for path in ("/", "/trades", "/decisions", "/missed", "/lessons", "/reports", "/report-card"):
         response = client.get(path, auth=AUTH)
         assert response.status_code == 200, (path, response.text[:500])
 
@@ -128,6 +128,12 @@ def test_pages_render_populated_data(tmp_path):
     assert "لا يوجد دليل كافٍ" in decisions_page  # a plain PASS is shown too
     assert "TRENDING_UP" in client.get("/missed", auth=AUTH).text
     assert "النظام الصاعد يعطي فرص أكثر" in client.get("/lessons", auth=AUTH).text
+
+    # the report card buckets the closed trade by regime, hour, confidence, exit
+    card = client.get("/report-card", auth=AUTH).text
+    assert "حسب نظام السوق" in card
+    assert "7/10" in card
+    assert "trail_stop" in card
 
 
 def test_overview_shows_pending_lesson_count(tmp_path):

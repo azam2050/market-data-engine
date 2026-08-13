@@ -17,13 +17,14 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from qqq_alpha.brain.attention import AttentionEngine
 from qqq_alpha.brain.decider import Decider, next_expiry, occ_symbol
 from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.brain.rails import DayState, SafetyRails, infeasible
 from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, Settings
+from qqq_alpha.data.calendar import todays_events
 from qqq_alpha.data.chain import LiveChainPricer
 from qqq_alpha.data.massive import MassiveClient
 from qqq_alpha.data.pricing import BlackScholesPricer, OptionPricer
@@ -348,7 +349,12 @@ class LiveEngine:
             price = self.pricer.price_at(trade.occ_symbol, bar.ts, bar.close, side="exit")
             if price is None:
                 continue
-            update = self.manager.update(trade, price, bar.ts)
+            # the thesis stop outranks price P&L: the brain named the spot level
+            # where its idea is wrong, and the underlying just crossed it
+            if self.manager.check_thesis(trade, bar.close):
+                update = self.manager.force_close(trade, price, bar.ts, "thesis_invalidated")
+            else:
+                update = self.manager.update(trade, price, bar.ts)
             if update is not None:
                 await self.notifier.update(trade, update, self._delayed)
                 self.journal.log_trade(trade)
@@ -408,6 +414,7 @@ class LiveEngine:
             ),
             options_pulse=await self._options_pulse(bar),
             recent_decisions=self._today_decisions[-4:],
+            calendar_events=todays_events(bar.ts),
         )
         self.status.brain_calls += 1
         # shown back to the brain on later wakes so an announced plan is
@@ -442,6 +449,7 @@ class LiveEngine:
             await self.notifier.note(f"could not price {decision.occ_symbol}; signal dropped")
             return
 
+        decision.size_factor = self._size_factor(decision, bar.ts)
         trade = self.manager.open_trade(decision, fill, snapshot)
         self.status.trades_today += 1
         self.status.signals_sent += 1
@@ -451,6 +459,27 @@ class LiveEngine:
         # position recoverable, never announced-but-forgotten
         self._persist()
         await self.notifier.signal(trade, self._delayed)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _size_factor(decision: Decision, ts: datetime) -> float:
+        """Recommended size as a fraction of normal. Conviction pays for size.
+
+        The record so far: two of three losses were full-size entries in the
+        first minutes of the session at middling confidence. Confidence 8+ is
+        "own money, no hesitation" per the prompt — that earns full size;
+        anything at 6 or below is half. The first hour halves it again, floored
+        at a quarter, because opening whipsaw kills stops regardless of thesis.
+        """
+        if decision.confidence >= 8:
+            factor = 1.0
+        elif decision.confidence == 7:
+            factor = 0.75
+        else:
+            factor = 0.5
+        if ts.astimezone(MARKET_TZ).time() < time(10, 30):
+            factor = max(factor * 0.5, 0.25)
+        return factor
 
     # ------------------------------------------------------------------
     async def _options_pulse(self, bar: Bar) -> list[dict] | None:

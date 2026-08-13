@@ -9,8 +9,8 @@
 #
 # version is bumped by the learning loop, never by hand.
 # =============================================================================
-version: 5
-updated: "2026-08-12"
+version: 6
+updated: "2026-08-13"
 notes: >
   Seed playbook plus live-evidence entries. 2026-08-06 (missed V-reversal, then
   a losing power-hour chase) is baked into CAPITULATION_REVERSAL,
@@ -105,6 +105,17 @@ setups:
 # not forbid a trade.
 # ---------------------------------------------------------------------------
 caution:
+  - id: OPENING_WINDOW_ENTRY
+    condition: "ENTER before 09:45 ET (the first 15 minutes of the session)"
+    note: >
+      Two of this engine's three losses were entries at minute 6 and minute 10
+      of the session, both against or without the leaders. The opening window
+      is where whipsaw hits stops hardest and where indicator readings are
+      least trustworthy. An entry here needs the leaders aligned with the
+      direction (leader_alignment >= 0) on top of the usual evidence; if you
+      enter anyway, name this caution in overrides and say what makes this
+      open different. The engine also halves recommended size before 10:30 —
+      expect that and plan the trade at reduced size.
   - id: LUNCH_CHOP
     condition: "11:45-13:15 ET with relative volume below 1.0"
     note: "Liquidity thins, ranges compress, 0DTE theta keeps burning."

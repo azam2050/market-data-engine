@@ -34,6 +34,9 @@ HOW TO THINK
 CONTRACT CHOICE
 Prefer contracts whose delta gives the leverage you need for the expected underlying move. Roughly: a 0.35-0.45 delta contract needs about a 0.35-0.5% move in QQQ to gain 50%. If the move you expect is smaller than that, either choose a cheaper strike and accept lower probability, or do not take the trade. State this arithmetic in your thesis.
 
+HOW YOUR EXITS ARE MANAGED
+Once you enter, a mechanical exit engine runs the position — you do not manage it bar by bar. Know its shape so your entries fit it: it banks HALF the position automatically at about +35% (securing the cost), floors the remainder at breakeven, and trails the rest from its peak so a runner is allowed to run — the fat right tail is where this desk's edge lives, so do not design entries around a single fixed take-profit. Two of its exits come directly from you: `invalidation_level` (the UNDERLYING price that proves you wrong — the engine exits the moment spot crosses it, so place it at the structural level from your thesis, not at an arbitrary distance) and `expected_hold_minutes` (if the thesis has not moved by ~1.5x this, the position is closed as theta bleed — be honest about how fast the idea should work).
+
 LATE-SESSION ENTRIES
 Past the configured cutoff (see execution warnings), a same-day (0DTE) entry is blocked — brokers themselves restrict trading same-day contracts as expiry nears, this is not just caution on our side. A next-day (1DTE) contract is not affected by that cutoff. If the evidence is strong late in the session, set expiry_dte to 1 rather than assuming no trade is possible — theta is far less brutal with a full extra day of time value.
 
@@ -101,6 +104,15 @@ DECISION_TOOL: dict[str, Any] = {
                     "Write in Arabic (technical terms may stay in English)."
                 ),
             },
+            "invalidation_level": {
+                "type": "number",
+                "description": (
+                    "The UNDERLYING price from your invalidation, as a number. The "
+                    "engine exits the position the moment spot crosses it (below for "
+                    "CALL, above for PUT). Required for ENTER — place it at the "
+                    "structural level from your thesis."
+                ),
+            },
             "expected_hold_minutes": {"type": "integer"},
             "confidence": {
                 "type": "integer",
@@ -158,6 +170,7 @@ def build_user_prompt(
     chain: list | None = None,
     options_pulse: list | None = None,
     recent_decisions: list | None = None,
+    calendar_events: list | None = None,
 ) -> str:
     sections: list[str] = []
 
@@ -176,6 +189,27 @@ def build_user_prompt(
             ]
         )
     )
+
+    if calendar_events:
+        lines = []
+        for event in calendar_events:
+            when = event.get("time_et", "?")
+            marker = event.get("minutes_from_now")
+            timing = ""
+            if isinstance(marker, (int, float)):
+                timing = (
+                    f" (in {abs(marker):.0f} min)" if marker > 0 else f" ({abs(marker):.0f} min ago)"
+                )
+            lines.append(f"- {when} ET: {event.get('label', '?')} [{event.get('impact', '?')}]{timing}")
+        sections.append(
+            "=== ECONOMIC CALENDAR TODAY (operator-maintained schedule) ===\n"
+            + "\n".join(lines)
+            + "\nEvent days have their own character: the hour before a high-impact "
+            "release is usually positioning noise — a breakout there rarely holds. "
+            "The first minutes after a release are violent whipsaw where stops die; "
+            "the tradeable move is the trend that emerges once the reaction picks a "
+            "side. Weigh every setup against where you are relative to the event."
+        )
 
     if snapshot.timeframes:
         sections.append(

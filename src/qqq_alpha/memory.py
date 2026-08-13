@@ -23,7 +23,7 @@ import logging
 import sqlite3
 from contextlib import closing, suppress
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -97,7 +97,10 @@ CREATE TABLE IF NOT EXISTS lessons (
     -- the finding key (e.g. "missed:regime:TRENDING_UP") — statements carry
     -- live numbers that drift as data accumulates, so text comparison cannot
     -- recognise "the same lesson again"; the key can
-    key         TEXT
+    key         TEXT,
+    -- when the operator ruled on it: the cooling period between behaviour
+    -- changes is measured from here
+    decided_at  TEXT
 );
 
 -- trial subscribers: anyone who /started the bot. Durable, because cutting a
@@ -238,6 +241,8 @@ class Memory:
         """Bring an existing database up to the current schema. Idempotent."""
         with suppress(sqlite3.OperationalError):  # column already exists
             conn.execute("ALTER TABLE lessons ADD COLUMN key TEXT")
+        with suppress(sqlite3.OperationalError):
+            conn.execute("ALTER TABLE lessons ADD COLUMN decided_at TEXT")
 
     @staticmethod
     def _purge_infeasible_missed(conn: sqlite3.Connection) -> None:
@@ -368,10 +373,28 @@ class Memory:
             )
             conn.commit()
 
-    def missed_performance_by(self, column: str, min_sample: int = 3) -> list[dict[str, Any]]:
-        """Aggregate missed-opportunity cost grouped by regime or direction."""
+    def missed_performance_by(
+        self,
+        column: str,
+        min_sample: int = 3,
+        max_session_minute: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Aggregate missed-opportunity cost grouped by regime or direction.
+
+        ``max_session_minute`` drops declines from late in the session: a
+        power-hour PASS that "missed" a closing gamma spike was usually a
+        correct decision the playbook demanded, and counting it as evidence
+        poisons any lesson built on the aggregate.
+        """
         if column not in {"regime", "would_be_direction", "reason"}:
             raise ValueError(f"cannot group missed opportunities by {column}")
+
+        clause = f"WHERE {column} IS NOT NULL"
+        params: list[Any] = []
+        if max_session_minute is not None:
+            clause += " AND (session_minute IS NULL OR session_minute < ?)"
+            params.append(max_session_minute)
+        params.append(min_sample)
 
         with closing(self._connect()) as conn:
             rows = conn.execute(
@@ -379,13 +402,16 @@ class Memory:
                            COUNT(*)             AS count,
                            AVG(peak_return_pct) AS avg_peak,
                            MAX(peak_return_pct) AS best,
-                           MIN(peak_return_pct) AS worst
+                           MIN(peak_return_pct) AS worst,
+                           MIN(session_day)     AS first_day,
+                           MAX(session_day)     AS last_day,
+                           COUNT(DISTINCT session_day) AS distinct_days
                     FROM missed_opportunities
-                    WHERE {column} IS NOT NULL
+                    {clause}
                     GROUP BY bucket
                     HAVING count >= ?
                     ORDER BY avg_peak DESC""",
-                (min_sample,),
+                params,
             ).fetchall()
 
         return [
@@ -395,6 +421,9 @@ class Memory:
                 "avg_peak": round(row["avg_peak"], 1),
                 "best": round(row["best"], 1),
                 "worst": round(row["worst"], 1),
+                "first_day": row["first_day"],
+                "last_day": row["last_day"],
+                "distinct_days": row["distinct_days"],
             }
             for row in rows
         ]
@@ -681,8 +710,24 @@ class Memory:
 
     def set_lesson_status(self, lesson_id: int, status: str) -> None:
         with closing(self._connect()) as conn:
-            conn.execute("UPDATE lessons SET status = ? WHERE id = ?", (status, lesson_id))
+            conn.execute(
+                "UPDATE lessons SET status = ?, decided_at = ? WHERE id = ?",
+                (status, datetime.now(UTC).isoformat(), lesson_id),
+            )
             conn.commit()
+
+    def last_applied_at(self) -> datetime | None:
+        """When the operator last changed the engine's behaviour by approving
+        a lesson. The learning loop's cooling period is measured from here."""
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                """SELECT MAX(COALESCE(decided_at, created_at)) AS ts
+                   FROM lessons WHERE status = 'applied'"""
+            ).fetchone()
+        if row is None or row["ts"] is None:
+            return None
+        ts = datetime.fromisoformat(row["ts"])
+        return ts if ts.tzinfo else ts.replace(tzinfo=UTC)
 
 
 def _to_recalled(row: sqlite3.Row) -> RecalledTrade:

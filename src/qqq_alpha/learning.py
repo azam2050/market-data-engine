@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from statistics import mean
 
 from qqq_alpha.brain.playbook import Lesson, Playbook, append_lesson
@@ -33,6 +33,15 @@ log = logging.getLogger(__name__)
 MIN_SAMPLE = 8
 MIN_EFFECT_PCT = 25.0  # a bucket must beat/lag the average by this much to count
 MIN_TOTAL_TRADES = 20  # below this, the record cannot support any lesson at all
+
+# --- governance of missed-opportunity lessons, learned the hard way ---
+# a "lower your bar" lesson trained on a dozen declines from two days produced
+# behaviour that oscillated daily; these gates make the evidence earn the change
+MIN_MISSED_SAMPLE = 25  # declines needed before caution itself goes on trial
+MISSED_CUTOFF_MINUTE = 330  # ignore declines after 15:00 ET — those passes are policy
+MIN_SPAN_DAYS = 7  # the sample must cover at least two calendar weeks...
+MIN_DISTINCT_DAYS = 4  # ...and at least this many separate sessions
+COOLING_DAYS = 7  # one behaviour change at a time: no proposals right after one
 
 
 @dataclass
@@ -80,9 +89,21 @@ def _consider_missed(memory: Memory, settings: Settings) -> list[Finding]:
     a wide margin is a regime where the engine is saying no too readily.
     """
     findings: list[Finding] = []
-    for row in memory.missed_performance_by("regime", MIN_SAMPLE):
+    rows = memory.missed_performance_by(
+        "regime", MIN_MISSED_SAMPLE, max_session_minute=MISSED_CUTOFF_MINUTE
+    )
+    for row in rows:
         effect = round(row["avg_peak"] - settings.min_target_return_pct, 1)
         if effect < MIN_EFFECT_PCT:
+            continue
+        # the sample must span real market variety, not one bad week's mood:
+        # a lesson built on two consecutive sessions describes those sessions,
+        # not the engine
+        span_ok = False
+        if row.get("first_day") and row.get("last_day"):
+            span = (date.fromisoformat(row["last_day"]) - date.fromisoformat(row["first_day"])).days
+            span_ok = span >= MIN_SPAN_DAYS and (row.get("distinct_days") or 0) >= MIN_DISTINCT_DAYS
+        if not span_ok:
             continue
         findings.append(
             Finding(
@@ -272,12 +293,35 @@ def propose(memory: Memory, report: LearningReport) -> list[int]:
     accumulates, so an already-approved lesson would otherwise come back the
     very next morning wearing slightly different figures (this happened: L002
     was approved on 2026-08-10 and re-proposed verbatim-in-spirit on 08-11).
+
+    Two pacing rules on top of the dedupe:
+    - a cooling period after any applied lesson, so one behaviour change is
+      measured before the next is even suggested
+    - at most ONE new proposal per run — the strongest finding. A stack of
+      simultaneous amendments cannot be attributed when results move.
     """
+    applied_at = memory.last_applied_at()
+    if applied_at is not None and datetime.now(UTC) - applied_at < timedelta(days=COOLING_DAYS):
+        report.notes.append(
+            f"a lesson was applied within the last {COOLING_DAYS} days — proposals "
+            "are paused so its effect can be measured on its own"
+        )
+        return []
+
+    pending = memory.pending_lessons()
+    if pending:
+        report.notes.append(
+            "a proposal is already awaiting the operator's ruling — "
+            "no new ones until that decision is made"
+        )
+        return []
+
     ids: list[int] = []
     seen_keys = memory.lesson_keys()
-    seen_statements = {row["statement"] for row in memory.pending_lessons()}
+    seen_statements = {row["statement"] for row in pending}
 
-    for finding in report.findings:
+    candidates = sorted(report.findings, key=lambda f: f.confidence, reverse=True)
+    for finding in candidates:
         if finding.key in seen_keys or finding.statement in seen_statements:
             continue
         ids.append(
@@ -289,6 +333,7 @@ def propose(memory: Memory, report: LearningReport) -> list[int]:
                 key=finding.key,
             )
         )
+        break  # one change per measurement period
     return ids
 
 

@@ -1,0 +1,24 @@
+# الأجندة الاقتصادية — بتوقيت نيويورك (ET)
+#
+# هذا الملف يحرّره المشغّل: أضف أو صحّح المواعيد عند صدور الجداول الرسمية.
+# تقرير الوظائف NFP لا يُكتب هنا — المحرك يحسبه تلقائياً (أول جمعة من كل شهر
+# الساعة 08:30). كل ما يُكتب هنا يظهر للذكاء داخل سياق القرار يوم الحدث.
+#
+# impact: high | medium
+events:
+  # --- FOMC 2026 (يوم إعلان القرار، 14:00 ET + مؤتمر صحفي 14:30) ---
+  - {date: 2026-01-28, time_et: "14:00", label: "قرار الفائدة FOMC", impact: high}
+  - {date: 2026-03-18, time_et: "14:00", label: "قرار الفائدة FOMC", impact: high}
+  - {date: 2026-04-29, time_et: "14:00", label: "قرار الفائدة FOMC", impact: high}
+  - {date: 2026-06-17, time_et: "14:00", label: "قرار الفائدة FOMC", impact: high}
+  - {date: 2026-07-29, time_et: "14:00", label: "قرار الفائدة FOMC", impact: high}
+  - {date: 2026-09-16, time_et: "14:00", label: "قرار الفائدة FOMC", impact: high}
+  - {date: 2026-10-28, time_et: "14:00", label: "قرار الفائدة FOMC", impact: high}
+  - {date: 2026-12-09, time_et: "14:00", label: "قرار الفائدة FOMC", impact: high}
+
+  # --- CPI 2026 (تقرير التضخم، 08:30 ET) — تحقق من جدول BLS الرسمي وصحّح عند الحاجة ---
+  - {date: 2026-08-12, time_et: "08:30", label: "CPI تقرير التضخم", impact: high}
+  - {date: 2026-09-11, time_et: "08:30", label: "CPI تقرير التضخم", impact: high}
+  - {date: 2026-10-13, time_et: "08:30", label: "CPI تقرير التضخم", impact: high}
+  - {date: 2026-11-10, time_et: "08:30", label: "CPI تقرير التضخم", impact: high}
+  - {date: 2026-12-10, time_et: "08:30", label: "CPI تقرير التضخم", impact: high}

@@ -210,7 +210,19 @@ class Decision(BaseModel):
         description="playbook guidance the brain deliberately went against, with reasons",
     )
     invalidation: str = ""
+    invalidation_level: float | None = Field(
+        default=None,
+        description="the UNDERLYING price that proves the thesis wrong; the "
+        "engine exits the moment spot crosses it",
+    )
     expected_hold_minutes: int | None = None
+    size_factor: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="recommended position size as a fraction of normal, set by "
+        "the engine from confidence and time of day",
+    )
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -254,6 +266,10 @@ class Trade(BaseModel):
     max_favorable_pct: float = 0.0
     max_adverse_pct: float = 0.0
     exit_reason: str = ""
+    # scale-out bookkeeping: the banked half's contribution to whole-position
+    # P&L, and how much of the position is still open (1.0 = never scaled)
+    banked_return_pct: float = 0.0
+    open_fraction: float = 1.0
     snapshot_at_entry: MarketSnapshot | None = None
 
     @property

@@ -372,6 +372,54 @@ def test_signal_message_contains_the_full_trade_plan():
     assert "يُلغى إذا" in message
 
 
+def test_signal_message_carries_size_thesis_stop_and_exit_plan():
+    """The subscriber acts on the size line and the thesis-stop level directly."""
+    from qqq_alpha.domain import Action, Decision, OptionType, Target
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    bars = synthetic_session("QQQ", DAY, seed=15)
+    snap = SnapshotBuilder("QQQ").build(bars[:80])
+    decision = Decision(
+        ts=snap.ts,
+        action=Action.ENTER,
+        direction=OptionType.CALL,
+        occ_symbol="O:QQQ260302C00485000",
+        targets=[Target(label="T1", price=0.0, return_pct=50, take_pct=50)],
+        stop_return_pct=-40,
+        confidence=6,
+        thesis="x",
+        invalidation_level=484.2,
+        size_factor=0.5,
+    )
+    message = format_signal(TradeManager().open_trade(decision, 1.00, snap), delayed=False)
+
+    assert "نصف الحجم المعتاد" in message
+    assert "وقف الفكرة" in message and "484.20" in message
+    assert "نبيع النصف ونؤمّن التكلفة" in message
+
+
+def test_size_factor_pays_for_conviction_and_fears_the_open():
+    from qqq_alpha.domain import Action, Decision
+    from qqq_alpha.live.engine import LiveEngine
+
+    def _decision(confidence: int) -> Decision:
+        return Decision(
+            ts=datetime(2026, 3, 2, 11, 0, tzinfo=MARKET_TZ),
+            action=Action.ENTER,
+            confidence=confidence,
+        )
+
+    midday = datetime(2026, 3, 2, 11, 0, tzinfo=MARKET_TZ)
+    open_min = datetime(2026, 3, 2, 9, 36, tzinfo=MARKET_TZ)
+
+    assert LiveEngine._size_factor(_decision(8), midday) == 1.0
+    assert LiveEngine._size_factor(_decision(7), midday) == 0.75
+    assert LiveEngine._size_factor(_decision(6), midday) == 0.5
+    # the first hour halves everything: the record's worst losses lived there
+    assert LiveEngine._size_factor(_decision(8), open_min) == 0.5
+    assert LiveEngine._size_factor(_decision(5), open_min) == 0.25
+
+
 # ---------------------------------------------------------------- human_contract
 def test_human_contract_labels_a_same_day_call():
     as_of = datetime(2026, 3, 2, 10, 0, tzinfo=MARKET_TZ)

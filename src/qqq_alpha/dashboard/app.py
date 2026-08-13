@@ -117,6 +117,12 @@ def create_app(
         Memory(settings.data_dir / "memory.db").set_lesson_status(lesson_id, "rejected")
         return RedirectResponse(url="/lessons", status_code=303)
 
+    @app.get("/report-card")
+    def report_card(request: Request, _: str = Depends(login)):
+        return templates.TemplateResponse(
+            request, "report_card.html", _ctx(card=data.report_card(settings))
+        )
+
     @app.get("/reports")
     def reports(request: Request, day: str | None = None, _: str = Depends(login)):
         target = date.fromisoformat(day) if day else data.today_et()

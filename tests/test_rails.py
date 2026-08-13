@@ -193,7 +193,9 @@ def test_implied_volatility_recovers_input():
     assert abs(recovered - 0.25) < 0.02
 
 
-def test_trade_manager_stops_and_targets():
+def test_trade_manager_banks_half_then_the_trade_cannot_go_red():
+    """The new geometry: at +35% half is sold and the cost is secured, so even
+    a full collapse afterwards closes the whole position green."""
     from qqq_alpha.trades import TradeManager
 
     bars = synthetic_session("QQQ", date(2026, 3, 2), seed=5)
@@ -206,13 +208,73 @@ def test_trade_manager_stops_and_targets():
 
     now = trade.opened_at + timedelta(minutes=5)
     update = manager.update(trade, 1.60, now)
-    assert update is not None and "target:T1" in update.note
+    assert update is not None and update.note.startswith("scale_out")
+    assert trade.open_fraction == 0.5
+    assert trade.banked_return_pct == 30.0  # half the position, banked at +60%
     assert trade.is_open
 
+    # the crash that used to produce -45% now exits at breakeven on the
+    # remainder and keeps the banked half: whole position closes positive
     update = manager.update(trade, 0.55, now + timedelta(minutes=1))
-    assert update is not None and "closed:stop_hit" in update.note
+    assert update is not None and "closed:breakeven_stop" in update.note
     assert not trade.is_open
-    assert trade.return_pct == -45.0
+    assert trade.return_pct == 7.5  # 30.0 banked + 0.5 x -45.0
+
+
+def test_trade_manager_trails_the_runner_from_its_peak():
+    from qqq_alpha.trades import TradeManager
+
+    bars = synthetic_session("QQQ", date(2026, 3, 2), seed=5)
+    snap = SnapshotBuilder("QQQ").build(bars[:60])
+    manager = TradeManager()
+    trade = manager.open_trade(_decision(), fill_price=1.00, snapshot=snap)
+
+    now = trade.opened_at + timedelta(minutes=5)
+    manager.update(trade, 1.60, now)  # scale out, peak +60%
+    manager.update(trade, 2.20, now + timedelta(minutes=2))  # peak +120%
+    assert trade.is_open
+
+    # +120% peak minus 25% giveback → exits near +95% on the runner
+    update = manager.update(trade, 1.90, now + timedelta(minutes=4))
+    assert update is not None and "closed:trail_stop" in update.note
+    assert trade.return_pct == 75.0  # 30 banked + 0.5 x 90
+
+
+def test_trade_manager_time_stops_a_thesis_that_never_moved():
+    from qqq_alpha.trades import TradeManager
+
+    bars = synthetic_session("QQQ", date(2026, 3, 2), seed=5)
+    snap = SnapshotBuilder("QQQ").build(bars[:60])
+    manager = TradeManager()
+    decision = _decision().model_copy(update={"expected_hold_minutes": 20})
+    trade = manager.open_trade(decision, fill_price=1.00, snapshot=snap)
+
+    # +5% after 1.5x the expected hold is theta bleed, not patience
+    update = manager.update(trade, 1.05, trade.opened_at + timedelta(minutes=31))
+    assert update is not None and "closed:time_stop" in update.note
+
+
+def test_thesis_stop_fires_when_spot_crosses_the_invalidation_level():
+    from qqq_alpha.domain import OptionType
+    from qqq_alpha.trades import TradeManager
+
+    bars = synthetic_session("QQQ", date(2026, 3, 2), seed=5)
+    snap = SnapshotBuilder("QQQ").build(bars[:60])
+    manager = TradeManager()
+    decision = _decision().model_copy(
+        update={"direction": OptionType.CALL, "invalidation_level": 480.0}
+    )
+    trade = manager.open_trade(decision, fill_price=1.00, snapshot=snap)
+
+    assert not manager.check_thesis(trade, spot=485.0)  # thesis alive
+    assert manager.check_thesis(trade, spot=479.5)  # CALL, spot below the level
+
+    put = _decision().model_copy(
+        update={"direction": OptionType.PUT, "invalidation_level": 490.0}
+    )
+    put_trade = manager.open_trade(put, fill_price=1.00, snapshot=snap)
+    assert not manager.check_thesis(put_trade, spot=485.0)
+    assert manager.check_thesis(put_trade, spot=490.5)  # PUT, spot above the level
 
 
 def test_infeasible_separates_impossibility_from_caution():

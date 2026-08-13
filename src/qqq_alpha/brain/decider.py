@@ -62,6 +62,7 @@ class Decider(Protocol):
         chain: list | None = None,
         options_pulse: list | None = None,
         recent_decisions: list | None = None,
+        calendar_events: list | None = None,
     ) -> Decision: ...
 
 
@@ -92,6 +93,7 @@ class AIDecider:
         chain: list | None = None,
         options_pulse: list | None = None,
         recent_decisions: list | None = None,
+        calendar_events: list | None = None,
     ) -> Decision:
         if not self.settings.anthropic_model:
             raise RuntimeError("ANTHROPIC_MODEL is not configured (see .env.example)")
@@ -111,6 +113,7 @@ class AIDecider:
                 chain=chain,
                 options_pulse=options_pulse,
                 recent_decisions=recent_decisions,
+                calendar_events=calendar_events,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("prompt assembly failed")
@@ -220,6 +223,12 @@ class AIDecider:
             expected_hold_minutes=payload.get("expected_hold_minutes"),
             raw=payload,
         )
+        level = payload.get("invalidation_level")
+        if level is not None:
+            try:
+                decision.invalidation_level = float(level)
+            except (TypeError, ValueError):
+                decision.invalidation_level = None
 
         if action is not Action.ENTER:
             return decision
@@ -278,6 +287,7 @@ class HeuristicDecider:
         chain: list | None = None,
         options_pulse: list | None = None,
         recent_decisions: list | None = None,
+        calendar_events: list | None = None,
     ) -> Decision:
         bias = snapshot.net_bias
         rel_vol = snapshot.indicators.get("rel_volume") or 0.0

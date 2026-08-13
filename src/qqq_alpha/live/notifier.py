@@ -25,6 +25,17 @@ log = logging.getLogger(__name__)
 DISCLAIMER = "توصية تعليمية — القرار والمسؤولية عليك"
 
 
+def size_label(factor: float) -> str:
+    """The size recommendation in words a subscriber acts on directly."""
+    if factor >= 1.0:
+        return "كامل الحجم المعتاد"
+    if factor >= 0.75:
+        return "ثلاثة أرباع الحجم المعتاد"
+    if factor >= 0.5:
+        return "نصف الحجم المعتاد"
+    return "ربع الحجم المعتاد"
+
+
 class Notifier(Protocol):
     async def signal(self, trade: Trade, delayed: bool) -> None: ...
     async def update(self, trade: Trade, update: TradeUpdate, delayed: bool) -> None: ...
@@ -76,8 +87,14 @@ def format_signal(trade: Trade, delayed: bool) -> str:
 
     if decision.stop_price is not None:
         lines.append(
-            f"🛑 وقف الخسارة: ${decision.stop_price:.2f} ({decision.stop_return_pct:+.0f}%)"
+            f"🛑 وقف الحماية: ${decision.stop_price:.2f} ({decision.stop_return_pct:+.0f}%)"
         )
+    if decision.invalidation_level is not None:
+        lines.append(
+            f"🧭 وقف الفكرة: خروج فوري إذا وصل السهم {decision.invalidation_level:.2f}"
+        )
+    lines.append(f"📦 الحجم المقترح: {size_label(decision.size_factor)}")
+    lines.append("♻️ الإدارة: عند +35% نبيع النصف ونؤمّن التكلفة، والباقي يركض بوقف متحرك")
 
     lines += ["", "📊 سبب الدخول:", decision.thesis]
 
@@ -103,6 +120,16 @@ def format_signal(trade: Trade, delayed: bool) -> str:
     return "\n".join(lines)
 
 
+EXIT_REASON_AR = {
+    "stop_hit": "ضُرب وقف الحماية",
+    "trail_stop": "الوقف المتحرك أقفل الرابح وحفظ معظم القمة",
+    "breakeven_stop": "عاد للتعادل بعد تأمين النصف — خروج بلا خسارة على الباقي",
+    "time_stop": "الفكرة لم تتحرك في وقتها — خروج قبل أن تأكلنا theta",
+    "thesis_invalidated": "السهم كسر مستوى إلغاء الفكرة الذي حدده التحليل",
+    "session_close": "إغلاق نهاية الجلسة",
+}
+
+
 def format_update(trade: Trade, update: TradeUpdate, delayed: bool) -> str:
     closed = update.note.startswith("closed:")
     icon = "🏁" if closed else "🔔"
@@ -114,6 +141,10 @@ def format_update(trade: Trade, update: TradeUpdate, delayed: bool) -> str:
         f"السعر الآن: ${update.price:.2f} ({update.return_pct:+.1f}%) {sign}",
         update.note,
     ]
+    if closed:
+        reason_ar = EXIT_REASON_AR.get(trade.exit_reason)
+        if reason_ar:
+            lines.append(f"السبب: {reason_ar}")
     if closed:
         held = (
             int((update.ts - trade.opened_at).total_seconds() // 60)

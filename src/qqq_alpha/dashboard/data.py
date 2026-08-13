@@ -81,6 +81,70 @@ def memory_counts(settings: Settings) -> dict[str, int]:
     return counts
 
 
+def report_card(settings: Settings) -> dict[str, Any]:
+    """Where the engine wins and loses: closed trades bucketed by regime,
+    entry hour, stated confidence, and exit reason.
+
+    After enough trades this page answers the questions that matter — "does
+    confidence 6 ever pay?", "should the first hour be off-limits?" — with
+    arithmetic instead of memory. Below ~10 trades per bucket it is a sketch,
+    and the template says so.
+    """
+    closed = [
+        t
+        for t in _latest_trades(settings)
+        if t.get("closed_at") and t.get("return_pct") is not None
+    ]
+
+    def _rows(label_of) -> list[dict[str, Any]]:
+        buckets: dict[str, list[float]] = {}
+        for trade in closed:
+            label = label_of(trade)
+            if label is None:
+                continue
+            buckets.setdefault(str(label), []).append(trade["return_pct"])
+        rows = [
+            {
+                "bucket": bucket,
+                "trades": len(returns),
+                "win_rate": round(100.0 * sum(r > 0 for r in returns) / len(returns)),
+                "avg_return": round(sum(returns) / len(returns), 1),
+                "best": round(max(returns), 1),
+                "worst": round(min(returns), 1),
+            }
+            for bucket, returns in buckets.items()
+        ]
+        return sorted(rows, key=lambda r: r["avg_return"], reverse=True)
+
+    def _hour(trade: dict[str, Any]) -> str | None:
+        opened = _parse_ts(trade.get("opened_at"))
+        if opened is None:
+            return None
+        local = opened.astimezone(MARKET_TZ)
+        return f"{local.hour:02d}:00-{local.hour + 1:02d}:00 ET"
+
+    returns = [t["return_pct"] for t in closed]
+    return {
+        "total": len(closed),
+        "avg_return": round(sum(returns) / len(returns), 1) if returns else 0.0,
+        "win_rate": (
+            round(100.0 * sum(r > 0 for r in returns) / len(returns)) if returns else 0
+        ),
+        "dimensions": [
+            {"title": "حسب نظام السوق", "rows": _rows(
+                lambda t: (t.get("snapshot_at_entry") or {}).get("regime")
+            )},
+            {"title": "حسب ساعة الدخول", "rows": _rows(_hour)},
+            {"title": "حسب الثقة المعلنة", "rows": _rows(
+                lambda t: f"{(t.get('decision') or {}).get('confidence', '?')}/10"
+            )},
+            {"title": "حسب سبب الخروج", "rows": _rows(
+                lambda t: t.get("exit_reason") or None
+            )},
+        ],
+    }
+
+
 def daily_report(settings: Settings, day: date) -> ReviewStats:
     return review(load_period(settings.journal_dir, since=day, until=day))
 

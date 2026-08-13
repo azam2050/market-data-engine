@@ -324,9 +324,11 @@ def _missed(
     peak: float = 80.0,
     direction: OptionType = OptionType.CALL,
     blocked: list[str] | None = None,
+    day_offset: int = 0,
+    session_minute: int = 30,
 ) -> MissedOpportunity:
     return MissedOpportunity(
-        ts=datetime(2026, 3, 2, 10, 0, tzinfo=MARKET_TZ),
+        ts=datetime(2026, 3, 2, 10, 0, tzinfo=MARKET_TZ) + timedelta(days=day_offset),
         reason="blocked before the brain could act" if blocked else "brain declined",
         would_be_direction=direction,
         occ_symbol="O:QQQ260302C00485000",
@@ -335,8 +337,14 @@ def _missed(
         peak_return_pct=peak,
         blocked_by=blocked or [],
         regime=regime,
-        session_minute=30,
+        session_minute=session_minute,
     )
+
+
+def _fill_missed_over_two_weeks(memory: Memory, peak: float = 90.0, count: int = 28) -> None:
+    """Enough declines, spread over enough sessions, to satisfy governance."""
+    for index in range(count):
+        memory.remember_missed(_missed(peak=peak, day_offset=index % 8))
 
 
 def test_missed_opportunity_round_trips(tmp_path):
@@ -365,10 +373,10 @@ def test_cannot_group_missed_by_arbitrary_columns(tmp_path):
 
 
 def test_learner_flags_regimes_where_caution_is_expensive(tmp_path):
-    """A pile of declined setups that would have cleared the target is a signal."""
+    """A pile of declined setups that would have cleared the target is a signal —
+    once it is big enough and spread over enough sessions to be trusted."""
     memory = Memory(tmp_path / "memory.db")
-    for _ in range(9):
-        memory.remember_missed(_missed(peak=90.0))  # well past the default 50% target
+    _fill_missed_over_two_weeks(memory, peak=90.0)  # well past the default 50% target
 
     report = analyse(memory)
     findings = [f for f in report.findings if f.key.startswith("missed:regime:")]
@@ -379,8 +387,31 @@ def test_learner_flags_regimes_where_caution_is_expensive(tmp_path):
 
 def test_learner_ignores_missed_opportunities_that_barely_clear_the_target(tmp_path):
     memory = Memory(tmp_path / "memory.db")
-    for _ in range(9):
-        memory.remember_missed(_missed(peak=55.0))  # clears 50%, but not by much
+    _fill_missed_over_two_weeks(memory, peak=55.0)  # clears 50%, but not by much
+
+    report = analyse(memory)
+    assert not any(f.key.startswith("missed:regime:") for f in report.findings)
+
+
+def test_a_dozen_declines_from_two_days_teach_nothing(tmp_path):
+    """The governance gate: the exact sample that produced the oscillating
+    'lower your bar' lessons — a dozen declines from a day or two — is refused."""
+    memory = Memory(tmp_path / "memory.db")
+    for index in range(12):
+        memory.remember_missed(_missed(peak=150.0, day_offset=index % 2))
+
+    report = analyse(memory)
+    assert not any(f.key.startswith("missed:regime:") for f in report.findings)
+
+
+def test_late_session_declines_are_not_missed_opportunities(tmp_path):
+    """A power-hour PASS that 'missed' a closing gamma spike was policy, not
+    cowardice — it must not count as evidence against caution."""
+    memory = Memory(tmp_path / "memory.db")
+    for index in range(28):
+        memory.remember_missed(
+            _missed(peak=300.0, day_offset=index % 8, session_minute=345)
+        )
 
     report = analyse(memory)
     assert not any(f.key.startswith("missed:regime:") for f in report.findings)
@@ -389,8 +420,7 @@ def test_learner_ignores_missed_opportunities_that_barely_clear_the_target(tmp_p
 def test_missed_opportunity_findings_do_not_wait_for_closed_trades(tmp_path):
     """Unlike trade-outcome dimensions, this one has its own sample size to trust."""
     memory = Memory(tmp_path / "memory.db")
-    for _ in range(9):
-        memory.remember_missed(_missed(peak=90.0))
+    _fill_missed_over_two_weeks(memory, peak=90.0)
 
     report = analyse(memory)  # zero closed trades on record
     assert report.total_trades == 0
@@ -429,10 +459,18 @@ def test_a_rejected_lesson_stays_rejected(tmp_path):
             snapshot,
         )
 
+    # proposals now arrive one at a time; reject each as it comes until the
+    # record has nothing new to offer
     ids = propose(memory, analyse(memory))
-    for lesson_id in ids:
-        memory.set_lesson_status(lesson_id, "rejected")
+    seen: set[int] = set()
+    while ids:
+        assert len(ids) == 1  # one behaviour change on the table at a time
+        assert ids[0] not in seen
+        seen.update(ids)
+        memory.set_lesson_status(ids[0], "rejected")
+        ids = propose(memory, analyse(memory))
 
+    # every distinct finding has been ruled on; none of them comes back
     assert propose(memory, analyse(memory)) == []
 
 

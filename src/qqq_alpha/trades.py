@@ -4,6 +4,13 @@ One object owns an open position from entry to exit: it applies targets, moves
 the stop, enforces the time stop, and emits the update messages a subscriber
 would receive. The backtester and the live engine both drive it the same way, so
 what you validate historically is literally what runs in production.
+
+The exit geometry is deliberately asymmetric, because the engine's own
+missed-opportunity record says 0DTE winners have a fat right tail (avg peak
++156%, best +614%) while the losers cluster at the stop. So instead of a fixed
++50% target that amputates the right tail while the -40% stop eats the whole
+left one, the manager banks half the position early to secure the cost, floors
+the remainder at breakeven, and trails the rest so a runner is allowed to run.
 """
 
 from __future__ import annotations
@@ -21,18 +28,28 @@ from qqq_alpha.domain import (
     TradeUpdate,
 )
 
-BREAKEVEN_ARM_PCT = 40.0
-TRAIL_GIVEBACK_PCT = 35.0
+SCALE_OUT_TRIGGER_PCT = 35.0
+TRAIL_GIVEBACK_PCT = 25.0
+DEFAULT_TIME_STOP_MINUTES = 15
 
 
 @dataclass
 class ExitPolicy:
     """How a position is managed once open. All values are percentages."""
 
+    # catastrophic backstop only — the working exits (scale-out, breakeven
+    # floor, trail, time stop, thesis stop) should all fire long before this
     stop_return_pct: float = -40.0
-    breakeven_arm_pct: float = BREAKEVEN_ARM_PCT
+    # at this contract gain, bank half the position: the trade can no longer
+    # lose money, and the remainder is free to chase the fat right tail
+    scale_out_trigger_pct: float = SCALE_OUT_TRIGGER_PCT
+    scale_out_fraction: float = 0.5
+    # once the scale-out has armed the trail, give back at most this much
+    # from the peak before the remainder is closed
     trail_giveback_pct: float = TRAIL_GIVEBACK_PCT
-    time_stop_minutes: int | None = None
+    # a position that goes nowhere is theta bleed, not patience — if the brain
+    # gave no expected hold, this fallback kicks in
+    time_stop_minutes: int | None = DEFAULT_TIME_STOP_MINUTES
     hard_close_minutes_before_expiry: int = 20
 
 
@@ -79,43 +96,88 @@ class TradeManager:
         return trade
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def blended_return_pct(trade: Trade, leg_return_pct: float) -> float:
+        """Whole-position P&L: the banked half plus the still-open fraction."""
+        return round(
+            trade.banked_return_pct + trade.open_fraction * leg_return_pct, 2
+        )
+
+    def check_thesis(self, trade: Trade, spot: float) -> bool:
+        """Has the underlying crossed the level where the thesis is wrong?
+
+        The brain names a spot level with every entry; price P&L is noise on a
+        0DTE contract, but the underlying crossing the invalidation level is a
+        fact about the idea itself. The caller closes with reason
+        ``thesis_invalidated`` when this returns True.
+        """
+        level = trade.decision.invalidation_level
+        direction = trade.decision.direction
+        if level is None or direction is None or not trade.is_open:
+            return False
+        if direction.value == "CALL":
+            return spot <= level
+        return spot >= level
+
     def update(self, trade: Trade, price: float, now: datetime) -> TradeUpdate | None:
         """Mark a trade to market and act on it. Returns an update worth sending."""
         if not trade.is_open or trade.entry_price <= 0:
             return None
 
-        return_pct = round((price - trade.entry_price) / trade.entry_price * 100.0, 2)
-        trade.max_favorable_pct = max(trade.max_favorable_pct, return_pct)
-        trade.max_adverse_pct = min(trade.max_adverse_pct, return_pct)
+        leg_return = round((price - trade.entry_price) / trade.entry_price * 100.0, 2)
+        trade.max_favorable_pct = max(trade.max_favorable_pct, leg_return)
+        trade.max_adverse_pct = min(trade.max_adverse_pct, leg_return)
 
-        # --- hard stop ---
+        # --- breakeven floor once half is banked: the trade cannot go red.
+        # checked before the catastrophic stop because it triggers far earlier
+        # and names what actually happened ---
+        if trade.open_fraction < 1.0 and leg_return <= 0.0:
+            return self._close(trade, price, now, "breakeven_stop")
+
+        # --- catastrophic stop (backstop, not the plan) ---
         stop_pct = trade.decision.stop_return_pct or self.policy.stop_return_pct
-        if return_pct <= stop_pct:
+        if leg_return <= stop_pct:
             return self._close(trade, price, now, "stop_hit")
 
-        # --- trailing exit after the position has run ---
-        if trade.max_favorable_pct >= self.policy.breakeven_arm_pct:
-            giveback = trade.max_favorable_pct - return_pct
+        # --- trail the runner: armed by the scale-out trigger ---
+        if trade.max_favorable_pct >= self.policy.scale_out_trigger_pct:
+            giveback = trade.max_favorable_pct - leg_return
             if giveback >= self.policy.trail_giveback_pct:
                 return self._close(trade, price, now, "trail_stop")
 
-        # --- time stop ---
+        # --- bank half at the trigger: secures the cost, frees the runner ---
+        if trade.open_fraction >= 1.0 and leg_return >= self.policy.scale_out_trigger_pct:
+            taken = self.policy.scale_out_fraction
+            trade.banked_return_pct = round(taken * leg_return, 2)
+            trade.open_fraction = round(1.0 - taken, 2)
+            update = TradeUpdate(
+                ts=now,
+                price=price,
+                return_pct=leg_return,
+                note=(
+                    f"scale_out: +{leg_return:.0f}% — بيع نصف الكمية الآن لتأمين التكلفة؛ "
+                    "النصف الباقي يركض بوقف عند التعادل ووقف متحرك من القمة"
+                ),
+            )
+            trade.updates.append(update)
+            return update
+
+        # --- time stop: a thesis that never moved is being eaten by theta ---
         expected = trade.decision.expected_hold_minutes or self.policy.time_stop_minutes
         if expected:
             elapsed = (now - trade.opened_at).total_seconds() / 60.0
-            if elapsed >= expected * 1.5 and return_pct < 15.0:
+            if elapsed >= expected * 1.5 and leg_return < 15.0:
                 return self._close(trade, price, now, "time_stop")
 
-        # --- target notifications ---
+        # --- target notifications (the brain's own map, still worth relaying) ---
         for target in trade.decision.targets:
             already = any(t.note.startswith(f"target:{target.label}") for t in trade.updates)
-            if not already and return_pct >= target.return_pct:
+            if not already and leg_return >= target.return_pct:
                 update = TradeUpdate(
                     ts=now,
                     price=price,
-                    return_pct=return_pct,
-                    note=f"target:{target.label} reached (+{target.return_pct:.0f}%) — "
-                    f"take {target.take_pct}%, move stop to breakeven",
+                    return_pct=leg_return,
+                    note=f"target:{target.label} reached (+{target.return_pct:.0f}%)",
                 )
                 trade.updates.append(update)
                 return update
@@ -124,7 +186,7 @@ class TradeManager:
         last_update = trade.updates[-1].ts if trade.updates else trade.opened_at
         if now - last_update >= timedelta(minutes=15):
             update = TradeUpdate(
-                ts=now, price=price, return_pct=return_pct, note="status: still open"
+                ts=now, price=price, return_pct=leg_return, note="status: still open"
             )
             trade.updates.append(update)
             return update
@@ -136,7 +198,8 @@ class TradeManager:
         return self._close(trade, price, now, reason)
 
     def _close(self, trade: Trade, price: float, now: datetime, reason: str) -> TradeUpdate:
-        return_pct = round((price - trade.entry_price) / trade.entry_price * 100.0, 2)
+        leg_return = round((price - trade.entry_price) / trade.entry_price * 100.0, 2)
+        return_pct = self.blended_return_pct(trade, leg_return)
         trade.exit_price = price
         trade.closed_at = now
         trade.return_pct = return_pct

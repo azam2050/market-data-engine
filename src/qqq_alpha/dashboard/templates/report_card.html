@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}بطاقة التقرير — QQQ Alpha{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>بطاقة تقرير المحرك — متى يربح ومتى يخسر</h2>
+  <div class="grid">
+    <div class="stat"><div class="n">{{ card.total }}</div><div class="l">صفقات مغلقة</div></div>
+    <div class="stat"><div class="n">{{ card.win_rate }}%</div><div class="l">نسبة الصفقات الرابحة</div></div>
+    <div class="stat"><div class="n">{{ "%.1f"|format(card.avg_return) }}%</div><div class="l">متوسط العائد للصفقة</div></div>
+  </div>
+  {% if card.total < 10 %}
+  <p class="small muted">⚠️ أقل من 10 صفقات — هذه الأرقام مؤشر أولي فقط ولا تصلح للحكم بعد. الحكم الحقيقي يبدأ من ~30 صفقة.</p>
+  {% else %}
+  <p class="small muted">اقرأ الجداول كأسئلة: أي نظام سوق يدفع؟ أي ساعة تخسر دائماً؟ هل الثقة المعلنة تفرّق فعلاً؟</p>
+  {% endif %}
+</div>
+
+{% for dim in card.dimensions %}
+<div class="card">
+  <h2>{{ dim.title }}</h2>
+  {% if dim.rows %}
+  <table>
+    <tr><th>الفئة</th><th>عدد الصفقات</th><th>نسبة الربح</th><th>متوسط العائد</th><th>أفضل</th><th>أسوأ</th></tr>
+    {% for r in dim.rows %}
+    <tr>
+      <td>{{ r.bucket }}</td>
+      <td>{{ r.trades }}{% if r.trades < 5 %} <span class="small muted">(عينة صغيرة)</span>{% endif %}</td>
+      <td>{{ r.win_rate }}%</td>
+      <td style="color: var({{ '--green' if r.avg_return > 0 else '--red' }});">{{ "%+.1f"|format(r.avg_return) }}%</td>
+      <td>{{ "%+.1f"|format(r.best) }}%</td>
+      <td>{{ "%+.1f"|format(r.worst) }}%</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">لا توجد بيانات كافية بعد</div>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% endblock %}
