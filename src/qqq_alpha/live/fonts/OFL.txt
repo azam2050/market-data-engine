@@ -1,0 +1,9 @@
+Tajawal — Copyright 2018 The Tajawal Project Authors (https://github.com/Gue3bara/Tajawal)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+The full license text is available with a FAQ at: https://openfontlicense.org
+
+Summary of the SIL Open Font License 1.1: the fonts may be used, studied,
+modified and redistributed freely (including bundled inside software, as done
+here) provided they are not sold by themselves, the copyright and license
+notices are retained, and any derived fonts use a different reserved name.

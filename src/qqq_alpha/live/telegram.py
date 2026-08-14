@@ -100,6 +100,36 @@ class TelegramNotifier:
         log.error("telegram send permanently failed after %d attempts", MAX_ATTEMPTS)
         return False
 
+    async def _post_photo(
+        self, png: bytes, caption: str = "", silent: bool = False, chat_id: str | None = None
+    ) -> bool:
+        """One photo message. Best-effort, single retry — the card is garnish;
+        the text that follows it is the signal of record."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=30.0)
+
+        url = f"{TELEGRAM_API}/bot{self.token}/sendPhoto"
+        for attempt in range(2):
+            try:
+                response = await self._client.post(
+                    url,
+                    data={
+                        "chat_id": chat_id or self.chat_id,
+                        "caption": caption[:1000],
+                        "disable_notification": silent,
+                    },
+                    files={"photo": ("signal.png", png, "image/png")},
+                )
+                if response.status_code == 200:
+                    return True
+                log.warning(
+                    "telegram rejected photo: %s %s", response.status_code, response.text[:200]
+                )
+            except (httpx.TransportError, httpx.TimeoutException) as exc:
+                log.warning("telegram photo send failed (%s)", exc)
+            await asyncio.sleep(BASE_RETRY_SEC * (2**attempt))
+        return False
+
     @staticmethod
     def _chunks(text: str) -> list[str]:
         """Split on line boundaries so a trade plan is never cut mid-number."""
@@ -286,23 +316,56 @@ class BroadcastNotifier(TelegramNotifier):
         super().__init__(token, admin_chat_id, client=client, silent_notes=silent_notes)
         self.memory = memory
 
-    async def _broadcast(self, text: str, silent: bool) -> None:
-        await self._send(text, silent=silent)  # the operator, always first
-        for chat_id in self.memory.active_subscriber_ids(datetime.now(UTC)):
-            if chat_id == self.chat_id:
-                continue
+    async def _broadcast(self, text: str, silent: bool, card: bytes | None = None) -> None:
+        recipients = [
+            self.chat_id,  # the operator, always first
+            *(
+                chat_id
+                for chat_id in self.memory.active_subscriber_ids(datetime.now(UTC))
+                if chat_id != self.chat_id
+            ),
+        ]
+        for chat_id in recipients:
             try:
+                if card is not None:
+                    # the card carries the visual; the text right after it is
+                    # the signal of record and goes out regardless
+                    await self._post_photo(card, silent=silent, chat_id=chat_id)
                 await self._send(text, silent=silent, chat_id=chat_id)
             except Exception:  # noqa: BLE001 - one blocked user must not stop the list
                 log.exception("broadcast to %s failed", chat_id)
             await asyncio.sleep(0.05)  # stay under Telegram's ~30 msg/s ceiling
 
+    @staticmethod
+    def _render_card(kind: str, trade: Trade, update: TradeUpdate | None, delayed: bool) -> bytes | None:
+        """Best-effort card image. Any failure means text-only, never no-signal."""
+        try:
+            from qqq_alpha.live import cards
+
+            if kind == "entry":
+                return cards.render_entry_card(trade, delayed)
+            if kind == "scale_out" and update is not None:
+                return cards.render_scale_out_card(trade, update)
+            if kind == "close" and update is not None:
+                return cards.render_close_card(trade, update)
+        except Exception:  # noqa: BLE001 - a drawing bug must never cost a signal
+            log.exception("card rendering failed; sending text only")
+        return None
+
     async def signal(self, trade: Trade, delayed: bool) -> None:
-        await self._broadcast(format_signal(trade, delayed), silent=False)
+        card = self._render_card("entry", trade, None, delayed)
+        await self._broadcast(format_signal(trade, delayed), silent=False, card=card)
 
     async def update(self, trade: Trade, update: TradeUpdate, delayed: bool) -> None:
-        noteworthy = update.note.startswith(("closed:", "target:"))
-        await self._broadcast(format_update(trade, update, delayed), silent=not noteworthy)
+        card: bytes | None = None
+        if update.note.startswith("closed:"):
+            card = self._render_card("close", trade, update, delayed)
+        elif update.note.startswith("scale_out"):
+            card = self._render_card("scale_out", trade, update, delayed)
+        noteworthy = update.note.startswith(("closed:", "target:", "scale_out"))
+        await self._broadcast(
+            format_update(trade, update, delayed), silent=not noteworthy, card=card
+        )
 
 
 def welcome_message(trial_days: int) -> str:

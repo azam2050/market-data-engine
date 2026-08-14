@@ -308,8 +308,13 @@ async def test_broadcast_reaches_operator_and_active_subscribers(tmp_path):
     memory.add_subscriber("203", "u3", "Old", now - timedelta(days=40), now - timedelta(days=10))
 
     recipients: list[str] = []
+    photos = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal photos
+        if request.url.path.endswith("sendPhoto"):
+            photos += 1
+            return httpx.Response(200, json={"ok": True})
         recipients.append(json.loads(request.content)["chat_id"])
         return httpx.Response(200, json={"ok": True})
 
@@ -319,10 +324,49 @@ async def test_broadcast_reaches_operator_and_active_subscribers(tmp_path):
         await notifier.signal(_trade(), delayed=False)
         await notifier.note("system detail")
 
-    # signal: admin + the two active trials, never the expired one
+    # signal: admin + the two active trials, never the expired one —
+    # each got the card image and then the text of record
     assert recipients[:3] == ["admin", "201", "202"]
-    # the note went to the admin only
+    assert photos == 3
+    # the note went to the admin only, and notes carry no card
     assert recipients[3:] == ["admin"]
+
+
+async def test_a_card_rendering_bug_never_costs_the_text_signal(tmp_path, monkeypatch):
+    """The card is garnish. If drawing explodes, the text still goes out."""
+    from datetime import UTC, datetime, timedelta
+
+    from qqq_alpha.live import cards
+    from qqq_alpha.live.telegram import BroadcastNotifier
+    from qqq_alpha.memory import Memory
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("font missing")
+
+    monkeypatch.setattr(cards, "render_entry_card", boom)
+
+    memory = Memory(tmp_path / "memory.db")
+    now = datetime.now(UTC)
+    memory.add_subscriber("301", "u", "U", now, now + timedelta(days=30))
+
+    recipients: list[str] = []
+    photos = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal photos
+        if request.url.path.endswith("sendPhoto"):
+            photos += 1
+            return httpx.Response(200, json={"ok": True})
+        recipients.append(json.loads(request.content)["chat_id"])
+        return httpx.Response(200, json={"ok": True})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        notifier = BroadcastNotifier("token", "admin", memory, client=client)
+        await notifier.signal(_trade(), delayed=False)
+
+    assert photos == 0
+    assert recipients == ["admin", "301"]
 
 
 async def test_listener_claims_the_inbox_from_a_stale_webhook():
