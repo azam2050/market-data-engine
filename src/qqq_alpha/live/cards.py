@@ -194,7 +194,7 @@ def render_entry_card(trade: Trade, delayed: bool) -> bytes:
     contract = human_contract(trade.occ_symbol, trade.opened_at)
 
     img, draw = _canvas()
-    y = _header(draw, "إشارة مباشرة من محرك الذكاء الاصطناعي")
+    y = _header(draw, "بوت الخيارات اليومي")
 
     # the contract, big enough to read from across a room
     _panel(draw, (MARGIN, y, W - MARGIN, y + 280), outline=accent)
