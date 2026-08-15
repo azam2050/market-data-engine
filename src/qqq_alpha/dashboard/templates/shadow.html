@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}أسهم الظل — QQQ Alpha{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>مكتب أسهم الظل — التعلم في الخلفية قبل التوسع</h2>
+  <p class="small muted">
+    نفس العقل، نفس دفتر التشغيل، نفس محرك الخروج — لكن على أسهم فردية بعقود
+    أسبوعية، وكل شيء هنا <b>محاكاة مسجلة فقط</b>: لا تُرسل توصيات، ولا تمس
+    تداول QQQ الحقيقي، والتسعير تقريبي (نموذج Black-Scholes وليس أسعار سوق
+    حية). عندما يثبت سهم جدارته هنا بسجل كافٍ، يُرقّى إلى التداول الفعلي.
+  </p>
+  {% if shadow.symbols %}
+  <table>
+    <tr>
+      <th>السهم</th><th>قرارات AI</th><th>دخول</th><th>صفقات مفتوحة</th>
+      <th>صفقات مغلقة</th><th>نسبة الربح</th><th>متوسط العائد</th><th>العائد التراكمي</th>
+    </tr>
+    {% for s in shadow.symbols %}
+    <tr>
+      <td><b>{{ s.symbol }}</b></td>
+      <td>{{ s.decisions }}</td>
+      <td>{{ s.entries }}</td>
+      <td>{{ s.open }}</td>
+      <td>{{ s.closed }}</td>
+      <td>{% if s.win_rate is not none %}{{ s.win_rate }}%{% else %}—{% endif %}</td>
+      <td>{% if s.avg_return is not none %}<span class="{{ 'pos' if s.avg_return > 0 else 'neg' }}">{{ "%+.1f"|format(s.avg_return) }}%</span>{% else %}—{% endif %}</td>
+      <td>{% if s.total_return is not none %}<span class="{{ 'pos' if s.total_return > 0 else 'neg' }}">{{ "%+.1f"|format(s.total_return) }}%</span>{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">مكتب الظل غير مفعّل (SHADOW_SYMBOLS فارغ)</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>الصفقات المحاكاة</h2>
+  {% if shadow.trades %}
+  <table>
+    <tr><th>السهم</th><th>العقد</th><th>الدخول</th><th>الخروج</th><th>العائد</th><th>سبب الخروج</th><th>الثقة</th><th>فُتحت</th></tr>
+    {% for t in shadow.trades %}
+    <tr>
+      <td><b>{{ t.symbol or "?" }}</b></td>
+      <td class="small">{{ t.occ_symbol }}</td>
+      <td>{{ t.entry_price }}</td>
+      <td>{{ t.exit_price if t.exit_price is not none else "—" }}</td>
+      <td>
+        {% if t.return_pct is not none %}
+        <span class="{{ 'pos' if t.return_pct > 0 else 'neg' }}">{{ "%+.1f"|format(t.return_pct) }}%</span>
+        {% else %}<span class="pill wait">مفتوحة</span>{% endif %}
+      </td>
+      <td class="small">{{ t.exit_reason or "—" }}</td>
+      <td>{{ (t.decision or {}).get("confidence", "?") }}/10</td>
+      <td class="small muted">{{ (t.opened_at or "")[:16] }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">لا صفقات محاكاة بعد — المكتب ينتظر أول استيقاظ يستحق قرارًا</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>قرارات الظل الأخيرة</h2>
+  {% if shadow.decisions %}
+  <table>
+    <tr><th>الوقت</th><th>السهم</th><th>القرار</th><th>الثقة</th><th>الأطروحة</th></tr>
+    {% for d in shadow.decisions %}
+    <tr>
+      <td class="small muted">{{ (d.ts or "")[:16] }}</td>
+      <td><b>{{ d.symbol or "?" }}</b></td>
+      <td><span class="pill {{ d.action|lower }}">{{ d.action }}</span></td>
+      <td>{{ d.confidence }}/10</td>
+      <td class="thesis small">{{ d.thesis }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">لا قرارات بعد</div>
+  {% endif %}
+</div>
+
+{% endblock %}

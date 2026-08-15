@@ -103,8 +103,8 @@ class TelegramNotifier:
     async def _post_photo(
         self, png: bytes, caption: str = "", silent: bool = False, chat_id: str | None = None
     ) -> bool:
-        """One photo message. Best-effort, single retry — the card is garnish;
-        the text that follows it is the signal of record."""
+        """One photo message. Best-effort, single retry — if the photo cannot
+        be delivered, the caller falls back to the text version of the signal."""
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=30.0)
 
@@ -327,11 +327,16 @@ class BroadcastNotifier(TelegramNotifier):
         ]
         for chat_id in recipients:
             try:
+                delivered_card = False
                 if card is not None:
-                    # the card carries the visual; the text right after it is
-                    # the signal of record and goes out regardless
-                    await self._post_photo(card, silent=silent, chat_id=chat_id)
-                await self._send(text, silent=silent, chat_id=chat_id)
+                    delivered_card = await self._post_photo(card, silent=silent, chat_id=chat_id)
+                # subscribers get the card alone — the operator asked for one
+                # clean image per event, not image-plus-wall-of-text. The full
+                # text still goes to the operator (their audit copy) and to any
+                # recipient whose photo failed to deliver: a signal may lose its
+                # styling, never its content.
+                if chat_id == self.chat_id or not delivered_card:
+                    await self._send(text, silent=silent, chat_id=chat_id)
             except Exception:  # noqa: BLE001 - one blocked user must not stop the list
                 log.exception("broadcast to %s failed", chat_id)
             await asyncio.sleep(0.05)  # stay under Telegram's ~30 msg/s ceiling

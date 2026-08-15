@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from qqq_alpha.domain import (
     Decision,
@@ -31,6 +31,30 @@ from qqq_alpha.domain import (
 SCALE_OUT_TRIGGER_PCT = 35.0
 TRAIL_GIVEBACK_PCT = 25.0
 DEFAULT_TIME_STOP_MINUTES = 15
+
+
+def recommended_size_factor(decision: Decision, ts: datetime) -> float:
+    """Recommended size as a fraction of normal. Conviction pays for size.
+
+    The record so far: two of three early losses were full-size entries in the
+    first minutes of the session at middling confidence. Confidence 8+ is
+    "own money, no hesitation" per the prompt — that earns full size;
+    anything at 6 or below is half. The first hour halves it again, floored
+    at a quarter, because opening whipsaw kills stops regardless of thesis.
+    Shared by the live desk and the shadow stock desk so both records are
+    sized by the same arithmetic.
+    """
+    from qqq_alpha.config import MARKET_TZ
+
+    if decision.confidence >= 8:
+        factor = 1.0
+    elif decision.confidence == 7:
+        factor = 0.75
+    else:
+        factor = 0.5
+    if ts.astimezone(MARKET_TZ).time() < time(10, 30):
+        factor = max(factor * 0.5, 0.25)
+    return factor
 
 
 @dataclass

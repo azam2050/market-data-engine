@@ -324,12 +324,41 @@ async def test_broadcast_reaches_operator_and_active_subscribers(tmp_path):
         await notifier.signal(_trade(), delayed=False)
         await notifier.note("system detail")
 
-    # signal: admin + the two active trials, never the expired one —
-    # each got the card image and then the text of record
-    assert recipients[:3] == ["admin", "201", "202"]
+    # signal: the card went to admin + the two active trials, never the
+    # expired one. The full text is the admin's audit copy only — a
+    # subscriber's card IS their message
     assert photos == 3
+    assert recipients[:1] == ["admin"]
     # the note went to the admin only, and notes carry no card
-    assert recipients[3:] == ["admin"]
+    assert recipients[1:] == ["admin"]
+
+
+async def test_a_failed_photo_falls_back_to_text_for_that_subscriber(tmp_path):
+    """Card-only delivery must degrade to text, never to silence."""
+    from datetime import UTC, datetime, timedelta
+
+    from qqq_alpha.live.telegram import BroadcastNotifier
+    from qqq_alpha.memory import Memory
+
+    memory = Memory(tmp_path / "memory.db")
+    now = datetime.now(UTC)
+    memory.add_subscriber("401", "u", "U", now, now + timedelta(days=30))
+
+    text_recipients: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("sendPhoto"):
+            return httpx.Response(400, json={"ok": False})  # photos rejected
+        text_recipients.append(json.loads(request.content)["chat_id"])
+        return httpx.Response(200, json={"ok": True})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        notifier = BroadcastNotifier("token", "admin", memory, client=client)
+        await notifier.signal(_trade(), delayed=False)
+
+    # both the admin and the subscriber still received the signal as text
+    assert text_recipients == ["admin", "401"]
 
 
 async def test_a_card_rendering_bug_never_costs_the_text_signal(tmp_path, monkeypatch):

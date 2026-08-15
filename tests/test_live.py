@@ -488,6 +488,50 @@ def test_an_infeasible_decline_is_never_queued_as_missed(settings, tmp_path):
     assert len(engine._pending_missed) == 1
 
 
+def test_a_capacity_block_while_riding_the_move_is_not_a_miss(settings, tmp_path):
+    """Friday's ledger filled with '+104% missed' PUT rows recorded while the
+    engine was HOLDING a winning PUT — the caps refused a second entry into a
+    move already captured. Those rows taught the memory that our best trades
+    were failures of caution, which is exactly backwards."""
+    from qqq_alpha.domain import OptionType
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    engine = LiveEngine(
+        settings=settings,
+        decider=_AlwaysPassDecider(),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=NullNotifier(),
+    )
+    bars = synthetic_session("QQQ", DAY, seed=12, trend=0.03, volatility=0.002)
+    snapshot = SnapshotBuilder("QQQ").build(bars[:120])
+    for obs in snapshot.observations:
+        obs.score = 1.0  # strong positive bias — the "missed" side is CALL
+
+    decision = Decision(
+        ts=snapshot.ts,
+        action=Action.ENTER,
+        direction=OptionType.CALL,
+        occ_symbol="O:QQQ260302C00500000",
+        stop_return_pct=-40,
+        confidence=7,
+    )
+    engine.manager.open_trade(decision, 1.50, snapshot)
+
+    # same direction + capacity block: the move is being ridden, nothing missed
+    engine._queue_missed_check(snapshot, ["position_cap: 1/1 open"])
+    assert engine._pending_missed == []
+    engine._queue_missed_check(snapshot, ["daily_trade_cap: 2/2"])
+    assert engine._pending_missed == []
+
+    # the OPPOSITE direction blocked by capacity is still a real potential
+    # cost of the caps — that one must keep being graded
+    engine.manager.open_trades[0].decision.direction = OptionType.PUT
+    engine._queue_missed_check(snapshot, ["position_cap: 1/1 open"])
+    assert len(engine._pending_missed) == 1
+
+
 def test_prompt_renders_recalled_trades_from_durable_memory():
     """Regression: at boot and at each session roll the engine reloads recent
     trades as RecalledTrade summaries, not full Trade objects. Assuming the

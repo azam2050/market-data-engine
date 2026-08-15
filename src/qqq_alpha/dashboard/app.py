@@ -123,6 +123,12 @@ def create_app(
             request, "report_card.html", _ctx(card=data.report_card(settings))
         )
 
+    @app.get("/shadow")
+    def shadow(request: Request, _: str = Depends(login)):
+        return templates.TemplateResponse(
+            request, "shadow.html", _ctx(shadow=data.shadow_overview(settings))
+        )
+
     @app.get("/reports")
     def reports(request: Request, day: str | None = None, _: str = Depends(login)):
         target = date.fromisoformat(day) if day else data.today_et()

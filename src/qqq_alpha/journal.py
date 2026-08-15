@@ -109,6 +109,7 @@ def _snapshot_digest(snapshot: MarketSnapshot | None) -> dict[str, Any] | None:
         return None
     return {
         "ts": snapshot.ts,
+        "symbol": snapshot.underlying.symbol,
         "session_minute": snapshot.session_minute,
         "price": snapshot.underlying.close,
         "regime": snapshot.regime.value,

@@ -145,6 +145,72 @@ def report_card(settings: Settings) -> dict[str, Any]:
     }
 
 
+def shadow_overview(settings: Settings) -> dict[str, Any]:
+    """The shadow stock desk's record: per-symbol scoreboard plus the raw
+    decisions and simulated trades behind it.
+
+    Reads the shadow subdirectory only — the live QQQ pages glob the top-level
+    journal dir, and the two records must never mix. Every number here is a
+    simulation on model-priced weekly contracts, and the page says so.
+    """
+    from qqq_alpha.data.massive import parse_occ_symbol
+
+    shadow_dir = settings.journal_dir / "shadow"
+
+    def _symbol_of(row: dict[str, Any]) -> str | None:
+        occ = row.get("occ_symbol")
+        if occ:
+            try:
+                return parse_occ_symbol(occ)[0]
+            except (ValueError, IndexError):
+                pass
+        return (row.get("snapshot") or row.get("snapshot_at_entry") or {}).get("symbol")
+
+    trades_latest: dict[str, dict[str, Any]] = {}
+    for row in read_jsonl(sorted(shadow_dir.glob("trades-*.jsonl"))):
+        if row.get("trade_id"):
+            trades_latest[row["trade_id"]] = row
+    trades = sorted(
+        trades_latest.values(), key=lambda r: r.get("opened_at") or "", reverse=True
+    )
+    for trade in trades:
+        trade["symbol"] = _symbol_of(trade)
+
+    decisions = read_jsonl(sorted(shadow_dir.glob("decisions-*.jsonl")))
+    decisions.sort(key=lambda r: r.get("ts") or "", reverse=True)
+    for row in decisions:
+        row["symbol"] = _symbol_of(row)
+
+    symbols = []
+    for symbol in settings.shadow_symbols:
+        mine = [t for t in trades if t.get("symbol") == symbol]
+        closed = [
+            t for t in mine if t.get("closed_at") and t.get("return_pct") is not None
+        ]
+        returns = [t["return_pct"] for t in closed]
+        my_decisions = [d for d in decisions if d.get("symbol") == symbol]
+        symbols.append(
+            {
+                "symbol": symbol,
+                "decisions": len(my_decisions),
+                "entries": sum(1 for d in my_decisions if d.get("action") == "ENTER"),
+                "open": sum(1 for t in mine if not t.get("closed_at")),
+                "closed": len(closed),
+                "win_rate": (
+                    round(100.0 * sum(r > 0 for r in returns) / len(returns))
+                    if returns
+                    else None
+                ),
+                "avg_return": (
+                    round(sum(returns) / len(returns), 1) if returns else None
+                ),
+                "total_return": round(sum(returns), 1) if returns else None,
+            }
+        )
+
+    return {"symbols": symbols, "decisions": decisions[:60], "trades": trades[:60]}
+
+
 def daily_report(settings: Settings, day: date) -> ReviewStats:
     return review(load_period(settings.journal_dir, since=day, until=day))
 

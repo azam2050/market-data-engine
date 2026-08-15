@@ -17,7 +17,7 @@ import asyncio
 import contextlib
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from qqq_alpha.brain.attention import AttentionEngine
 from qqq_alpha.brain.decider import Decider, next_expiry, occ_symbol
@@ -46,11 +46,12 @@ from qqq_alpha.learning import apply_lesson as apply_pending_lesson
 from qqq_alpha.live.flowfeed import LiveFlowFeed
 from qqq_alpha.live.notifier import ConsoleNotifier, Notifier
 from qqq_alpha.live.preflight import run_preflight
+from qqq_alpha.live.shadow import ShadowStockDesk
 from qqq_alpha.live.state import SessionState, StateStore
 from qqq_alpha.live.stream import LiveBarStream
 from qqq_alpha.live.telegram import TelegramCommandListener
 from qqq_alpha.memory import Memory
-from qqq_alpha.trades import TradeManager
+from qqq_alpha.trades import TradeManager, recommended_size_factor
 
 log = logging.getLogger(__name__)
 
@@ -158,6 +159,14 @@ class LiveEngine:
         self.flow_feed = (
             LiveFlowFeed(self.settings, self.pricer)
             if isinstance(self.pricer, LiveChainPricer)
+            else None
+        )
+        # the expansion candidates, learning in the background on the leader
+        # bars this engine already receives — simulated, journal-only, and
+        # entirely absent from subscriber-facing output
+        self.shadow = (
+            ShadowStockDesk(self.settings, self.decider, self.playbook)
+            if self.settings.shadow_symbols
             else None
         )
 
@@ -312,6 +321,8 @@ class LiveEngine:
                     leader = await client.session(symbol, today)
                     if leader.regular:
                         self.leader_bars[symbol] = list(leader.regular)
+                        if self.shadow is not None:
+                            self.shadow.seed(symbol, list(leader.regular))
         except Exception as exc:
             # a failed warm start degrades the engine, it does not stop it
             self.status.last_error = f"warm_start_failed: {exc}"
@@ -331,6 +342,13 @@ class LiveEngine:
 
         if bar.symbol != self.settings.primary_symbol:
             self.leader_bars.setdefault(bar.symbol, []).append(bar)
+            if self.shadow is not None:
+                # shadow failures must never cost a QQQ bar — the live desk
+                # outranks the learner in every conflict
+                try:
+                    await self.shadow.on_bar(bar)
+                except Exception:  # noqa: BLE001
+                    log.exception("shadow desk failed on %s bar", bar.symbol)
             return
 
         self.session_bars.append(bar)
@@ -463,23 +481,9 @@ class LiveEngine:
     # ------------------------------------------------------------------
     @staticmethod
     def _size_factor(decision: Decision, ts: datetime) -> float:
-        """Recommended size as a fraction of normal. Conviction pays for size.
-
-        The record so far: two of three losses were full-size entries in the
-        first minutes of the session at middling confidence. Confidence 8+ is
-        "own money, no hesitation" per the prompt — that earns full size;
-        anything at 6 or below is half. The first hour halves it again, floored
-        at a quarter, because opening whipsaw kills stops regardless of thesis.
-        """
-        if decision.confidence >= 8:
-            factor = 1.0
-        elif decision.confidence == 7:
-            factor = 0.75
-        else:
-            factor = 0.5
-        if ts.astimezone(MARKET_TZ).time() < time(10, 30):
-            factor = max(factor * 0.5, 0.25)
-        return factor
+        """Delegates to the shared sizing arithmetic in trades.py — the shadow
+        stock desk uses the identical function, so both records compare."""
+        return recommended_size_factor(decision, ts)
 
     # ------------------------------------------------------------------
     async def _options_pulse(self, bar: Bar) -> list[dict] | None:
@@ -514,9 +518,19 @@ class LiveEngine:
         skipped — there is no "obvious trade" to grade it against. So is an
         infeasible decline (market closed, broken data): a trade that could not
         exist was not missed, and counting it poisons the learning loop.
+
+        A capacity block while already riding the same direction is not a miss
+        either: when the caps say "no second PUT" and the desk is holding a PUT,
+        the move was captured, not missed. Recording those rows taught the
+        ledger that big gains were "lost" during our best trades and pressured
+        the learning loop toward loosening caps that were doing their job.
         """
         if abs(snapshot.net_bias) < 0.2 or infeasible(blocked_by):
             return
+        if any(b.startswith(("daily_trade_cap", "position_cap")) for b in blocked_by):
+            wanted = OptionType.CALL if snapshot.net_bias > 0 else OptionType.PUT
+            if any(t.decision.direction is wanted for t in self.manager.open_trades):
+                return
         self._pending_missed.append(
             {
                 "ts": snapshot.ts,
@@ -830,6 +844,9 @@ class LiveEngine:
 
         def _apply_playbook(book: Playbook) -> None:
             self.playbook = book
+            if self.shadow is not None:
+                # the learner reads the same playbook the live desk does
+                self.shadow.playbook = book
 
         app = create_app(self.settings, status=self.status, on_lesson_applied=_apply_playbook)
         config = uvicorn.Config(
@@ -860,6 +877,8 @@ class LiveEngine:
 
         for trade in list(self.manager.open_trades):
             self.journal.log_trade(trade)
+        if self.shadow is not None:
+            self.shadow.flatten(datetime.now(UTC))
         # pending missed-opportunity checks are in-memory only; score what we
         # can rather than silently lose them to a restart
         for pending in self._pending_missed:

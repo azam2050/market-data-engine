@@ -48,6 +48,17 @@ class Settings(BaseSettings):
         validation_alias="LEADER_SYMBOLS",
     )
 
+    # shadow stock desk — single names learning in the background. Same brain,
+    # same playbook, weekly contracts, simulated fills; no signals are sent.
+    # Symbols must be in LEADER_SYMBOLS (that is where their bars come from).
+    # Empty string disables the desk entirely.
+    shadow_symbols_csv: str = Field(
+        default="NVDA,TSLA,AAPL", validation_alias="SHADOW_SYMBOLS"
+    )
+    # per symbol per day — the desk is a learner, not a second trading floor,
+    # and every wake here is a real brain call with a real cost
+    shadow_max_brain_calls_per_day: int = 3
+
     # operating limits — soft by design, see brain/rails.py
     max_trades_per_day: int = 2
     max_open_positions: int = 1
@@ -88,6 +99,10 @@ class Settings(BaseSettings):
     @property
     def leader_symbols(self) -> list[str]:
         return [s.strip().upper() for s in self.leader_symbols_csv.split(",") if s.strip()]
+
+    @property
+    def shadow_symbols(self) -> list[str]:
+        return [s.strip().upper() for s in self.shadow_symbols_csv.split(",") if s.strip()]
 
     @property
     def last_entry_time(self) -> time:

@@ -37,6 +37,9 @@ Prefer contracts whose delta gives the leverage you need for the expected underl
 HOW YOUR EXITS ARE MANAGED
 Once you enter, a mechanical exit engine runs the position — you do not manage it bar by bar. Know its shape so your entries fit it: it banks HALF the position automatically at about +35% (securing the cost), floors the remainder at breakeven, and trails the rest from its peak so a runner is allowed to run — the fat right tail is where this desk's edge lives, so do not design entries around a single fixed take-profit. Two of its exits come directly from you: `invalidation_level` (the UNDERLYING price that proves you wrong — the engine exits the moment spot crosses it, so place it at the structural level from your thesis, not at an arbitrary distance) and `expected_hold_minutes` (if the thesis has not moved by ~1.5x this, the position is closed as theta bleed — be honest about how fast the idea should work).
 
+SINGLE-STOCK SHADOW DESK
+Sometimes the snapshot you receive is for a single stock (NVDA, TSLA, AAPL, …) rather than QQQ. That is a shadow evaluation: your decision is recorded and scored against what the market then did, but no signal is sent and no capital moves — this is how a new symbol earns its way onto the live desk. Apply the same discipline with two adjustments. First, single names carry WEEKLY expiries: whatever expiry_dte you give resolves to the nearest Friday contract. Second, a contract with days of life left moves and decays far more slowly than 0DTE — a +50% target needs a proportionally larger move in the underlying, expected_hold_minutes should reflect a slower thesis, and lunch-hour theta panic does not apply at Wednesday's pace. Everything else — a numeric invalidation level, honest confidence, PASS as a first-class answer — is unchanged.
+
 LATE-SESSION ENTRIES
 Past the configured cutoff (see execution warnings), a same-day (0DTE) entry is blocked — brokers themselves restrict trading same-day contracts as expiry nears, this is not just caution on our side. A next-day (1DTE) contract is not affected by that cutoff. If the evidence is strong late in the session, set expiry_dte to 1 rather than assuming no trade is possible — theta is far less brutal with a full extra day of time value.
 
@@ -336,7 +339,10 @@ def build_user_prompt(
             "session of WAITs that each names a trigger and then quietly re-derives a "
             "new reason to wait is how 2026-08-11 produced zero trades on a clean "
             "trend day. Consistency between what you said and what you would do is "
-            "part of being a professional desk.\n" + _compact(decision_rows)
+            "part of being a professional desk. Follow-through means honoring a "
+            "trigger you named — it never means spending the day's remaining trade "
+            "allowance. PASS stays a first-class answer on every wake, including "
+            "right after a closed trade, win or loss.\n" + _compact(decision_rows)
         )
 
     if chain:
