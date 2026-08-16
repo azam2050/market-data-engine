@@ -375,27 +375,28 @@ class BroadcastNotifier(TelegramNotifier):
 
 def welcome_message(trial_days: int) -> str:
     return (
-        "أهلاً بك في QQQ Alpha 👋\n\n"
-        f"تم تفعيل فترتك التجريبية المجانية لمدة {trial_days} يوماً.\n"
-        "ستصلك توصيات الخيارات الحية على QQQ فور صدورها: العقد، الاتجاه، "
-        "الأهداف، وقف الخسارة، وسبب الدخول كاملاً — ومتابعة كل صفقة حتى إغلاقها.\n\n"
+        "أهلاً بك في بوت عقود الخيارات 👋\n\n"
+        f"تم تفعيل فترة المتابعة المجانية لمدة {trial_days} يوماً.\n"
+        "ستصلك الطروحات الفنية التعليمية الحية فور صدورها: العقد، الاتجاه، "
+        "مستويات المتابعة، وقف الحماية، والقراءة الفنية كاملة — مع متابعة كل "
+        "طرح حتى إغلاقه بنتيجته الحقيقية، ربحاً أو خسارة.\n\n"
         f"⚠️ {DISCLAIMER}"
     )
 
 
 def trial_status_message(days_left: int) -> str:
     return (
-        f"فترتك التجريبية فعّالة — المتبقي {max(days_left, 0)} يوماً.\n"
-        "التوصيات تصلك تلقائياً فور صدورها، لا يلزمك أي إجراء."
+        f"فترة المتابعة المجانية فعّالة — المتبقي {max(days_left, 0)} يوماً.\n"
+        "الطروحات تصلك تلقائياً فور صدورها، لا يلزمك أي إجراء."
     )
 
 
 def farewell_message(channel_url: str) -> str:
     lines = [
-        "انتهت فترتك التجريبية المجانية في QQQ Alpha — شكراً لمتابعتك معنا 🙏",
+        "انتهت فترة المتابعة المجانية في بوت عقود الخيارات — شكراً لمتابعتك معنا 🙏",
     ]
     if channel_url:
-        lines.append(f"\nللاستمرار ومتابعة الجديد، انضم إلينا هنا:\n{channel_url}")
+        lines.append(f"\nللاستمرار ومتابعة النتائج والتقارير، انضم إلينا هنا:\n{channel_url}")
     return "\n".join(lines)
 
 
@@ -432,7 +433,7 @@ async def verify_telegram(token: str, chat_id: str) -> tuple[bool, str]:
             name = me.json().get("result", {}).get("username", "unknown")
 
             notifier = TelegramNotifier(token, chat_id, client=client)
-            sent = await notifier._send("✅ QQQ Alpha متصل بنجاح — هذه رسالة اختبار")
+            sent = await notifier._send("✅ بوت عقود الخيارات متصل بنجاح — هذه رسالة اختبار")
             if not sent:
                 return False, f"bot @{name} works, but cannot post to chat {chat_id}"
 

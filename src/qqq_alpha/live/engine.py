@@ -43,9 +43,11 @@ from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
 from qqq_alpha.learning import analyse, propose, with_applied_lessons
 from qqq_alpha.learning import apply_lesson as apply_pending_lesson
+from qqq_alpha.live.channel import ChannelPublisher
 from qqq_alpha.live.flowfeed import LiveFlowFeed
-from qqq_alpha.live.notifier import ConsoleNotifier, Notifier
+from qqq_alpha.live.notifier import ConsoleNotifier, Notifier, human_contract
 from qqq_alpha.live.preflight import run_preflight
+from qqq_alpha.live.review import load_period, review
 from qqq_alpha.live.shadow import ShadowStockDesk
 from qqq_alpha.live.state import SessionState, StateStore
 from qqq_alpha.live.stream import LiveBarStream
@@ -169,6 +171,14 @@ class LiveEngine:
             if self.settings.shadow_symbols
             else None
         )
+        # the public channel: two live shares a week, daily and weekly
+        # reports, and the education series — all best-effort, never blocking
+        self.channel = (
+            ChannelPublisher(self.settings.telegram_bot_token, self.settings.telegram_channel_id)
+            if self.settings.telegram_bot_token and self.settings.telegram_channel_id
+            else None
+        )
+        self._channel_daily_posted: date | None = None
 
     # ------------------------------------------------------------------
     def _persist(self) -> None:
@@ -248,6 +258,12 @@ class LiveEngine:
             self._dashboard_task = asyncio.create_task(self._run_dashboard())
             await self.notifier.note(
                 f"📊 لوحة التحكم شغّالة على المنفذ {self.settings.dashboard_port}"
+            )
+
+        if self.channel is not None:
+            await self.notifier.note(
+                f"📢 النشر في القناة مفعّل: {self.settings.telegram_channel_id} — "
+                "طرحان حيّان أسبوعيًا + تقرير يومي وأسبوعي وسلسلة تعليمية"
             )
 
         await self._restore()
@@ -375,6 +391,8 @@ class LiveEngine:
                 update = self.manager.update(trade, price, bar.ts)
             if update is not None:
                 await self.notifier.update(trade, update, self._delayed)
+                if trade.shared_to_channel and self.channel is not None:
+                    await self.channel.post_trade_update(trade, update, self._delayed)
                 self.journal.log_trade(trade)
                 self.memory.remember_trade(trade)
                 self._persist()
@@ -471,12 +489,25 @@ class LiveEngine:
         trade = self.manager.open_trade(decision, fill, snapshot)
         self.status.trades_today += 1
         self.status.signals_sent += 1
+        # is this the week's live public share? First trade of a randomly
+        # chosen share day — flagged before persisting so a restart mid-trade
+        # keeps following it in the channel
+        if self.channel is not None:
+            local_day = bar.ts.astimezone(MARKET_TZ).date()
+            already_shared = any(
+                t.shared_to_channel
+                for t in (*self.manager.open_trades, *self.manager.closed_trades)
+            )
+            if self.channel.is_share_day(local_day) and not already_shared:
+                trade.shared_to_channel = True
         self.journal.log_trade(trade)
         self.memory.remember_trade(trade, snapshot)
         # persist before publishing: a crash between the two must leave the
         # position recoverable, never announced-but-forgotten
         self._persist()
         await self.notifier.signal(trade, self._delayed)
+        if trade.shared_to_channel and self.channel is not None:
+            await self.channel.post_trade_entry(trade, self._delayed)
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -619,9 +650,47 @@ class LiveEngine:
             )
             update = self.manager.force_close(trade, price, bar.ts, "session_close")
             await self.notifier.update(trade, update, self._delayed)
+            if trade.shared_to_channel and self.channel is not None:
+                await self.channel.post_trade_update(trade, update, self._delayed)
             self.journal.log_trade(trade)
             self.memory.remember_trade(trade)
             self._persist()
+        await self._publish_channel_daily(bar.ts.astimezone(MARKET_TZ).date())
+
+    async def _publish_channel_daily(self, day: date) -> None:
+        """The channel's after-the-bell package: the daily report, the weekly
+        report on Fridays, and the education series on its two slots. Guarded
+        so it runs once per session no matter how many post-close bars arrive."""
+        if self.channel is None or self._channel_daily_posted == day:
+            return
+        self._channel_daily_posted = day
+        try:
+            await self.channel.post_daily_report(day, list(self.manager.closed_trades))
+            if day.weekday() in (1, 3):  # Tuesday, Thursday
+                await self.channel.post_education(day)
+            if day.weekday() == 4:  # Friday: the weekly scoreboard
+                period = load_period(
+                    self.settings.journal_dir, since=day - timedelta(days=6), until=day
+                )
+                stats = review(period)
+                channel_rows = []
+                for row in period.closed:
+                    if not row.get("shared_to_channel"):
+                        continue
+                    opened = row.get("opened_at")
+                    try:
+                        when = datetime.fromisoformat(opened) if opened else datetime.now(UTC)
+                    except ValueError:
+                        when = datetime.now(UTC)
+                    channel_rows.append(
+                        {
+                            "label": human_contract(row.get("occ_symbol", ""), when),
+                            "return_pct": row.get("return_pct"),
+                        }
+                    )
+                await self.channel.post_weekly_report(stats, channel_rows)
+        except Exception:  # noqa: BLE001 - the shop window must never stop the desk
+            log.exception("channel daily publishing failed")
 
     async def _roll_session(self, new_day: date) -> None:
         """New session: flatten, archive, reset counters."""
@@ -634,6 +703,13 @@ class LiveEngine:
                 trade, price, last.ts if last else datetime.now(UTC), "session_rollover"
             )
             await self.notifier.update(trade, update, self._delayed)
+            if trade.shared_to_channel and self.channel is not None:
+                await self.channel.post_trade_update(trade, update, self._delayed)
+
+        # if the close-time bar never arrived (dead feed at the bell), the
+        # day's channel report still goes out at the boundary instead of never
+        if self._current_day is not None:
+            await self._publish_channel_daily(self._current_day)
 
         for closed in self.manager.closed_trades:
             self.memory.remember_trade(closed)
@@ -874,6 +950,8 @@ class LiveEngine:
                 await self._command_task
         if self.commands is not None:
             await self.commands.aclose()
+        if self.channel is not None:
+            await self.channel.aclose()
 
         for trade in list(self.manager.open_trades):
             self.journal.log_trade(trade)

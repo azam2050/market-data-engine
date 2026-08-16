@@ -357,7 +357,8 @@ def test_signal_message_warns_when_data_is_delayed():
     assert "متأخرة" in delayed
     assert "متأخرة" not in live
     # the disclaimer is not optional, in either mode
-    assert "توصية تعليمية" in delayed and "توصية تعليمية" in live
+    assert "محتوى تعليمي" in delayed and "محتوى تعليمي" in live
+    assert "ليس توصية استثمارية" in delayed and "ليس توصية استثمارية" in live
 
 
 def test_signal_message_contains_the_full_trade_plan():
@@ -395,7 +396,10 @@ def test_signal_message_carries_size_thesis_stop_and_exit_plan():
 
     assert "نصف الحجم المعتاد" in message
     assert "وقف الفكرة" in message and "484.20" in message
-    assert "نبيع النصف ونؤمّن التكلفة" in message
+    assert "يُباع النصف وتُؤمَّن التكلفة" in message
+    # the operator's lawyer set the register: educational presentation, no
+    # imperative "enter now" phrasing anywhere in the message
+    assert "طرح تعليمي حي" in message
 
 
 def test_size_factor_pays_for_conviction_and_fears_the_open():

@@ -22,7 +22,10 @@ from qqq_alpha.domain import Decision, Trade, TradeUpdate
 
 log = logging.getLogger(__name__)
 
-DISCLAIMER = "توصية تعليمية — القرار والمسؤولية عليك"
+DISCLAIMER = (
+    "محتوى تعليمي للمتابعة والتعلم — ليس توصية استثمارية ولا دعوة للتداول. "
+    "الخيارات عالية المخاطر وقد تخسر كامل المبلغ، والقرار مسؤوليتك"
+)
 
 
 def size_label(factor: float) -> str:
@@ -67,22 +70,22 @@ def format_signal(trade: Trade, delayed: bool) -> str:
     direction = "CALL 📈" if decision.direction and decision.direction.value == "CALL" else "PUT 📉"
 
     lines = [
-        f"🎯 توصية جديدة | {trade.snapshot_at_entry.underlying.symbol if trade.snapshot_at_entry else 'QQQ'}",
+        f"📚 طرح تعليمي حي | {trade.snapshot_at_entry.underlying.symbol if trade.snapshot_at_entry else 'QQQ'}",
         "",
         f"العقد: {human_contract(trade.occ_symbol, trade.opened_at)}",
         f"الاتجاه: {direction}",
-        f"سعر العقد الآن: ${trade.entry_price:.2f}",
+        f"سعر الطرح: ${trade.entry_price:.2f}",
     ]
 
     if decision.entry_zone:
         low, high = decision.entry_zone
-        lines.append(f"منطقة الدخول: {low:.2f} – {high:.2f}")
+        lines.append(f"نطاق الطرح: {low:.2f} – {high:.2f}")
 
     lines.append("")
-    for target in decision.targets:
+    for index, target in enumerate(decision.targets, start=1):
         lines.append(
-            f"🎯 {target.label}: ${target.price:.2f}  (+{target.return_pct:.0f}%) "
-            f"— اجنِ {target.take_pct}%"
+            f"🎯 مستوى المتابعة {index}: ${target.price:.2f}  (+{target.return_pct:.0f}%) "
+            f"— نموذج جني {target.take_pct}%"
         )
 
     if decision.stop_price is not None:
@@ -91,12 +94,12 @@ def format_signal(trade: Trade, delayed: bool) -> str:
         )
     if decision.invalidation_level is not None:
         lines.append(
-            f"🧭 وقف الفكرة: خروج فوري إذا وصل السهم {decision.invalidation_level:.2f}"
+            f"🧭 وقف الفكرة: يُغلق الطرح آليًا إذا وصل السهم {decision.invalidation_level:.2f}"
         )
-    lines.append(f"📦 الحجم المقترح: {size_label(decision.size_factor)}")
-    lines.append("♻️ الإدارة: عند +35% نبيع النصف ونؤمّن التكلفة، والباقي يركض بوقف متحرك")
+    lines.append(f"📦 نموذج إدارة رأس المال: {size_label(decision.size_factor)}")
+    lines.append("♻️ الإدارة الآلية: عند +35% يُباع النصف وتُؤمَّن التكلفة، والباقي يركض بوقف متحرك")
 
-    lines += ["", "📊 سبب الدخول:", decision.thesis]
+    lines += ["", "📊 القراءة الفنية:", decision.thesis]
 
     if decision.invalidation:
         lines += ["", f"❌ يُلغى إذا: {decision.invalidation}"]
@@ -121,12 +124,12 @@ def format_signal(trade: Trade, delayed: bool) -> str:
 
 
 EXIT_REASON_AR = {
-    "stop_hit": "ضُرب وقف الحماية",
-    "trail_stop": "الوقف المتحرك أقفل الرابح وحفظ معظم القمة",
-    "breakeven_stop": "عاد للتعادل بعد تأمين النصف — خروج بلا خسارة على الباقي",
-    "time_stop": "الفكرة لم تتحرك في وقتها — خروج قبل أن تأكلنا theta",
-    "thesis_invalidated": "السهم كسر مستوى إلغاء الفكرة الذي حدده التحليل",
-    "session_close": "إغلاق نهاية الجلسة",
+    "stop_hit": "الخسارة المحدودة المخطط لها ليست فشلًا — هي ثمن البقاء في اللعبة",
+    "trail_stop": "الوقف المتحرك صعد خلف السعر وحفظ الربح عند الانعكاس",
+    "breakeven_stop": "بيع النصف عند +35% حوّل طرحًا منعكسًا إلى خروج بلا خسارة",
+    "time_stop": "الفكرة لم تتحرك في وقتها — الخروج المبكر حماية من التآكل الزمني theta",
+    "thesis_invalidated": "السهم كسر مستوى إلغاء الفكرة — احترام الإلغاء أهم من الأمل",
+    "session_close": "إغلاق نهاية الجلسة — لا نبيّت مراكز 0DTE",
 }
 
 
@@ -144,7 +147,7 @@ def format_update(trade: Trade, update: TradeUpdate, delayed: bool) -> str:
     if closed:
         reason_ar = EXIT_REASON_AR.get(trade.exit_reason)
         if reason_ar:
-            lines.append(f"السبب: {reason_ar}")
+            lines.append(f"الدرس المستفاد: {reason_ar}")
     if closed:
         held = (
             int((update.ts - trade.opened_at).total_seconds() // 60)

@@ -270,6 +270,10 @@ class Trade(BaseModel):
     # P&L, and how much of the position is still open (1.0 = never scaled)
     banked_return_pct: float = 0.0
     open_fraction: float = 1.0
+    # true when this trade is the week's live public share: its entry card
+    # went to the channel before the outcome existed, and every update
+    # follows it there. The weekly report tags these rows.
+    shared_to_channel: bool = False
     snapshot_at_entry: MarketSnapshot | None = None
 
     @property

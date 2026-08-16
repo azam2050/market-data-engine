@@ -115,7 +115,7 @@ def _panel(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], outline: s
 
 def _header(draw: ImageDraw.ImageDraw, subtitle: str) -> int:
     _panel(draw, (MARGIN, 56, W - MARGIN, 196))
-    draw.text((W / 2, 112), "QQQ Alpha", font=_font(58, bold=True), fill=TEXT, anchor="mm")
+    _rtl(draw, (W / 2, 112), "بوت عقود الخيارات", _font(54, bold=True), GOLD, "mm")
     _rtl(draw, (W / 2, 164), subtitle, _font(28), MUTED, "mm")
     return 226
 
@@ -175,8 +175,8 @@ def _footer(draw: ImageDraw.ImageDraw, when: datetime, delayed: bool, note: str 
     stamp = when.astimezone(MARKET_TZ).strftime("%H:%M")
     _rtl(
         draw, (W / 2, y),
-        f"التداول ينطوي على مخاطر عالية — القرار والمسؤولية عليك • {stamp} نيويورك",
-        _font(24), MUTED, "mm",
+        f"محتوى تعليمي وليس توصية استثمارية — الخيارات عالية المخاطر والقرار مسؤوليتك • {stamp} نيويورك",
+        _font(22), MUTED, "mm",
     )
 
 
@@ -194,11 +194,11 @@ def render_entry_card(trade: Trade, delayed: bool) -> bytes:
     contract = human_contract(trade.occ_symbol, trade.opened_at)
 
     img, draw = _canvas()
-    y = _header(draw, "بوت الخيارات اليومي")
+    y = _header(draw, "طروحات فنية تعليمية على عقود الخيارات")
 
     # the contract, big enough to read from across a room
     _panel(draw, (MARGIN, y, W - MARGIN, y + 280), outline=accent)
-    _chip(draw, W / 2, y + 50, "توصية جديدة", GOLD)
+    _chip(draw, W / 2, y + 50, "طرح تعليمي حي", GOLD)
     draw.text((W / 2, y + 144), contract, font=_font(84, bold=True), fill=accent, anchor="mm")
     _rtl(
         draw, (W / 2, y + 228),
@@ -207,9 +207,10 @@ def render_entry_card(trade: Trade, delayed: bool) -> bytes:
     )
     y += 310
 
-    # the numbers a subscriber acts on
+    # the numbers that define the study — labelled as a plan being followed,
+    # never as an instruction to the reader
     rows: list[tuple[str, str, str, bool]] = [
-        ("سعر الدخول", f"${trade.entry_price:.2f}", BLUE, False)
+        ("سعر الطرح", f"${trade.entry_price:.2f}", BLUE, False)
     ]
     if decision.stop_price is not None:
         rows.append(
@@ -217,23 +218,23 @@ def render_entry_card(trade: Trade, delayed: bool) -> bytes:
         )
     if decision.invalidation_level is not None:
         rows.append(("وقف الفكرة - على السهم", f"{decision.invalidation_level:.2f}", RED, False))
-    rows.append(("الحجم المقترح", size_label(decision.size_factor), GOLD, True))
+    rows.append(("نموذج إدارة رأس المال", size_label(decision.size_factor), GOLD, True))
     rows.append(("الثقة", f"{decision.confidence}/10", TEXT, False))
 
-    row_y, y = _titled_panel(draw, y, "تفاصيل الصفقة", len(rows))
+    row_y, y = _titled_panel(draw, y, "تفاصيل الطرح", len(rows))
     for label, value, fill, value_rtl in rows:
         _row(draw, row_y, label, value, fill, value_rtl)
         row_y += 60
 
-    # targets, plus the management line that makes this desk different
+    # follow-up levels, plus the management line that makes this desk different
     targets = decision.targets[:4]
-    row_y, y = _titled_panel(draw, y, "الأهداف", len(targets), extra=90)
+    row_y, y = _titled_panel(draw, y, "مستويات المتابعة", len(targets), extra=90)
     for index, target in enumerate(targets, start=1):
-        _row(draw, row_y, f"الهدف {index}", f"${target.price:.2f}  (+{target.return_pct:.0f}%)", GREEN)
+        _row(draw, row_y, f"المستوى {index}", f"${target.price:.2f}  (+{target.return_pct:.0f}%)", GREEN)
         row_y += 60
     for line in _wrap(
         draw,
-        "الإدارة: عند +35% نبيع النصف ونؤمن التكلفة — والباقي يركض بوقف متحرك",
+        "الإدارة الآلية: عند +35% يُباع النصف وتُؤمَّن التكلفة — والباقي يركض بوقف متحرك",
         _font(26, bold=True),
         W - 2 * MARGIN - 120,
     )[:2]:
@@ -247,7 +248,7 @@ def render_entry_card(trade: Trade, delayed: bool) -> bytes:
 # ---------------------------------------------------------------- scale-out
 def render_scale_out_card(trade: Trade, update: TradeUpdate) -> bytes:
     img, draw = _canvas()
-    y = _header(draw, "إدارة الصفقة")
+    y = _header(draw, "تطبيق عملي: تأمين التكلفة")
 
     _panel(draw, (MARGIN, y, W - MARGIN, y + 330), outline=GREEN)
     _rtl(draw, (W / 2, y + 78), "تم تأمين التكلفة", _font(64, bold=True), GREEN, "mm")
@@ -255,7 +256,7 @@ def render_scale_out_card(trade: Trade, update: TradeUpdate) -> bytes:
         (W / 2, y + 180), f"+{update.return_pct:.0f}%", font=_font(96, bold=True),
         fill=GREEN, anchor="mm",
     )
-    _chip(draw, W / 2, y + 272, "بيع نصف الكمية الآن", GOLD)
+    _chip(draw, W / 2, y + 272, "بِيع نصف الكمية آليًا", GOLD)
     y += 360
 
     contract = human_contract(trade.occ_symbol, trade.opened_at)
@@ -267,7 +268,7 @@ def render_scale_out_card(trade: Trade, update: TradeUpdate) -> bytes:
 
     for line in _wrap(
         draw,
-        "من هذه اللحظة لا يمكن لهذه الصفقة أن تخسر — النصف الباقي يطارد الامتداد",
+        "الدرس: من هذه اللحظة لا يمكن لهذا الطرح أن يخسر — النصف الباقي يطارد الامتداد",
         _font(30, bold=True),
         W - 2 * MARGIN - 60,
     )[:2]:
@@ -284,10 +285,10 @@ def render_close_card(trade: Trade, update: TradeUpdate) -> bytes:
     win = result > 1.0
     flat = -1.0 <= result <= 1.0
     accent = GREEN if win else (MUTED if flat else RED)
-    verdict = "صفقة رابحة" if win else ("تعادل" if flat else "صفقة خاسرة")
+    verdict = "طرح رابح" if win else ("تعادل" if flat else "طرح خاسر")
 
     img, draw = _canvas()
-    y = _header(draw, "نتيجة الصفقة — كما هي، ربحا أو خسارة")
+    y = _header(draw, "نتيجة الطرح — كما هي، ربحا أو خسارة")
 
     _panel(draw, (MARGIN, y, W - MARGIN, y + 290), outline=accent)
     draw.text(
@@ -299,6 +300,7 @@ def render_close_card(trade: Trade, update: TradeUpdate) -> bytes:
 
     reason = EXIT_REASON_AR.get(trade.exit_reason, "")
     if reason:
+        reason = f"الدرس المستفاد: {reason}"
         for line in _wrap(draw, reason, _font(28, bold=True), W - 2 * MARGIN - 60)[:2]:
             _rtl(draw, (W / 2, y), line, _font(28, bold=True), MUTED, "mm")
             y += 38
@@ -308,7 +310,7 @@ def render_close_card(trade: Trade, update: TradeUpdate) -> bytes:
     held = int((update.ts - trade.opened_at).total_seconds() // 60) if trade.opened_at else 0
     rows: list[tuple[str, str, str, bool]] = [
         ("العقد", contract, TEXT, False),
-        ("سعر الدخول", f"${trade.entry_price:.2f}", BLUE, False),
+        ("سعر الطرح", f"${trade.entry_price:.2f}", BLUE, False),
         ("سعر الخروج", f"${update.price:.2f}", BLUE, False),
         ("أعلى ما وصلته", f"{trade.max_favorable_pct:+.1f}%", GREEN, False),
         ("مدة الصفقة", f"{held} دقيقة", TEXT, True),
@@ -323,11 +325,11 @@ def render_close_card(trade: Trade, update: TradeUpdate) -> bytes:
 
     targets = trade.decision.targets[:3]
     if targets:
-        row_y, y = _titled_panel(draw, y, "الأهداف", len(targets))
+        row_y, y = _titled_panel(draw, y, "مستويات المتابعة", len(targets))
         for index, target in enumerate(targets, start=1):
             achieved = trade.max_favorable_pct >= target.return_pct
             _row(
-                draw, row_y, f"الهدف {index} (+{target.return_pct:.0f}%)",
+                draw, row_y, f"المستوى {index} (+{target.return_pct:.0f}%)",
                 "تحقق" if achieved else "لم يتحقق",
                 GREEN if achieved else MUTED,
                 value_rtl=True,
