@@ -84,3 +84,21 @@ def test_report_cards_render_as_valid_pngs():
         stats, [{"label": "QQQ 731 PUT 0DTE", "return_pct": 68.1}]
     )
     assert weekly.startswith(PNG_MAGIC) and len(weekly) > 10_000
+
+
+def test_cards_survive_a_raqm_less_environment(monkeypatch):
+    """Production once lost libraqm on a rebuild and shipped tofu boxes: the
+    fallback path must render complete Arabic with the Amiri family, whose
+    cmap covers every presentation form the reshaper emits."""
+    monkeypatch.setattr(cards, "RAQM", False)
+    monkeypatch.setattr(cards, "_FAMILY", ("Amiri-Regular.ttf", "Amiri-Bold.ttf"))
+    monkeypatch.setattr(cards, "_fonts", {})
+
+    trade = _open_trade(TradeManager())
+    assert cards.render_entry_card(trade, delayed=False).startswith(PNG_MAGIC)
+    from datetime import UTC, datetime
+    png = cards.render_watch_card(
+        "QQQ", "هبوط PUT", "ارتداد فاشل نحو VWAP", 6,
+        datetime(2026, 8, 14, 15, 49, tzinfo=UTC), level=732.5,
+    )
+    assert png.startswith(PNG_MAGIC)

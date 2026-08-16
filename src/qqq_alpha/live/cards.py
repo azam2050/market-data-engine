@@ -81,12 +81,21 @@ def _stage(name: str | None):
 
 _fonts: dict[tuple[str, int], ImageFont.FreeTypeFont] = {}
 
+# The brand font (Tajawal) needs libraqm to shape Arabic — its cmap lacks 17
+# of the presentation forms the reshaper fallback emits, which is exactly how
+# production cards once shipped with tofu boxes when a rebuild lost raqm.
+# Amiri carries the complete presentation-form set, so the no-raqm path
+# switches to it: a different (naskh) look beats broken letters every time.
+_FAMILY = ("Tajawal-Regular.ttf", "Tajawal-Bold.ttf") if RAQM else (
+    "Amiri-Regular.ttf", "Amiri-Bold.ttf"
+)
+log.info("cards: raqm=%s, family=%s", RAQM, _FAMILY[0].split("-")[0])
+
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     key = ("bold" if bold else "regular", size)
     if key not in _fonts:
-        name = "Tajawal-Bold.ttf" if bold else "Tajawal-Regular.ttf"
-        _fonts[key] = ImageFont.truetype(str(FONT_DIR / name), size)
+        _fonts[key] = ImageFont.truetype(str(FONT_DIR / _FAMILY[1 if bold else 0]), size)
     return _fonts[key]
 
 

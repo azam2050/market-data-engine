@@ -16,8 +16,12 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # gosu drops root privileges after the entrypoint fixes volume ownership —
 # needed because Railway mounts the persistent volume as root at container
 # start, after this build-time chown has already run.
+# libraqm (+fribidi/harfbuzz) gives Pillow proper Arabic shaping with the
+# brand font; without it the cards fall back to the bundled Amiri which
+# carries full presentation forms — either way the Arabic renders correctly
 RUN pip install --no-cache-dir -e . && \
-    apt-get update && apt-get install -y --no-install-recommends gosu && \
+    apt-get update && apt-get install -y --no-install-recommends gosu \
+        libraqm0 libfribidi0 libharfbuzz0b && \
     rm -rf /var/lib/apt/lists/* && \
     useradd --create-home --uid 10001 engine && \
     mkdir -p /app/var && chown -R engine:engine /app && \
