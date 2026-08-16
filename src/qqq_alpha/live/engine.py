@@ -1077,14 +1077,15 @@ class LiveEngine:
             )
 
             if self.commands is not None:
+                admin = str(self.settings.telegram_chat_id)
                 await self.commands.send_with_buttons(
-                    str(self.settings.telegram_chat_id),
+                    admin,
                     consent_message(self.settings.trial_days),
                     [("✅ أوافق وأقر", PREVIEW_YES), ("❌ لا أوافق", PREVIEW_NO)],
                 )
-                await self.commands.send(
-                    str(self.settings.telegram_chat_id), cards_guide_message()
-                )
+                await self.commands.send(admin, cards_guide_message())
+                for caption, png in self._preview_cards():
+                    await self.commands.send_photo(admin, png, caption)
             return
         if len(parts) != 2 or not parts[1].isdigit():
             # any other operator text gets an answer on purpose: it is the
@@ -1111,6 +1112,80 @@ class LiveEngine:
         elif verb in {"رفض", "reject"}:
             self.memory.set_lesson_status(lesson_id, "rejected")
             await self.notifier.note(f"🚫 رُفض الدرس #{lesson_id}")
+
+    @staticmethod
+    def _preview_cards() -> list[tuple[str, bytes]]:
+        """Sample renders of every card type, for the operator's معاينة.
+
+        Built on synthetic data and clearly captioned as models — how the
+        operator inspects design changes on their phone without waiting for
+        a live trade. Best-effort: a broken renderer skips its card.
+        """
+        from qqq_alpha.data.synthetic import synthetic_session
+        from qqq_alpha.domain import Target, TradeUpdate
+        from qqq_alpha.live import cards
+
+        samples: list[tuple[str, bytes]] = []
+        try:
+            bars = synthetic_session("QQQ", date(2026, 8, 14), seed=15)
+            snap = SnapshotBuilder("QQQ").build(bars[:80])
+
+            def demo_trade(direction: OptionType):
+                decision = Decision(
+                    ts=snap.ts, action=Action.ENTER, direction=direction,
+                    occ_symbol="O:QQQ260814P00731000"
+                    if direction is OptionType.PUT
+                    else "O:QQQ260814C00731000",
+                    targets=[
+                        Target(label="T1", price=0.0, return_pct=50, take_pct=50),
+                        Target(label="T2", price=0.0, return_pct=100, take_pct=30),
+                    ],
+                    stop_return_pct=-40, confidence=7, thesis="نموذج للمعاينة",
+                    invalidation_level=732.70, size_factor=0.5,
+                )
+                manager = TradeManager()
+                return manager, manager.open_trade(decision, 1.79, snap)
+
+            samples.append((
+                "🔵 نموذج: بطاقة المراقبة",
+                cards.render_watch_card(
+                    "QQQ", "هبوط PUT", "ارتداد فاشل نحو VWAP", 6, snap.ts, level=732.50
+                ),
+            ))
+
+            manager, trade = demo_trade(OptionType.PUT)
+            samples.append(("نموذج: بطاقة الطرح الجديد", cards.render_entry_card(trade, False)))
+
+            live = TradeUpdate(
+                ts=trade.opened_at + timedelta(minutes=31), price=2.01,
+                return_pct=12.3, note="status: still open",
+            )
+            samples.append((
+                "🟢 نموذج: البطاقة الحية (تتجدد كل ربع ساعة)",
+                cards.render_entry_card(trade, False, live=live),
+            ))
+
+            scale = manager.update(trade, 2.42, trade.opened_at + timedelta(minutes=9))
+            if scale is not None:
+                samples.append((
+                    "🟢 نموذج: تأمين التكلفة", cards.render_scale_out_card(trade, scale)
+                ))
+            manager.update(trade, 3.60, trade.opened_at + timedelta(minutes=20))
+            close = manager.update(trade, 3.00, trade.opened_at + timedelta(minutes=26))
+            if close is not None:
+                samples.append((
+                    "🟢 نموذج: إغلاق رابح", cards.render_close_card(trade, close)
+                ))
+
+            manager2, trade2 = demo_trade(OptionType.CALL)
+            close2 = manager2.update(trade2, 1.05, trade2.opened_at + timedelta(minutes=7))
+            if close2 is not None:
+                samples.append((
+                    "🔴 نموذج: إغلاق خاسر", cards.render_close_card(trade2, close2)
+                ))
+        except Exception:  # noqa: BLE001 - a preview must never crash the engine
+            log.exception("preview card rendering failed")
+        return samples
 
     async def _run_dashboard(self) -> None:
         """Serve the admin dashboard for the life of the session.

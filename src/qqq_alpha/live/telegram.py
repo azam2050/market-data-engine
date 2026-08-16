@@ -445,6 +445,26 @@ class TelegramCommandListener:
             log.warning("message edit in %s failed (%s)", chat_id, exc)
             return False
 
+    async def send_photo(self, chat_id: str, png: bytes, caption: str = "") -> bool:
+        """One photo to one chat — the operator's card previews ride this."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=30.0)
+        try:
+            response = await self._client.post(
+                f"{TELEGRAM_API}/bot{self.token}/sendPhoto",
+                data={"chat_id": chat_id, "caption": caption[:1000]},
+                files={"photo": ("card.png", png, "image/png")},
+            )
+            if response.status_code != 200:
+                log.warning(
+                    "photo to %s rejected (%s): %s",
+                    chat_id, response.status_code, response.text[:200],
+                )
+            return response.status_code == 200
+        except (httpx.TransportError, httpx.TimeoutException) as exc:
+            log.warning("photo to %s failed (%s)", chat_id, exc)
+            return False
+
     async def send(self, chat_id: str, text: str) -> bool:
         """A direct reply to one chat — welcomes, trial status, farewells."""
         if self._client is None:

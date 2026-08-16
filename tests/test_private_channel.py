@@ -32,8 +32,8 @@ def _recording_transport(calls: list[tuple[str, dict]]):
         method = request.url.path.rsplit("/", 1)[-1]
         try:
             payload = json.loads(request.content) if request.content else {}
-        except json.JSONDecodeError:
-            payload = {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            payload = {}  # multipart photo bodies are not JSON
         calls.append((method, payload))
         if method == "getUpdates":
             return httpx.Response(200, json={"ok": True, "result": []})
@@ -332,3 +332,16 @@ async def test_heartbeat_edits_the_posted_card_instead_of_new_messages(tmp_path)
 
     assert methods.count("sendPhoto") == 1        # the entry card, once
     assert methods.count("editMessageMedia") == 1  # the living refresh
+
+
+@pytest.mark.asyncio
+async def test_preview_command_sends_terms_guide_and_sample_cards(tmp_path):
+    calls: list[tuple[str, dict]] = []
+    engine = _engine(tmp_path, calls)
+
+    await engine._handle_command("معاينه")  # the common taa/haa misspelling counts
+
+    methods = _methods(calls)
+    assert methods.count("sendPhoto") >= 5  # watch, entry, live, scale-out, closes
+    consent = next(p for m, p in calls if m == "sendMessage" and "reply_markup" in p)
+    assert "إقرار وإخلاء مسؤولية" in consent["text"]
