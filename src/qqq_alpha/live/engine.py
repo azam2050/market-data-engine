@@ -816,6 +816,13 @@ class LiveEngine:
                     log.exception("join request handling failed")
             self.commands.join_requests = []
 
+            for press in self.commands.button_presses:
+                try:
+                    await self._handle_button_press(press)
+                except Exception:  # noqa: BLE001
+                    log.exception("button press handling failed")
+            self.commands.button_presses = []
+
             for channel_id, title in self.commands.channel_promotions:
                 # this is how the operator learns a private channel's numeric
                 # id — no technical digging, the bot reports it the moment it
@@ -829,15 +836,16 @@ class LiveEngine:
             self.commands.channel_promotions = []
 
     async def _handle_join_request(self, request) -> None:
-        """The private channel's front door: approve trials, refuse expired.
+        """The private channel's front door — now a consent gate.
 
-        A join request is the whole sign-up now — one tap on the public
-        channel's pinned link, the bot approves within a second, the trial
-        clock starts, and the welcome lands in their DMs (Telegram allows a
-        bot to message anyone with a pending join request).
+        Nobody enters and no trial starts until they press "أوافق وأقر" on
+        the legal terms. Declining (or never answering) leaves them outside
+        with nothing recorded. Telegram permits messaging anyone with a
+        pending join request, which is exactly what makes this gate work.
         """
         from qqq_alpha.live.telegram import (
-            channel_welcome_message,
+            CONSENT_BUTTONS,
+            consent_message,
             farewell_message,
             trial_status_message,
         )
@@ -854,7 +862,8 @@ class LiveEngine:
             expires = datetime.fromisoformat(row["expires_at"])
             if row["status"] == "trial" and expires > now:
                 # a known active subscriber re-joining (new phone, left by
-                # accident): let them back in on their existing clock
+                # accident): let them back in on their existing clock —
+                # their consent is already on record
                 await self.commands.approve_join_request(private, request.user_id)
                 await self.commands.send(
                     request.user_id, trial_status_message((expires - now).days)
@@ -871,27 +880,89 @@ class LiveEngine:
             await self.commands.decline_join_request(private, request.user_id)
             return
 
-        if not await self.commands.approve_join_request(private, request.user_id):
+        # first-timer: the request stays pending; the verdict is theirs to press
+        delivered = await self.commands.send_with_buttons(
+            request.user_id, consent_message(self.settings.trial_days), CONSENT_BUTTONS
+        )
+        if not delivered:
             await self.notifier.note(
-                f"⚠️ تعذرت الموافقة على طلب انضمام {name} — "
-                "تحقق من صلاحيات البوت في القناة الخاصة"
+                f"⚠️ تعذر إرسال رسالة الإقرار لطالب الانضمام {name} — طلبه معلق"
+            )
+
+    async def _handle_button_press(self, press) -> None:
+        """Route inline-button taps: the consent verdicts and operator previews."""
+        from qqq_alpha.live.telegram import (
+            CONSENT_NO,
+            CONSENT_YES,
+            PREVIEW_NO,
+            PREVIEW_YES,
+            cards_guide_message,
+            consent_accepted_note,
+            consent_declined_note,
+            consent_message,
+        )
+
+        if self.commands is None:
+            return
+
+        if press.data in (PREVIEW_YES, PREVIEW_NO):
+            await self.commands.answer_button(
+                press.callback_id, "هذه معاينة فقط — لا تسجيل ولا تأثير ✅"
             )
             return
+
+        private = self.settings.telegram_private_channel_id
+        if press.data not in (CONSENT_YES, CONSENT_NO) or not private:
+            await self.commands.answer_button(press.callback_id)
+            return
+
+        now = datetime.now(UTC)
+        name = press.username or press.first_name or press.user_id
+
+        if press.data == CONSENT_NO:
+            await self.commands.decline_join_request(private, press.user_id)
+            await self.commands.answer_button(press.callback_id, "أُلغي الطلب")
+            await self.commands.replace_message(
+                press.chat_id, press.message_id,
+                consent_message(self.settings.trial_days) + "\n\n❌ لم تتم الموافقة — أُلغي الطلب.",
+            )
+            await self.commands.send(press.user_id, consent_declined_note())
+            return
+
+        # consent:yes — approval first: joining is the thing being consented to
+        if not await self.commands.approve_join_request(private, press.user_id):
+            # most likely the pending request lapsed (they cancelled it)
+            await self.commands.answer_button(
+                press.callback_id, "اضغط رابط القناة مرة أخرى ثم وافق"
+            )
+            await self.commands.send(
+                press.user_id,
+                "يبدو أن طلب انضمامك لم يعد قائمًا — اضغط رابط القناة من جديد "
+                "ثم اضغط زر الموافقة.",
+            )
+            return
+
         self.memory.add_subscriber(
-            request.user_id,
-            request.username,
-            request.first_name,
+            press.user_id,
+            press.username,
+            press.first_name,
             joined_at=now,
             expires_at=now + timedelta(days=self.settings.trial_days),
         )
-        delivered = await self.commands.send(
-            request.user_id, channel_welcome_message(self.settings.trial_days)
+        self.memory.record_consent(press.user_id, now)
+        await self.commands.answer_button(press.callback_id, "تم الإقرار — أهلاً بك 🎉")
+        await self.commands.replace_message(
+            press.chat_id, press.message_id,
+            consent_message(self.settings.trial_days) + "\n\n✅ تم الإقرار والانضمام.",
         )
+        await self.commands.send(
+            press.user_id, consent_accepted_note(self.settings.trial_days)
+        )
+        await self.commands.send(press.user_id, cards_guide_message())
         active = len(self.memory.active_subscriber_ids(now))
-        note = f"👤 مشترك جديد عبر القناة الخاصة: {name} — النشطون الآن: {active}"
-        if not delivered:
-            note += "\n⚠️ لكن تعذر إرسال رسالة الترحيب له"
-        await self.notifier.note(note)
+        await self.notifier.note(
+            f"👤 مشترك جديد أقرّ بالشروط وانضم: {name} — النشطون الآن: {active}"
+        )
 
     async def _handle_subscriber(self, message) -> None:
         """The trial funnel: /start begins a free month, expiry hands the
@@ -995,6 +1066,26 @@ class LiveEngine:
                 f" | منتهي: {counts.get('expired', 0)}"
             )
             return
+        if parts and parts[0].strip().lower() in {"معاينة", "preview"}:
+            # the operator sees the consent gate exactly as a subscriber
+            # would — real buttons, zero side effects
+            from qqq_alpha.live.telegram import (
+                PREVIEW_NO,
+                PREVIEW_YES,
+                cards_guide_message,
+                consent_message,
+            )
+
+            if self.commands is not None:
+                await self.commands.send_with_buttons(
+                    str(self.settings.telegram_chat_id),
+                    consent_message(self.settings.trial_days),
+                    [("✅ أوافق وأقر بما سبق", PREVIEW_YES), ("❌ لا أوافق", PREVIEW_NO)],
+                )
+                await self.commands.send(
+                    str(self.settings.telegram_chat_id), cards_guide_message()
+                )
+            return
         if len(parts) != 2 or not parts[1].isdigit():
             # any other operator text gets an answer on purpose: it is the
             # operator's one-tap proof that the inbound path is alive at all —
@@ -1002,7 +1093,7 @@ class LiveEngine:
             await self.notifier.note(
                 "✅ وصلتني رسالتك — استقبال الرسائل شغال.\n"
                 'الأوامر: "موافق <رقم>" / "رفض <رقم>" لقرارات الدروس، '
-                '"مشتركين" لعدد المشتركين.'
+                '"مشتركين" لعدد المشتركين، "معاينة" لتجربة رسالة الإقرار بأزرارها.'
             )
             return
 

@@ -115,7 +115,9 @@ async def test_listener_surfaces_join_requests_and_promotions():
 
 # ---------------------------------------------------------------- join flow
 @pytest.mark.asyncio
-async def test_new_join_request_is_approved_and_starts_the_trial(tmp_path):
+async def test_new_join_request_gets_the_consent_gate_not_auto_approval(tmp_path):
+    """Nobody enters before pressing أوافق: the request stays pending, the
+    terms arrive with buttons, and nothing is registered yet."""
     calls: list[tuple[str, dict]] = []
     engine = _engine(tmp_path, calls)
 
@@ -123,9 +125,69 @@ async def test_new_join_request_is_approved_and_starts_the_trial(tmp_path):
         JoinRequest(channel_id=PRIVATE, user_id="777", username="new", first_name="N")
     )
 
-    assert "approveChatJoinRequest" in _methods(calls)
-    assert "sendMessage" in _methods(calls)  # the welcome DM
+    methods = _methods(calls)
+    assert "approveChatJoinRequest" not in methods  # gate first
+    assert "sendMessage" in methods  # the consent message with buttons
+    consent_payload = next(p for m, p in calls if m == "sendMessage")
+    assert "reply_markup" in consent_payload
+    assert "إقرار وإخلاء مسؤولية" in consent_payload["text"]
+    assert engine.memory.subscriber("777") is None  # nothing recorded yet
+
+
+@pytest.mark.asyncio
+async def test_pressing_agree_admits_registers_and_records_consent(tmp_path):
+    from qqq_alpha.live.telegram import CONSENT_YES, ButtonPress
+
+    calls: list[tuple[str, dict]] = []
+    engine = _engine(tmp_path, calls)
+
+    await engine._handle_button_press(
+        ButtonPress(
+            callback_id="cb1", user_id="777", chat_id="777", message_id=5,
+            data=CONSENT_YES, username="new", first_name="N",
+        )
+    )
+
+    methods = _methods(calls)
+    assert "approveChatJoinRequest" in methods
+    assert "answerCallbackQuery" in methods
+    assert "editMessageText" in methods  # the buttons are retired in place
     row = engine.memory.subscriber("777")
+    assert row is not None and row["status"] == "trial"
+    assert row["consented_at"]  # the legal timestamp
+    # welcome note + the cards guide both went out
+    texts = [p.get("text", "") for m, p in calls if m == "sendMessage"]
+    assert any("دليل ألوان البطاقات" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_pressing_decline_rejects_and_records_nothing(tmp_path):
+    from qqq_alpha.live.telegram import CONSENT_NO, ButtonPress
+
+    calls: list[tuple[str, dict]] = []
+    engine = _engine(tmp_path, calls)
+
+    await engine._handle_button_press(
+        ButtonPress(
+            callback_id="cb2", user_id="888", chat_id="888", message_id=6,
+            data=CONSENT_NO, username="no", first_name="No",
+        )
+    )
+
+    methods = _methods(calls)
+    assert "declineChatJoinRequest" in methods
+    assert "approveChatJoinRequest" not in methods
+    assert engine.memory.subscriber("888") is None  # a decline burns nothing
+    # ...so coming back a minute later and agreeing works as a first-timer
+    from qqq_alpha.live.telegram import CONSENT_YES
+
+    await engine._handle_button_press(
+        ButtonPress(
+            callback_id="cb3", user_id="888", chat_id="888", message_id=7,
+            data=CONSENT_YES, username="no", first_name="No",
+        )
+    )
+    row = engine.memory.subscriber("888")
     assert row is not None and row["status"] == "trial"
 
 

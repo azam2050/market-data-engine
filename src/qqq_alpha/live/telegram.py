@@ -234,6 +234,19 @@ class JoinRequest:
     first_name: str = ""
 
 
+@dataclass
+class ButtonPress:
+    """An inline-keyboard button was tapped (a callback_query)."""
+
+    callback_id: str
+    user_id: str
+    chat_id: str
+    message_id: int
+    data: str
+    username: str = ""
+    first_name: str = ""
+
+
 class TelegramCommandListener:
     """Long-polls the bot's inbox.
 
@@ -255,6 +268,8 @@ class TelegramCommandListener:
         self.channel_promotions: list[tuple[str, str]] = []
         # pending join requests for the private subscribers channel
         self.join_requests: list[JoinRequest] = []
+        # inline-keyboard taps awaiting routing (consent gate, previews)
+        self.button_presses: list[ButtonPress] = []
 
     async def _claim_inbox(self) -> None:
         """Delete any webhook so getUpdates actually receives messages.
@@ -295,7 +310,7 @@ class TelegramCommandListener:
                     # admin promotions (channel-id discovery), and the private
                     # channel's join requests
                     "allowed_updates": json.dumps(
-                        ["message", "my_chat_member", "chat_join_request"]
+                        ["message", "my_chat_member", "chat_join_request", "callback_query"]
                     ),
                 },
             )
@@ -336,6 +351,21 @@ class TelegramCommandListener:
                         first_name=sender.get("first_name") or "",
                     )
                 )
+            callback = update.get("callback_query") or {}
+            if callback:
+                sender = callback.get("from") or {}
+                origin = callback.get("message") or {}
+                self.button_presses.append(
+                    ButtonPress(
+                        callback_id=str(callback.get("id")),
+                        user_id=str(sender.get("id")),
+                        chat_id=str((origin.get("chat") or {}).get("id") or sender.get("id")),
+                        message_id=int(origin.get("message_id") or 0),
+                        data=str(callback.get("data") or ""),
+                        username=sender.get("username") or "",
+                        first_name=sender.get("first_name") or "",
+                    )
+                )
             message = update.get("message") or {}
             chat = message.get("chat") or {}
             sender = message.get("from") or {}
@@ -351,6 +381,69 @@ class TelegramCommandListener:
                     )
                 )
         return messages
+
+    async def send_with_buttons(
+        self, chat_id: str, text: str, buttons: list[tuple[str, str]]
+    ) -> bool:
+        """One message with a single-column inline keyboard.
+
+        ``buttons`` is (label, callback_data) pairs — the consent gate's
+        "أوافق / لا أوافق" and the operator's previews both ride this.
+        """
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=20.0)
+        markup = {
+            "inline_keyboard": [[{"text": label, "callback_data": data}] for label, data in buttons]
+        }
+        try:
+            response = await self._client.post(
+                f"{TELEGRAM_API}/bot{self.token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "disable_web_page_preview": True,
+                    "reply_markup": markup,
+                },
+            )
+            if response.status_code != 200:
+                log.warning(
+                    "buttoned message to %s rejected (%s): %s",
+                    chat_id, response.status_code, response.text[:200],
+                )
+            return response.status_code == 200
+        except (httpx.TransportError, httpx.TimeoutException) as exc:
+            log.warning("buttoned message to %s failed (%s)", chat_id, exc)
+            return False
+
+    async def answer_button(self, callback_id: str, text: str = "") -> None:
+        """Acknowledge a button tap so Telegram stops the loading spinner."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=20.0)
+        with contextlib.suppress(httpx.TransportError, httpx.TimeoutException):
+            await self._client.post(
+                f"{TELEGRAM_API}/bot{self.token}/answerCallbackQuery",
+                json={"callback_query_id": callback_id, "text": text[:200]},
+            )
+
+    async def replace_message(self, chat_id: str, message_id: int, text: str) -> bool:
+        """Rewrite a sent message (dropping any buttons) — how the consent
+        message flips to '✅ تم الإقرار' once a verdict is pressed."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=20.0)
+        try:
+            response = await self._client.post(
+                f"{TELEGRAM_API}/bot{self.token}/editMessageText",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": text,
+                    "disable_web_page_preview": True,
+                },
+            )
+            return response.status_code == 200
+        except (httpx.TransportError, httpx.TimeoutException) as exc:
+            log.warning("message edit in %s failed (%s)", chat_id, exc)
+            return False
 
     async def send(self, chat_id: str, text: str) -> bool:
         """A direct reply to one chat — welcomes, trial status, farewells."""
@@ -592,17 +685,82 @@ class BroadcastNotifier(TelegramNotifier):
         )
 
 
-def channel_welcome_message(trial_days: int) -> str:
-    """Sent after a join request is approved — the subscriber never had to
-    open the bot, so this DM is also their proof of who runs the channel."""
+CONSENT_YES = "consent:yes"
+CONSENT_NO = "consent:no"
+PREVIEW_YES = "preview:yes"
+PREVIEW_NO = "preview:no"
+
+CONSENT_BUTTONS: list[tuple[str, str]] = [
+    ("✅ أوافق وأقر بما سبق", CONSENT_YES),
+    ("❌ لا أوافق", CONSENT_NO),
+]
+
+
+def consent_message(trial_days: int) -> str:
+    """The legal gate: operator-approved wording, shown BEFORE any content.
+
+    The subscriber's explicit button press on this exact text is recorded
+    with a timestamp — the platform's proof of informed consent.
+    """
     return (
         "أهلاً بك في بوت عقود الخيارات 👋\n\n"
-        "تمت الموافقة على انضمامك لقناة الطروحات الحية، وبدأت فترة متابعتك "
-        f"المجانية لمدة {trial_days} يوماً.\n"
-        "ستجد الطروحات الفنية التعليمية الحية داخل القناة فور صدورها — العقد، "
-        "مستويات المتابعة، وقف الحماية — مع متابعة كل طرح حتى إغلاقه بنتيجته "
-        "الحقيقية، ربحاً أو خسارة.\n\n"
-        f"⚠️ {DISCLAIMER}"
+        f"طلب انضمامك وصلنا. قبل الدخول وبدء فترة الاطلاع المجانية ({trial_days} يوماً)، "
+        "يلزم الاطلاع على ما يلي والإقرار به:\n\n"
+        "تعريف الخدمة:\n"
+        "هذه منصة تعليمية آلية غرضها عرض طروحات فنية توضيحية على عقود الخيارات "
+        "الأمريكية، ليتعلّم المتابع عملياً كيف تُبنى الصفقة الاحترافية: اختيار "
+        "العقد، تحديد مستويات المتابعة، وضع وقوف الحماية، إدارة رأس المال، "
+        "وتوثيق النتيجة كما وقعت فعلاً — ربحاً أو خسارة.\n\n"
+        "إقرار وإخلاء مسؤولية:\n\n"
+        "١. جميع ما يُنشر هو محتوى تعليمي وتوضيحي حصراً، ولا يُعد بأي حال من "
+        "الأحوال توصية استثمارية، أو استشارة مالية، أو دعوة لشراء أو بيع أي "
+        "أداة مالية.\n\n"
+        "٢. تداول عقود الخيارات ينطوي على مخاطر عالية جداً قد تصل إلى خسارة "
+        "كامل المبلغ، وقد لا يكون مناسباً لجميع الأشخاص.\n\n"
+        "٣. النتائج والطروحات السابقة — أياً كانت — لا تضمن ولا تشير إلى نتائج "
+        "مستقبلية مماثلة.\n\n"
+        "٤. أي قرار يتخذه المتابع هو قراره الشخصي وعلى مسؤوليته الكاملة وحده، "
+        "ولا تتحمل هذه المنصة أي مسؤولية عن قرارات أو نتائج أي متابع.\n\n"
+        "٥. تنبيه أمني: قنواتنا الرسمية الوحيدة هي القناة والبوت المرسل لهذه "
+        "الرسالة فقط. لا نراسل أحداً بشكل خاص أبداً — فاحذر أي جهة تنتحل اسمنا.\n\n"
+        "بالضغط على زر الموافقة أدناه، فأنت تقر بأنك قرأت ما سبق وفهمته "
+        "ووافقت عليه:"
+    )
+
+
+def consent_accepted_note(trial_days: int) -> str:
+    return (
+        "✅ تم تسجيل إقرارك وقبولك في القناة.\n"
+        f"بدأت فترة اطلاعك المجانية لمدة {trial_days} يوماً — أهلاً بك 🎉"
+    )
+
+
+def consent_declined_note() -> str:
+    return (
+        "نحترم قرارك — أُلغي طلب الانضمام ولم يُسجَّل أي شيء.\n"
+        "بابنا مفتوح متى غيّرت رأيك: اضغط رابط القناة من جديد وستصلك هذه "
+        "الرسالة مرة أخرى."
+    )
+
+
+def cards_guide_message() -> str:
+    """The second welcome message: how to read the channel at a glance."""
+    return (
+        "دليل ألوان البطاقات — احفظه وستقرأ القناة بنظرة واحدة 🎨\n\n"
+        "🔵 بطاقة زرقاء — تحت المراقبة:\n"
+        "فرصة تتكوّن ولم يصدر طرح بعد. قد يكتمل شرطها فيصدر الطرح كاملاً، "
+        "وقد لا يكتمل فلا يصدر شيء — والانضباط أهم من الحماس.\n\n"
+        "🌑 بطاقة كحلية (لون العلامة) — طرح جديد:\n"
+        "صدر الآن طرح تعليمي بكامل تفاصيله: العقد، مستويات المتابعة، وقوف "
+        "الحماية، ونموذج إدارة رأس المال.\n\n"
+        "🟢 بطاقة خضراء نابضة — الطرح حي الآن:\n"
+        "نفس البطاقة تتجدد تلقائياً بالسعر الحالي كل ربع ساعة — تعرف حالة "
+        "الطرح لحظياً دون أي رسائل إضافية.\n\n"
+        "🟢 خضراء بالنتيجة — أُغلق رابحاً | 🔴 حمراء — أُغلق خاسراً:\n"
+        "ننشر الرابح والخاسر بنفس الوضوح والتصميم، مع الدرس المستفاد من كل "
+        "إغلاق — فالسجل الصادق هو منتجنا.\n\n"
+        "لست مضطراً لقراءة كل بطاقة — اللون يخبرك بالحالة من أول نظرة، "
+        "والتفاصيل لمن أراد التعمق. متابعة موفقة 📊"
     )
 
 

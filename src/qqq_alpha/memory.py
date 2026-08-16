@@ -243,6 +243,10 @@ class Memory:
             conn.execute("ALTER TABLE lessons ADD COLUMN key TEXT")
         with suppress(sqlite3.OperationalError):
             conn.execute("ALTER TABLE lessons ADD COLUMN decided_at TEXT")
+        with suppress(sqlite3.OperationalError):
+            # when the subscriber pressed "أوافق وأقر" — the legal proof of
+            # explicit consent, stamped before they saw any content
+            conn.execute("ALTER TABLE subscribers ADD COLUMN consented_at TEXT")
 
     @staticmethod
     def _purge_infeasible_missed(conn: sqlite3.Connection) -> None:
@@ -617,6 +621,15 @@ class Memory:
         return [dict(row) for row in rows]
 
     # ------------------------------------------------------------------
+    def record_consent(self, chat_id: str, when: datetime) -> None:
+        """Stamp the moment the subscriber explicitly agreed to the terms."""
+        with closing(self._connect()) as conn:
+            conn.execute(
+                "UPDATE subscribers SET consented_at = ? WHERE chat_id = ?",
+                (when.isoformat(), str(chat_id)),
+            )
+            conn.commit()
+
     def add_subscriber(
         self,
         chat_id: str,
