@@ -19,6 +19,7 @@ subscriber a signal.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -48,6 +49,35 @@ GREEN = "#35C78A"
 RED = "#EF5F6B"
 GOLD = "#E0B23E"
 BLUE = "#4F8CFF"
+
+# stage tints — the whole card shifts color with the trade's life stage, so a
+# follower reads the channel like traffic lights: blue "forming", the brand
+# navy "a new study was posted", green "alive right now", green/red "closed
+# as". Operator-approved palette; the entry card deliberately keeps the
+# original navy — the gold full-tint was tried and rejected as too heavy.
+_STAGE_THEMES: dict[str, tuple[str, str, str, str]] = {
+    "watch": ("#050E22", "#0A1834", "#081530", "#2A4A8F"),
+    "live": ("#04180F", "#082418", "#072015", "#1F6B4A"),
+    "win": ("#04180F", "#082418", "#072015", "#1F6B4A"),
+    "loss": ("#1C0709", "#2A0D11", "#260A0F", "#7A2733"),
+}
+
+
+@contextmanager
+def _stage(name: str | None):
+    """Swap the card's base palette for one render. Rendering is synchronous
+    single-threaded work, so a plain global swap-and-restore is safe."""
+    global BG, GRID, PANEL, BORDER
+    theme = _STAGE_THEMES.get(name or "")
+    if theme is None:
+        yield
+        return
+    previous = (BG, GRID, PANEL, BORDER)
+    BG, GRID, PANEL, BORDER = theme
+    try:
+        yield
+    finally:
+        BG, GRID, PANEL, BORDER = previous
 
 _fonts: dict[tuple[str, int], ImageFont.FreeTypeFont] = {}
 
@@ -191,10 +221,15 @@ def render_entry_card(trade: Trade, delayed: bool, live: TradeUpdate | None = No
     """The entry card — and, via ``live``, the living version of it.
 
     Every ~15 minutes the engine re-renders this card with the current price
-    and edits the already-posted message in place, so the top badge behaves
-    like a status light: "still in the trade — now +12.4%". One message, no
-    feed clutter, and the card is never stale.
+    and edits the already-posted message in place. The live version shifts
+    the WHOLE card to the green stage tint — a glance says "alive right now"
+    before a single word is read — while the fresh entry keeps the brand navy.
     """
+    with _stage("live" if live is not None else None):
+        return _draw_entry_card(trade, delayed, live)
+
+
+def _draw_entry_card(trade: Trade, delayed: bool, live: TradeUpdate | None) -> bytes:
     decision = trade.decision
     is_call = bool(decision.direction and decision.direction.value == "CALL")
     accent = GREEN if is_call else RED
@@ -296,6 +331,13 @@ def render_scale_out_card(trade: Trade, update: TradeUpdate) -> bytes:
 
 # ---------------------------------------------------------------- close
 def render_close_card(trade: Trade, update: TradeUpdate) -> bytes:
+    result = trade.return_pct if trade.return_pct is not None else update.return_pct
+    stage = "win" if result > 1.0 else ("loss" if result < -1.0 else None)
+    with _stage(stage):
+        return _draw_close_card(trade, update)
+
+
+def _draw_close_card(trade: Trade, update: TradeUpdate) -> bytes:
     result = trade.return_pct if trade.return_pct is not None else update.return_pct
     win = result > 1.0
     flat = -1.0 <= result <= 1.0
@@ -461,3 +503,62 @@ def render_weekly_report_card(stats, channel_rows: list[dict]) -> bytes:
 
     _report_tail(draw, y + 10, height)
     return _png(img)
+
+
+# ---------------------------------------------------------------- watch
+def render_watch_card(
+    symbol: str,
+    direction_hint: str,
+    condition: str,
+    confidence: int,
+    ts: datetime,
+    level: float | None = None,
+) -> bytes:
+    """The blue "under watch" card — a setup forming, no study posted yet.
+
+    Discipline made visible: the card promises nothing, states the condition
+    being waited for, and says out loud that no-entry is a valid outcome.
+    """
+    with _stage("watch"):
+        img, draw = _canvas(1120)
+        y = _header(draw, "رصد مبكر — فرصة قيد التكوين")
+
+        _panel(draw, (MARGIN, y, W - MARGIN, y + 280), outline=BLUE)
+        _chip(draw, W / 2, y + 50, "تحت المراقبة — ليس طرحًا بعد", BLUE)
+        draw.text((W / 2, y + 144), symbol, font=_font(84, bold=True), fill=BLUE, anchor="mm")
+        _rtl(
+            draw, (W / 2, y + 228),
+            f"الاتجاه المحتمل: {direction_hint}",
+            _font(34, bold=True), TEXT, "mm",
+        )
+        y += 310
+
+        rows = 2 if level is not None else 1
+        row_y, y = _titled_panel(draw, y, "ماذا نراقب", rows, extra=96)
+        _row(draw, row_y, "قوة الإشارة حتى الآن", f"{confidence}/10", TEXT)
+        row_y += 60
+        if level is not None:
+            _row(draw, row_y, "مستوى المراقبة", f"{level:.2f}", BLUE)
+            row_y += 60
+        for line in _wrap(draw, f"الشرط المنتظر: {condition}", _font(28, bold=True),
+                          W - 2 * MARGIN - 120)[:3]:
+            _rtl(draw, (W / 2, row_y + 6), line, _font(28, bold=True), BLUE, "mm")
+            row_y += 40
+
+        y += 8
+        for line in _wrap(
+            draw,
+            "إذا اكتمل الشرط يصدر طرح تعليمي كامل بتفاصيله — وإذا لم يكتمل فلن "
+            "يصدر شيء، والانضباط أهم من الحماس",
+            _font(28, bold=True), W - 2 * MARGIN - 60,
+        )[:2]:
+            _rtl(draw, (W / 2, y), line, _font(28, bold=True), MUTED, "mm")
+            y += 42
+
+        stamp = ts.astimezone(MARKET_TZ).strftime("%H:%M")
+        _rtl(
+            draw, (W / 2, 1120 - 78),
+            f"محتوى تعليمي وليس توصية استثمارية — الخيارات عالية المخاطر والقرار مسؤوليتك • {stamp} نيويورك",
+            _font(22), MUTED, "mm",
+        )
+        return _png(img)
