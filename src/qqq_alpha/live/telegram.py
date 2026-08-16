@@ -201,6 +201,9 @@ class TelegramCommandListener:
         self._owns_client = client is None
         self._offset = 0
         self._webhook_cleared = False
+        # channels the bot was just promoted in — the engine reports these to
+        # the operator so they can copy the numeric id into the env config
+        self.channel_promotions: list[tuple[str, str]] = []
 
     async def _claim_inbox(self) -> None:
         """Delete any webhook so getUpdates actually receives messages.
@@ -249,6 +252,18 @@ class TelegramCommandListener:
         messages: list[InboundMessage] = []
         for update in response.json().get("result", []):
             self._offset = update["update_id"] + 1
+            # promotion to channel admin arrives as my_chat_member — surfacing
+            # it is how the operator learns a private channel's numeric id
+            # without any technical digging
+            member = update.get("my_chat_member") or {}
+            member_chat = member.get("chat") or {}
+            if (
+                member_chat.get("type") == "channel"
+                and (member.get("new_chat_member") or {}).get("status") == "administrator"
+            ):
+                self.channel_promotions.append(
+                    (str(member_chat.get("id")), member_chat.get("title") or "")
+                )
             message = update.get("message") or {}
             chat = message.get("chat") or {}
             sender = message.get("from") or {}
@@ -289,6 +304,53 @@ class TelegramCommandListener:
             return response.status_code == 200
         except (httpx.TransportError, httpx.TimeoutException) as exc:
             log.warning("telegram reply to %s failed (%s)", chat_id, exc)
+            return False
+
+    async def create_invite_link(self, channel_id: str, name: str = "") -> str | None:
+        """A single-use invite link to the private channel — one link, one
+        member, so a forwarded link cannot smuggle in free riders."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=20.0)
+        try:
+            response = await self._client.post(
+                f"{TELEGRAM_API}/bot{self.token}/createChatInviteLink",
+                json={"chat_id": channel_id, "member_limit": 1, "name": name[:32]},
+            )
+            if response.status_code == 200:
+                return (response.json().get("result") or {}).get("invite_link")
+            log.warning(
+                "invite link creation failed (%s): %s",
+                response.status_code, response.text[:200],
+            )
+        except (httpx.TransportError, httpx.TimeoutException) as exc:
+            log.warning("invite link creation failed (%s)", exc)
+        return None
+
+    async def kick(self, channel_id: str, user_id: str) -> bool:
+        """Remove an expired subscriber from the private channel.
+
+        Ban then immediately unban: the ban performs the removal, the unban
+        clears the blacklist so a future paid re-join with a fresh link works.
+        """
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=20.0)
+        try:
+            banned = await self._client.post(
+                f"{TELEGRAM_API}/bot{self.token}/banChatMember",
+                json={"chat_id": channel_id, "user_id": int(user_id)},
+            )
+            await self._client.post(
+                f"{TELEGRAM_API}/bot{self.token}/unbanChatMember",
+                json={"chat_id": channel_id, "user_id": int(user_id), "only_if_banned": True},
+            )
+            if banned.status_code != 200:
+                log.warning(
+                    "kick of %s failed (%s): %s",
+                    user_id, banned.status_code, banned.text[:200],
+                )
+            return banned.status_code == 200
+        except (httpx.TransportError, httpx.TimeoutException, ValueError) as exc:
+            log.warning("kick of %s failed (%s)", user_id, exc)
             return False
 
     async def aclose(self) -> None:

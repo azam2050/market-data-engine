@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     # the public channel (e.g. "@OqoodOptions"). Empty disables channel
     # publishing entirely; the bot must be a channel admin with post rights.
     telegram_channel_id: str = ""
+    # the private subscribers channel (numeric id like "-1001234567890").
+    # When set, live signals are posted here ONCE — reaching every subscriber
+    # instantly regardless of count — instead of being fanned out one DM at a
+    # time. The bot must be an admin with post + invite + ban rights: it
+    # issues each trial subscriber a single-use invite link and removes them
+    # at expiry. Empty keeps the per-subscriber DM delivery.
+    telegram_private_channel_id: str = ""
 
     # subscribers — anyone who /starts the bot gets the signals for a free
     # trial, then is pointed at the follow-up channel and cut off. Zero days
