@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import html
+import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -185,6 +186,16 @@ class InboundMessage:
     first_name: str = ""
 
 
+@dataclass
+class JoinRequest:
+    """Someone tapped the private channel's invite link and awaits approval."""
+
+    channel_id: str
+    user_id: str
+    username: str = ""
+    first_name: str = ""
+
+
 class TelegramCommandListener:
     """Long-polls the bot's inbox.
 
@@ -204,6 +215,8 @@ class TelegramCommandListener:
         # channels the bot was just promoted in — the engine reports these to
         # the operator so they can copy the numeric id into the env config
         self.channel_promotions: list[tuple[str, str]] = []
+        # pending join requests for the private subscribers channel
+        self.join_requests: list[JoinRequest] = []
 
     async def _claim_inbox(self) -> None:
         """Delete any webhook so getUpdates actually receives messages.
@@ -236,7 +249,17 @@ class TelegramCommandListener:
         url = f"{TELEGRAM_API}/bot{self.token}/getUpdates"
         try:
             response = await self._client.get(
-                url, params={"offset": self._offset, "timeout": timeout}
+                url,
+                params={
+                    "offset": self._offset,
+                    "timeout": timeout,
+                    # explicit, because the funnel depends on all three: DMs,
+                    # admin promotions (channel-id discovery), and the private
+                    # channel's join requests
+                    "allowed_updates": json.dumps(
+                        ["message", "my_chat_member", "chat_join_request"]
+                    ),
+                },
             )
             response.raise_for_status()
         except (httpx.TransportError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
@@ -263,6 +286,17 @@ class TelegramCommandListener:
             ):
                 self.channel_promotions.append(
                     (str(member_chat.get("id")), member_chat.get("title") or "")
+                )
+            join = update.get("chat_join_request") or {}
+            if join:
+                sender = join.get("from") or {}
+                self.join_requests.append(
+                    JoinRequest(
+                        channel_id=str((join.get("chat") or {}).get("id")),
+                        user_id=str(sender.get("id")),
+                        username=sender.get("username") or "",
+                        first_name=sender.get("first_name") or "",
+                    )
                 )
             message = update.get("message") or {}
             chat = message.get("chat") or {}
@@ -305,6 +339,32 @@ class TelegramCommandListener:
         except (httpx.TransportError, httpx.TimeoutException) as exc:
             log.warning("telegram reply to %s failed (%s)", chat_id, exc)
             return False
+
+    async def _join_request_verdict(
+        self, method: str, channel_id: str, user_id: str
+    ) -> bool:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=20.0)
+        try:
+            response = await self._client.post(
+                f"{TELEGRAM_API}/bot{self.token}/{method}",
+                json={"chat_id": channel_id, "user_id": int(user_id)},
+            )
+            if response.status_code != 200:
+                log.warning(
+                    "%s for %s failed (%s): %s",
+                    method, user_id, response.status_code, response.text[:200],
+                )
+            return response.status_code == 200
+        except (httpx.TransportError, httpx.TimeoutException, ValueError) as exc:
+            log.warning("%s for %s failed (%s)", method, user_id, exc)
+            return False
+
+    async def approve_join_request(self, channel_id: str, user_id: str) -> bool:
+        return await self._join_request_verdict("approveChatJoinRequest", channel_id, user_id)
+
+    async def decline_join_request(self, channel_id: str, user_id: str) -> bool:
+        return await self._join_request_verdict("declineChatJoinRequest", channel_id, user_id)
 
     async def create_invite_link(self, channel_id: str, name: str = "") -> str | None:
         """A single-use invite link to the private channel — one link, one
@@ -362,9 +422,13 @@ class TelegramCommandListener:
 class BroadcastNotifier(TelegramNotifier):
     """The operator's chat plus every active trial subscriber.
 
-    Signals and trade updates fan out to the whole list; system notes
-    (preflight, errors, daily reviews) stay operator-only — a subscriber pays
-    for trades, not for plumbing. One failed recipient never blocks the rest.
+    Two delivery modes. With a private channel configured, a signal is posted
+    there ONCE — every subscriber sees it instantly no matter how many there
+    are, because distribution is Telegram's job, not this process's. Without
+    one, signals fan out as individual DMs (the original mode, kept as the
+    migration path and fallback). System notes (preflight, errors, daily
+    reviews) stay operator-only either way — a subscriber pays for trades,
+    not for plumbing.
     """
 
     def __init__(
@@ -374,11 +438,29 @@ class BroadcastNotifier(TelegramNotifier):
         memory: Memory,
         client: httpx.AsyncClient | None = None,
         silent_notes: bool = True,
+        private_channel_id: str = "",
     ):
         super().__init__(token, admin_chat_id, client=client, silent_notes=silent_notes)
         self.memory = memory
+        self.private_channel_id = private_channel_id
 
     async def _broadcast(self, text: str, silent: bool, card: bytes | None = None) -> None:
+        if self.private_channel_id:
+            # one post to the private channel carries the signal to everyone;
+            # the operator still gets the full text as their audit copy
+            try:
+                delivered_card = False
+                if card is not None:
+                    delivered_card = await self._post_photo(
+                        card, silent=silent, chat_id=self.private_channel_id
+                    )
+                if not delivered_card:
+                    await self._send(text, silent=silent, chat_id=self.private_channel_id)
+            except Exception:  # noqa: BLE001 - the audit copy below must still go out
+                log.exception("private channel broadcast failed")
+            await self._send(text, silent=silent)
+            return
+
         recipients = [
             self.chat_id,  # the operator, always first
             *(
@@ -433,6 +515,20 @@ class BroadcastNotifier(TelegramNotifier):
         await self._broadcast(
             format_update(trade, update, delayed), silent=not noteworthy, card=card
         )
+
+
+def channel_welcome_message(trial_days: int) -> str:
+    """Sent after a join request is approved — the subscriber never had to
+    open the bot, so this DM is also their proof of who runs the channel."""
+    return (
+        "أهلاً بك في بوت عقود الخيارات 👋\n\n"
+        "تمت الموافقة على انضمامك لقناة الطروحات الحية، وبدأت فترة متابعتك "
+        f"المجانية لمدة {trial_days} يوماً.\n"
+        "ستجد الطروحات الفنية التعليمية الحية داخل القناة فور صدورها — العقد، "
+        "مستويات المتابعة، وقف الحماية — مع متابعة كل طرح حتى إغلاقه بنتيجته "
+        "الحقيقية، ربحاً أو خسارة.\n\n"
+        f"⚠️ {DISCLAIMER}"
+    )
 
 
 def welcome_message(trial_days: int) -> str:

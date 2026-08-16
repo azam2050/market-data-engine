@@ -229,6 +229,7 @@ def live(
                 settings.telegram_bot_token,
                 settings.telegram_chat_id,
                 Memory(settings.data_dir / "memory.db"),
+                private_channel_id=settings.telegram_private_channel_id,
             ),
         )
         console.print("[green]Telegram delivery enabled[/]")

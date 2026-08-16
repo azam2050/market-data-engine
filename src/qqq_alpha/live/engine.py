@@ -265,6 +265,12 @@ class LiveEngine:
                 f"📢 النشر في القناة مفعّل: {self.settings.telegram_channel_id} — "
                 "طرحان حيّان أسبوعيًا + تقرير يومي وأسبوعي وسلسلة تعليمية"
             )
+        if self.settings.telegram_private_channel_id:
+            await self.notifier.note(
+                "🔒 قناة المشتركين الخاصة مفعّلة — الطروحات تُنشر فيها منشورًا "
+                "واحدًا، والانضمام بطلب يوافق عليه البوت آليًا، والمنتهون "
+                "يُخرَجون تلقائيًا"
+            )
 
         await self._restore()
         await self._expire_subscribers()
@@ -803,6 +809,90 @@ class LiveEngine:
                 except Exception:  # noqa: BLE001
                     log.exception("inbound message handling failed")
 
+            for request in self.commands.join_requests:
+                try:
+                    await self._handle_join_request(request)
+                except Exception:  # noqa: BLE001
+                    log.exception("join request handling failed")
+            self.commands.join_requests = []
+
+            for channel_id, title in self.commands.channel_promotions:
+                # this is how the operator learns a private channel's numeric
+                # id — no technical digging, the bot reports it the moment it
+                # is promoted
+                await self.notifier.note(
+                    f'🔑 تمت إضافتي مشرفًا في قناة "{title}"\n'
+                    f"المعرّف الرقمي: {channel_id}\n"
+                    "إن كانت هذه قناة المشتركين الخاصة، ضع هذا المعرّف في متغير "
+                    "TELEGRAM_PRIVATE_CHANNEL_ID في Railway ثم أعد التشغيل."
+                )
+            self.commands.channel_promotions = []
+
+    async def _handle_join_request(self, request) -> None:
+        """The private channel's front door: approve trials, refuse expired.
+
+        A join request is the whole sign-up now — one tap on the public
+        channel's pinned link, the bot approves within a second, the trial
+        clock starts, and the welcome lands in their DMs (Telegram allows a
+        bot to message anyone with a pending join request).
+        """
+        from qqq_alpha.live.telegram import (
+            channel_welcome_message,
+            farewell_message,
+            trial_status_message,
+        )
+
+        private = self.settings.telegram_private_channel_id
+        if self.commands is None or not private or request.channel_id != str(private):
+            return  # a request for some other chat is not ours to judge
+
+        now = datetime.now(UTC)
+        row = self.memory.subscriber(request.user_id)
+        name = request.username or request.first_name or request.user_id
+
+        if row is not None:
+            expires = datetime.fromisoformat(row["expires_at"])
+            if row["status"] == "trial" and expires > now:
+                # a known active subscriber re-joining (new phone, left by
+                # accident): let them back in on their existing clock
+                await self.commands.approve_join_request(private, request.user_id)
+                await self.commands.send(
+                    request.user_id, trial_status_message((expires - now).days)
+                )
+                return
+            await self.commands.decline_join_request(private, request.user_id)
+            await self.commands.send(
+                request.user_id, farewell_message(self.settings.post_trial_channel_url)
+            )
+            await self.notifier.note(f"⛔ طلب انضمام من مشترك منتهي: {name} — رُفض تلقائيًا")
+            return
+
+        if self.settings.trial_days <= 0:
+            await self.commands.decline_join_request(private, request.user_id)
+            return
+
+        if not await self.commands.approve_join_request(private, request.user_id):
+            await self.notifier.note(
+                f"⚠️ تعذرت الموافقة على طلب انضمام {name} — "
+                "تحقق من صلاحيات البوت في القناة الخاصة"
+            )
+            return
+        self.memory.add_subscriber(
+            request.user_id,
+            request.username,
+            request.first_name,
+            joined_at=now,
+            expires_at=now + timedelta(days=self.settings.trial_days),
+        )
+        delivered = await self.commands.send(
+            request.user_id, channel_welcome_message(self.settings.trial_days)
+        )
+        active = len(self.memory.active_subscriber_ids(now))
+        note = f"👤 مشترك جديد عبر القناة الخاصة: {name} — النشطون الآن: {active}"
+        if not delivered:
+            note += "\n⚠️ لكن تعذر إرسال رسالة الترحيب له"
+        await self.notifier.note(note)
+
     async def _handle_subscriber(self, message) -> None:
         """The trial funnel: /start begins a free month, expiry hands the
         subscriber to the follow-up channel."""
@@ -822,6 +912,8 @@ class LiveEngine:
             message.chat_id, message.username or message.first_name, message.text
         )
 
+        private = self.settings.telegram_private_channel_id
+
         if row is None:
             if not message.text.lower().startswith("/start"):
                 return  # unknown chat, no sign-up intent: stay silent
@@ -832,9 +924,19 @@ class LiveEngine:
                 joined_at=now,
                 expires_at=now + timedelta(days=self.settings.trial_days),
             )
-            delivered = await self.commands.send(
-                message.chat_id, welcome_message(self.settings.trial_days)
-            )
+            welcome = welcome_message(self.settings.trial_days)
+            if private:
+                # already registered here, so their link skips the join queue —
+                # single-use, one member, nothing to free-ride
+                link = await self.commands.create_invite_link(
+                    private, name=f"start-{message.chat_id}"
+                )
+                if link:
+                    welcome += (
+                        "\n\n🔗 الطروحات الحية تصلك داخل قناتنا الخاصة — "
+                        f"رابط دخولك (صالح لشخص واحد):\n{link}"
+                    )
+            delivered = await self.commands.send(message.chat_id, welcome)
             active = len(self.memory.active_subscriber_ids(now))
             name = message.username or message.first_name or message.chat_id
             note = f"👤 مشترك تجريبي جديد: {name} — النشطون الآن: {active}"
@@ -848,7 +950,14 @@ class LiveEngine:
         expires = datetime.fromisoformat(row["expires_at"])
         if row["status"] == "trial" and expires > now:
             days_left = (expires - now).days
-            await self.commands.send(message.chat_id, trial_status_message(days_left))
+            status = trial_status_message(days_left)
+            if private:
+                link = await self.commands.create_invite_link(
+                    private, name=f"status-{message.chat_id}"
+                )
+                if link:
+                    status += f"\n\n🔗 إن لم تكن داخل القناة الخاصة بعد، هذا رابطك:\n{link}"
+            await self.commands.send(message.chat_id, status)
         else:
             await self.commands.send(
                 message.chat_id, farewell_message(self.settings.post_trial_channel_url)
@@ -865,7 +974,12 @@ class LiveEngine:
         from qqq_alpha.live.telegram import farewell_message
 
         due = self.memory.expire_due_subscribers(datetime.now(UTC))
+        private = self.settings.telegram_private_channel_id
         for row in due:
+            if private:
+                # removal from the private channel IS the cutoff; the DM only
+                # explains it and points at the follow-up channel
+                await self.commands.kick(private, row["chat_id"])
             await self.commands.send(
                 row["chat_id"], farewell_message(self.settings.post_trial_channel_url)
             )
