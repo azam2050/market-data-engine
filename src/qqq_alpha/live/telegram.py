@@ -208,6 +208,15 @@ class TelegramNotifier:
     async def note(self, text: str) -> None:
         await self._send(text, silent=self.silent_notes)
 
+    async def watch(self, png: bytes | None, text: str) -> None:
+        """A blue under-watch card — quiet by design: a forming setup is
+        information, not an event worth a buzz."""
+        delivered = None
+        if png is not None:
+            delivered = await self._post_photo(png, silent=True)
+        if not delivered:
+            await self._send(text, silent=True)
+
     async def aclose(self) -> None:
         if self._owns_client and self._client is not None:
             await self._client.aclose()
@@ -658,6 +667,19 @@ class BroadcastNotifier(TelegramNotifier):
             log.exception("card rendering failed; sending text only")
         return None
 
+    async def watch(self, png: bytes | None, text: str) -> None:
+        if self.private_channel_id:
+            delivered = None
+            if png is not None:
+                delivered = await self._post_photo(
+                    png, silent=True, chat_id=self.private_channel_id
+                )
+            if not delivered:
+                await self._send(text, silent=True, chat_id=self.private_channel_id)
+            await self._send(text, silent=True)  # operator copy
+            return
+        await self._broadcast(text, silent=True, card=png)
+
     async def signal(self, trade: Trade, delayed: bool) -> None:
         card = self._render_card("entry", trade, None, delayed)
         text = format_signal(trade, delayed)
@@ -832,6 +854,9 @@ class FanoutNotifier:
 
     async def note(self, text: str) -> None:
         await self._fanout("note", text)
+
+    async def watch(self, png: bytes | None, text: str) -> None:
+        await self._fanout("watch", png, text)
 
 
 async def verify_telegram(token: str, chat_id: str) -> tuple[bool, str]:

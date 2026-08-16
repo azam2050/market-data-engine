@@ -43,6 +43,7 @@ class Notifier(Protocol):
     async def signal(self, trade: Trade, delayed: bool) -> None: ...
     async def update(self, trade: Trade, update: TradeUpdate, delayed: bool) -> None: ...
     async def note(self, text: str) -> None: ...
+    async def watch(self, png: bytes | None, text: str) -> None: ...
 
 
 def human_contract(occ_symbol: str, as_of) -> str:
@@ -187,6 +188,9 @@ class ConsoleNotifier:
     async def note(self, text: str) -> None:
         self.console.print(f"[dim]{text}[/]")
 
+    async def watch(self, png: bytes | None, text: str) -> None:
+        self.console.print(Panel(text, title="تحت المراقبة", border_style="blue"))
+
 
 class NullNotifier:
     """Swallows everything. For tests and for silent shadow runs."""
@@ -195,6 +199,7 @@ class NullNotifier:
         self.signals: list[Trade] = []
         self.updates: list[TradeUpdate] = []
         self.notes: list[str] = []
+        self.watches: list[str] = []
 
     async def signal(self, trade: Trade, delayed: bool) -> None:
         self.signals.append(trade)
@@ -204,3 +209,6 @@ class NullNotifier:
 
     async def note(self, text: str) -> None:
         self.notes.append(text)
+
+    async def watch(self, png: bytes | None, text: str) -> None:
+        self.watches.append(text)

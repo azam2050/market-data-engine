@@ -179,6 +179,9 @@ class LiveEngine:
             else None
         )
         self._channel_daily_posted: date | None = None
+        # blue under-watch cards published today — capped so a choppy session
+        # cannot turn the watch card into noise
+        self._watch_shared_today = 0
 
     # ------------------------------------------------------------------
     def _persist(self) -> None:
@@ -475,6 +478,7 @@ class LiveEngine:
             decision, snapshot, post.blocks, pre.warnings + post.warnings, verdict.score
         )
         self.memory.remember_decision(decision, snapshot, verdict.score, post.blocks)
+        await self._maybe_publish_watch(decision, snapshot)
 
         if decision.action is not Action.ENTER or not post.allowed:
             if decision.action is Action.ENTER:
@@ -514,6 +518,56 @@ class LiveEngine:
         await self.notifier.signal(trade, self._delayed)
         if trade.shared_to_channel and self.channel is not None:
             await self.channel.post_trade_entry(trade, self._delayed)
+
+    # ------------------------------------------------------------------
+    async def _maybe_publish_watch(self, decision: Decision, snapshot: MarketSnapshot) -> None:
+        """The blue "under watch" card, for a qualified WAIT.
+
+        Fires only when the brain named a specific condition it is waiting
+        for at confidence 6+, at most twice a day: the watch card is a
+        promise of discipline, and promises lose value when spammed. Private
+        channel always; the public channel only on live-share days.
+        """
+        if decision.action is not Action.WAIT or decision.confidence < 6:
+            return
+        if self._watch_shared_today >= 2:
+            return
+        condition = (decision.invalidation or "").strip() or (decision.thesis or "").strip()
+        if not condition or abs(snapshot.net_bias) < 0.2:
+            return
+        direction_hint = "صعود CALL" if snapshot.net_bias > 0 else "هبوط PUT"
+
+        png: bytes | None = None
+        try:
+            from qqq_alpha.live import cards
+
+            png = cards.render_watch_card(
+                snapshot.underlying.symbol,
+                direction_hint,
+                condition[:180],
+                decision.confidence,
+                snapshot.ts,
+                level=decision.invalidation_level,
+            )
+        except Exception:  # noqa: BLE001 - a drawing bug must never cost a wake
+            log.exception("watch card rendering failed")
+
+        from qqq_alpha.live.notifier import DISCLAIMER
+
+        text = (
+            "🔵 تحت المراقبة — ليس طرحًا بعد\n"
+            f"الاتجاه المحتمل: {direction_hint}\n"
+            f"الشرط المنتظر: {condition[:300]}\n"
+            f"قوة الإشارة حتى الآن: {decision.confidence}/10\n"
+            "إذا اكتمل الشرط يصدر طرح كامل — وإذا لم يكتمل فلن يصدر شيء.\n"
+            f"⚠️ {DISCLAIMER}"
+        )
+        await self.notifier.watch(png, text)
+        if self.channel is not None and self.channel.is_share_day(
+            snapshot.ts.astimezone(MARKET_TZ).date()
+        ):
+            await self.channel.post_watch(png, text)
+        self._watch_shared_today += 1
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -747,6 +801,7 @@ class LiveEngine:
         self.status.trades_today = 0
         self.status.realized_pct = 0.0
         self.status.open_positions = 0
+        self._watch_shared_today = 0
         self._current_day = new_day
         self._persist()
         await self._expire_subscribers()

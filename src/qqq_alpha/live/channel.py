@@ -217,6 +217,12 @@ class ChannelPublisher:
             await self._post_card(png, caption, format_update(trade, update, delayed))
 
     # ------------------------------------------------------------------
+    async def post_watch(self, png: bytes | None, text: str) -> None:
+        """The blue under-watch card, shown publicly only on live-share days
+        so the audience sees the discipline behind the week's free trades."""
+        await self._post_card(png, "🔵 تحت المراقبة — ليس طرحًا بعد", text)
+
+    # ------------------------------------------------------------------
     async def post_daily_report(self, day: date, closed_trades: list[Trade]) -> None:
         title = f"📅 تقرير اليوم — {day.isoformat()}"
         if not closed_trades:

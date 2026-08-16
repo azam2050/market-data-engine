@@ -248,3 +248,93 @@ async def test_first_trade_on_a_share_day_is_flagged_and_mirrored(tmp_path):
     assert sum(t.shared_to_channel for t in taken) == 1
     assert posts["photos"] >= 1
     await engine.channel._notifier._client.aclose()
+
+
+# ---------------------------------------------------------------- watch card
+class _WaitingDecider:
+    """A qualified WAIT every time: named condition, confidence 7."""
+
+    async def decide(self, snapshot, **kwargs):
+        return Decision(
+            ts=snapshot.ts, action=Action.WAIT, confidence=7,
+            thesis="نراقب ارتدادًا فاشلًا نحو VWAP",
+            invalidation="اختراق قمة الارتداد عند 732.50",
+        )
+
+
+@pytest.mark.asyncio
+async def test_qualified_waits_publish_at_most_two_watch_cards(tmp_path):
+    from qqq_alpha.live.engine import LiveEngine
+
+    settings = Settings(
+        massive_api_key="k",
+        journal_dir=tmp_path / "journal",
+        data_dir=tmp_path / "data",
+        max_data_age_sec=10**9,
+        attention_threshold=0.0,
+        attention_cooldown_sec=0,
+        shadow_symbols_csv="",
+    )
+    notifier = NullNotifier()
+    engine = LiveEngine(
+        settings=settings,
+        decider=_WaitingDecider(),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=notifier,
+    )
+    engine._current_day = DAY
+    bars = synthetic_session("QQQ", DAY, seed=8, trend=0.02, volatility=0.002)
+    for bar in bars[:120]:
+        await engine._on_bar(bar)
+
+    # plenty of qualified WAIT wakes, but the card kept its promise: max 2/day
+    assert len(notifier.watches) == 2
+    assert "تحت المراقبة" in notifier.watches[0]
+    assert "ليس طرحًا بعد" in notifier.watches[0]
+
+
+# ---------------------------------------------------------------- watch card
+class _WaitingDecider:
+    """A qualified WAIT every time: named condition, confidence 7."""
+
+    async def decide(self, snapshot, **kwargs):
+        return Decision(
+            ts=snapshot.ts, action=Action.WAIT, confidence=7,
+            thesis="نراقب ارتدادًا فاشلًا نحو VWAP",
+            invalidation="اختراق قمة الارتداد عند 732.50",
+        )
+
+
+@pytest.mark.asyncio
+async def test_qualified_waits_publish_at_most_two_watch_cards(tmp_path):
+    from qqq_alpha.live.engine import LiveEngine
+
+    settings = Settings(
+        massive_api_key="k",
+        journal_dir=tmp_path / "journal",
+        data_dir=tmp_path / "data",
+        max_data_age_sec=10**9,
+        attention_threshold=0.0,
+        attention_cooldown_sec=0,
+        shadow_symbols_csv="",
+    )
+    notifier = NullNotifier()
+    engine = LiveEngine(
+        settings=settings,
+        decider=_WaitingDecider(),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=notifier,
+    )
+    engine._current_day = DAY
+    bars = synthetic_session("QQQ", DAY, seed=8, trend=0.02, volatility=0.002)
+    for bar in bars[:120]:
+        await engine._on_bar(bar)
+
+    # plenty of qualified WAIT wakes, but the card kept its promise: max 2/day
+    assert len(notifier.watches) == 2
+    assert "تحت المراقبة" in notifier.watches[0]
+    assert "ليس طرحًا بعد" in notifier.watches[0]
