@@ -103,9 +103,14 @@ class TelegramNotifier:
 
     async def _post_photo(
         self, png: bytes, caption: str = "", silent: bool = False, chat_id: str | None = None
-    ) -> bool:
+    ) -> int | None:
         """One photo message. Best-effort, single retry — if the photo cannot
-        be delivered, the caller falls back to the text version of the signal."""
+        be delivered, the caller falls back to the text version of the signal.
+
+        Returns the posted message id (or a truthy sentinel when Telegram
+        omits it), so callers can later edit the card in place — that is how
+        the entry card becomes a live status board. None means not delivered.
+        """
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=30.0)
 
@@ -122,14 +127,47 @@ class TelegramNotifier:
                     files={"photo": ("signal.png", png, "image/png")},
                 )
                 if response.status_code == 200:
-                    return True
+                    result = {}
+                    with contextlib.suppress(Exception):
+                        result = response.json().get("result") or {}
+                    return int(result.get("message_id") or -1)
                 log.warning(
                     "telegram rejected photo: %s %s", response.status_code, response.text[:200]
                 )
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 log.warning("telegram photo send failed (%s)", exc)
             await asyncio.sleep(BASE_RETRY_SEC * (2**attempt))
-        return False
+        return None
+
+    async def _edit_photo(
+        self, chat_id: str, message_id: int, png: bytes, caption: str = ""
+    ) -> bool:
+        """Replace an already-posted card image in place. Single attempt —
+        a missed heartbeat refresh costs nothing; the next one catches up."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=30.0)
+        media = {"type": "photo", "media": "attach://photo"}
+        if caption:
+            media["caption"] = caption[:1000]
+        try:
+            response = await self._client.post(
+                f"{TELEGRAM_API}/bot{self.token}/editMessageMedia",
+                data={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "media": json.dumps(media),
+                },
+                files={"photo": ("signal.png", png, "image/png")},
+            )
+            if response.status_code != 200:
+                log.warning(
+                    "telegram rejected photo edit: %s %s",
+                    response.status_code, response.text[:200],
+                )
+            return response.status_code == 200
+        except (httpx.TransportError, httpx.TimeoutException) as exc:
+            log.warning("telegram photo edit failed (%s)", exc)
+            return False
 
     @staticmethod
     def _chunks(text: str) -> list[str]:
@@ -443,6 +481,10 @@ class BroadcastNotifier(TelegramNotifier):
         super().__init__(token, admin_chat_id, client=client, silent_notes=silent_notes)
         self.memory = memory
         self.private_channel_id = private_channel_id
+        # entry-card message ids per open trade, so heartbeats can refresh
+        # the posted card in place — in-memory only: after a restart the
+        # heartbeat edits simply resume being skipped, costing nothing
+        self._live_cards: dict[str, int] = {}
 
     async def _broadcast(self, text: str, silent: bool, card: bytes | None = None) -> None:
         if self.private_channel_id:
@@ -493,6 +535,8 @@ class BroadcastNotifier(TelegramNotifier):
 
             if kind == "entry":
                 return cards.render_entry_card(trade, delayed)
+            if kind == "entry_live" and update is not None:
+                return cards.render_entry_card(trade, delayed, live=update)
             if kind == "scale_out" and update is not None:
                 return cards.render_scale_out_card(trade, update)
             if kind == "close" and update is not None:
@@ -503,12 +547,43 @@ class BroadcastNotifier(TelegramNotifier):
 
     async def signal(self, trade: Trade, delayed: bool) -> None:
         card = self._render_card("entry", trade, None, delayed)
-        await self._broadcast(format_signal(trade, delayed), silent=False, card=card)
+        text = format_signal(trade, delayed)
+        if self.private_channel_id:
+            # posted directly (not via _broadcast) so the message id can be
+            # kept — the heartbeat will edit this exact card in place
+            message_id = None
+            if card is not None:
+                message_id = await self._post_photo(
+                    card, silent=False, chat_id=self.private_channel_id
+                )
+            if not message_id:
+                await self._send(text, silent=False, chat_id=self.private_channel_id)
+            elif message_id > 0:
+                self._live_cards[trade.trade_id] = message_id
+            await self._send(text, silent=False)  # the operator's audit copy
+            return
+        await self._broadcast(text, silent=False, card=card)
 
     async def update(self, trade: Trade, update: TradeUpdate, delayed: bool) -> None:
+        if update.note.startswith("status:"):
+            # the living card: the 15-minute heartbeat refreshes the posted
+            # entry card's badge in place — "still in, now +X%" — instead of
+            # dropping another message into the feed
+            if self.private_channel_id:
+                message_id = self._live_cards.get(trade.trade_id)
+                if message_id and message_id > 0:
+                    png = self._render_card("entry_live", trade, update, delayed)
+                    if png is not None:
+                        await self._edit_photo(self.private_channel_id, message_id, png)
+                await self._send(format_update(trade, update, delayed), silent=True)
+                return
+            await self._broadcast(format_update(trade, update, delayed), silent=True)
+            return
+
         card: bytes | None = None
         if update.note.startswith("closed:"):
             card = self._render_card("close", trade, update, delayed)
+            self._live_cards.pop(trade.trade_id, None)
         elif update.note.startswith("scale_out"):
             card = self._render_card("scale_out", trade, update, delayed)
         noteworthy = update.note.startswith(("closed:", "target:", "scale_out"))

@@ -187,7 +187,14 @@ def _png(img: Image.Image) -> bytes:
 
 
 # ---------------------------------------------------------------- entry
-def render_entry_card(trade: Trade, delayed: bool) -> bytes:
+def render_entry_card(trade: Trade, delayed: bool, live: TradeUpdate | None = None) -> bytes:
+    """The entry card — and, via ``live``, the living version of it.
+
+    Every ~15 minutes the engine re-renders this card with the current price
+    and edits the already-posted message in place, so the top badge behaves
+    like a status light: "still in the trade — now +12.4%". One message, no
+    feed clutter, and the card is never stale.
+    """
     decision = trade.decision
     is_call = bool(decision.direction and decision.direction.value == "CALL")
     accent = GREEN if is_call else RED
@@ -198,7 +205,15 @@ def render_entry_card(trade: Trade, delayed: bool) -> bytes:
 
     # the contract, big enough to read from across a room
     _panel(draw, (MARGIN, y, W - MARGIN, y + 280), outline=accent)
-    _chip(draw, W / 2, y + 50, "طرح تعليمي حي", GOLD)
+    if live is None:
+        _chip(draw, W / 2, y + 50, "طرح تعليمي حي", GOLD)
+    else:
+        elapsed = int((live.ts - trade.opened_at).total_seconds() // 60)
+        _chip(
+            draw, W / 2, y + 50,
+            f"ما زلنا في الطرح — الآن {live.return_pct:+.1f}% • {elapsed} دقيقة",
+            GREEN if live.return_pct >= 0 else GOLD,
+        )
     draw.text((W / 2, y + 144), contract, font=_font(84, bold=True), fill=accent, anchor="mm")
     _rtl(
         draw, (W / 2, y + 228),

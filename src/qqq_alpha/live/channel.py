@@ -133,6 +133,9 @@ class ChannelPublisher:
         self.channel_id = channel_id
         self._salt = token[-10:]  # unpredictable outside, stable across restarts
         self._notifier = TelegramNotifier(token, channel_id, client=client)
+        # the live share's entry-card message id, so heartbeats can refresh
+        # the card in place ("still in the trade — now +X%")
+        self._live_messages: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     def is_share_day(self, day: date) -> bool:
@@ -145,15 +148,18 @@ class ChannelPublisher:
         except Exception:  # noqa: BLE001
             log.exception("channel text post failed")
 
-    async def _post_card(self, png: bytes | None, caption: str, fallback: str) -> None:
+    async def _post_card(self, png: bytes | None, caption: str, fallback: str) -> int | None:
         try:
-            delivered = False
+            delivered = None
             if png is not None:
                 delivered = await self._notifier._post_photo(png, caption=caption)
             if not delivered:
                 await self._notifier._send(fallback)
+                return None
+            return delivered
         except Exception:  # noqa: BLE001
             log.exception("channel card post failed")
+            return None
 
     # ------------------------------------------------------------------
     async def post_trade_entry(self, trade: Trade, delayed: bool) -> None:
@@ -166,14 +172,31 @@ class ChannelPublisher:
             "وسنتابعه هنا حتى إغلاقه.\n"
             f"⚠️ {DISCLAIMER}"
         )
-        await self._post_card(png, caption, f"🔓 طرح تعليمي حي: {contract}\n⚠️ {DISCLAIMER}")
+        message_id = await self._post_card(
+            png, caption, f"🔓 طرح تعليمي حي: {contract}\n⚠️ {DISCLAIMER}"
+        )
+        if message_id and message_id > 0:
+            self._live_messages[trade.trade_id] = message_id
 
     async def post_trade_update(self, trade: Trade, update: TradeUpdate, delayed: bool) -> None:
         from qqq_alpha.live.notifier import format_update
         from qqq_alpha.live.telegram import BroadcastNotifier
 
+        if update.note.startswith("status:"):
+            # the living card: refresh the posted entry card's badge in place
+            message_id = self._live_messages.get(trade.trade_id)
+            if message_id and message_id > 0:
+                png = BroadcastNotifier._render_card("entry_live", trade, update, delayed)
+                if png is not None:
+                    try:
+                        await self._notifier._edit_photo(self.channel_id, message_id, png)
+                    except Exception:  # noqa: BLE001
+                        log.exception("live card refresh failed")
+            return
+
         if update.note.startswith("closed:"):
             png = BroadcastNotifier._render_card("close", trade, update, delayed)
+            self._live_messages.pop(trade.trade_id, None)
             lesson = EXIT_REASON_AR.get(trade.exit_reason, "")
             caption = (
                 f"🔓 إغلاق الطرح الحي: {update.return_pct:+.1f}%"
@@ -186,7 +209,7 @@ class ChannelPublisher:
             png = None
             caption = ""
         else:
-            return  # heartbeats stay out of the channel
+            return  # anything unrecognised stays out of the channel
 
         if png is None:
             await self.post_text(f"🔓 متابعة الطرح الحي\n{format_update(trade, update, delayed)}")

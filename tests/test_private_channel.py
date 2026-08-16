@@ -221,3 +221,52 @@ async def test_private_delivery_is_one_post_plus_operator_copy(tmp_path):
 
     assert len(photo_chats) == 1 and PRIVATE in photo_chats[0]  # one channel post
     assert text_chats == ["admin"]  # the audit copy only — no subscriber DMs
+
+
+# ---------------------------------------------------------------- living card
+@pytest.mark.asyncio
+async def test_heartbeat_edits_the_posted_card_instead_of_new_messages(tmp_path):
+    """Every 15 minutes the entry card's badge refreshes in place — 'still
+    in the trade, now +X%' — one message that lives, not a feed of pings."""
+    from datetime import date
+    from datetime import timedelta as td
+
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.domain import Action, Decision, OptionType, Target
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+    from qqq_alpha.trades import TradeManager
+
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        methods.append(method)
+        if method == "sendPhoto":
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 42}})
+        return httpx.Response(200, json={"ok": True, "result": {}})
+
+    bars = synthetic_session("QQQ", date(2026, 3, 2), seed=21)
+    snap = SnapshotBuilder("QQQ").build(bars[:80])
+    decision = Decision(
+        ts=snap.ts, action=Action.ENTER, direction=OptionType.CALL,
+        occ_symbol="O:QQQ260302C00485000",
+        targets=[Target(label="T1", price=0.0, return_pct=50, take_pct=50)],
+        stop_return_pct=-40, confidence=7, thesis="x",
+    )
+    manager = TradeManager()
+    trade = manager.open_trade(decision, 1.00, snap)
+
+    memory = Memory(tmp_path / "memory.db")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        notifier = BroadcastNotifier(
+            "token", "admin", memory, client=client, private_channel_id=PRIVATE
+        )
+        await notifier.signal(trade, delayed=False)
+        assert notifier._live_cards[trade.trade_id] == 42
+
+        heartbeat = manager.update(trade, 1.12, trade.opened_at + td(minutes=16))
+        assert heartbeat is not None and heartbeat.note.startswith("status:")
+        await notifier.update(trade, heartbeat, delayed=False)
+
+    assert methods.count("sendPhoto") == 1        # the entry card, once
+    assert methods.count("editMessageMedia") == 1  # the living refresh
