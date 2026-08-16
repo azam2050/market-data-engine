@@ -97,15 +97,15 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> list[st
     return lines
 
 
-def _canvas() -> tuple[Image.Image, ImageDraw.ImageDraw]:
-    img = Image.new("RGB", (W, H), BG)
+def _canvas(height: int = H) -> tuple[Image.Image, ImageDraw.ImageDraw]:
+    img = Image.new("RGB", (W, height), BG)
     draw = ImageDraw.Draw(img)
     # a faint blueprint grid, then the outer frame
     for x in range(0, W, 54):
-        draw.line([(x, 0), (x, H)], fill=GRID, width=1)
-    for y in range(0, H, 54):
+        draw.line([(x, 0), (x, height)], fill=GRID, width=1)
+    for y in range(0, height, 54):
         draw.line([(0, y), (W, y)], fill=GRID, width=1)
-    draw.rounded_rectangle([16, 16, W - 16, H - 16], radius=28, outline=BORDER, width=3)
+    draw.rounded_rectangle([16, 16, W - 16, height - 16], radius=28, outline=BORDER, width=3)
     return img, draw
 
 
@@ -340,4 +340,109 @@ def render_close_card(trade: Trade, update: TradeUpdate) -> bytes:
         draw, update.ts, delayed=False,
         note="سجلنا كامل وشفاف — كل صفقة تنشر بنتيجتها الحقيقية",
     )
+    return _png(img)
+
+
+# ---------------------------------------------------------------- reports
+METHODOLOGY_LINE = "النتائج كما أُغلقت فعليًا — لا نحسب طرحًا رابحًا لمجرد أنه لامس مستوى ثم انعكس"
+MODEL_NOTE_LINE = "النموذج الافتراضي لأغراض التوضيح فقط — ليست نتائج حساب حقيقي"
+DISCLAIMER_LINE = "محتوى تعليمي وليس توصية استثمارية — الخيارات عالية المخاطر والقرار مسؤوليتك"
+# the hypothetical sizing behind every $ figure on the report cards: $1000
+# per single-position unit, scaled by each trade's recommended size factor
+MODEL_DOLLARS_PER_TRADE = 1000.0
+
+
+def _report_tail(draw: ImageDraw.ImageDraw, y: int, height: int) -> None:
+    """The methodology line and the disclaimers, shared by both report cards."""
+    for line in _wrap(draw, METHODOLOGY_LINE, _font(26, bold=True), W - 2 * MARGIN - 60)[:2]:
+        _rtl(draw, (W / 2, y), line, _font(26, bold=True), GOLD, "mm")
+        y += 40
+    _rtl(draw, (W / 2, height - 116), MODEL_NOTE_LINE, _font(22), MUTED, "mm")
+    _rtl(draw, (W / 2, height - 78), DISCLAIMER_LINE, _font(22), MUTED, "mm")
+
+
+def _dollars(pct_sum: float) -> str:
+    value = pct_sum / 100.0 * MODEL_DOLLARS_PER_TRADE
+    return f"${value:+,.0f}"
+
+
+def render_daily_report_card(day, rows: list[dict]) -> bytes:
+    """The day's scoreboard as a table. ``rows``: label / return_pct / shared."""
+    returns = [float(r["return_pct"]) for r in rows]
+    total = sum(returns)
+    gross_win = sum(r for r in returns if r > 0)
+    gross_loss = sum(r for r in returns if r < 0)
+    accent = GREEN if total > 1 else (MUTED if total >= -1 else RED)
+
+    height = 226 + 260 + (110 + len(rows) * 60 + 24) + (110 + 3 * 60 + 24) + 100 + 170
+    img, draw = _canvas(height)
+    y = _header(draw, f"تقرير اليوم — {day.isoformat()}")
+
+    _panel(draw, (MARGIN, y, W - MARGIN, y + 230), outline=accent)
+    _chip(draw, W / 2, y + 46, "تقرير يومي — سجل شفاف", GOLD)
+    draw.text(
+        (W / 2, y + 142), f"{total:+.1f}%", font=_font(100, bold=True),
+        fill=accent, anchor="mm",
+    )
+    y += 260
+
+    row_y, y = _titled_panel(draw, y, "طروحات اليوم", len(rows))
+    for row in rows:
+        result = float(row["return_pct"])
+        fill = GREEN if result > 1 else (MUTED if result >= -1 else RED)
+        label = str(row["label"])
+        if row.get("shared"):
+            label += " — نُشر حيًا هنا"
+        _row(draw, row_y, label, f"{result:+.1f}%", fill)
+        row_y += 60
+
+    row_y, y = _titled_panel(draw, y, "الحصيلة — نموذج افتراضي 1000$ لكل طرح", 3)
+    _row(draw, row_y, "إجمالي الأرباح", f"{_dollars(gross_win)}  ({gross_win:+.1f}%)", GREEN)
+    _row(draw, row_y + 60, "إجمالي الخسائر", f"{_dollars(gross_loss)}  ({gross_loss:+.1f}%)", RED)
+    _row(draw, row_y + 120, "الصافي", f"{_dollars(total)}  ({total:+.1f}%)", GOLD)
+
+    _report_tail(draw, y + 10, height)
+    return _png(img)
+
+
+def render_weekly_report_card(stats, channel_rows: list[dict]) -> bytes:
+    """The weekly scoreboard as a table, with the live-share proof section."""
+    positive = stats.expectancy_pct > 0
+    gross_win = stats.avg_win_pct * stats.wins
+    gross_loss = stats.avg_loss_pct * stats.losses
+    net = stats.expectancy_pct * stats.closed
+    stat_rows: list[tuple[str, str, str]] = [
+        ("إجمالي الطروحات المغلقة", str(stats.closed), TEXT),
+        ("الرابحة", str(stats.wins), GREEN),
+        ("الخاسرة", str(stats.losses), RED),
+        ("نسبة الطروحات الرابحة", f"{stats.win_rate:.0f}%", GOLD),
+        ("إجمالي الأرباح", f"{_dollars(gross_win)}  ({gross_win:+.1f}%)", GREEN),
+        ("إجمالي الخسائر", f"{_dollars(gross_loss)}  ({gross_loss:+.1f}%)", RED),
+        ("الصافي — نموذج 1000$ لكل طرح", f"{_dollars(net)}  ({net:+.1f}%)", GOLD),
+        ("متوسط نتيجة الطرح", f"{stats.expectancy_pct:+.1f}%", GREEN if positive else RED),
+        ("أفضل طرح", f"{stats.best_pct:+.1f}%", GREEN),
+        ("أسوأ طرح", f"{stats.worst_pct:+.1f}%", RED),
+    ]
+
+    channel_panel = (110 + len(channel_rows) * 60 + 24) if channel_rows else 0
+    height = 226 + (110 + len(stat_rows) * 60 + 24) + channel_panel + 110 + 60
+    img, draw = _canvas(height)
+    y = _header(draw, "التقرير الأسبوعي — الرابح والخاسر كما أُغلق فعليًا")
+
+    row_y, y = _titled_panel(draw, y, "حصيلة الأسبوع", len(stat_rows))
+    for label, value, fill in stat_rows:
+        _row(draw, row_y, label, value, fill)
+        row_y += 60
+
+    if channel_rows:
+        row_y, y = _titled_panel(
+            draw, y, "طروحات نُشرت حية في القناة قبل نتيجتها", len(channel_rows)
+        )
+        for row in channel_rows:
+            result = float(row.get("return_pct") or 0)
+            fill = GREEN if result > 1 else (MUTED if result >= -1 else RED)
+            _row(draw, row_y, str(row.get("label", "?")), f"{result:+.1f}%", fill)
+            row_y += 60
+
+    _report_tail(draw, y + 10, height)
     return _png(img)

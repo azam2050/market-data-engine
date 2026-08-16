@@ -105,17 +105,39 @@ async def test_no_trade_day_report_teaches_capital_preservation():
     assert "ليس توصية استثمارية" in text
 
 
+def _closed_pair():
+    shared, private = _trade(shared=True), _trade()
+    for trade in (shared, private):
+        manager = TradeManager()
+        manager.open_trades = [trade]
+        manager.force_close(trade, 1.40, trade.opened_at + timedelta(minutes=30), "trail_stop")
+    return shared, private
+
+
 @pytest.mark.asyncio
-async def test_daily_report_tags_the_channel_trade():
+async def test_daily_report_goes_out_as_a_table_card():
     posts, transport = _recorder()
     async with httpx.AsyncClient(transport=transport) as client:
         publisher = ChannelPublisher("token", "@chan", client=client)
-        shared, private = _trade(shared=True), _trade()
-        for trade in (shared, private):
-            manager = TradeManager()
-            manager.open_trades = [trade]
-            manager.force_close(trade, 1.40, trade.opened_at + timedelta(minutes=30), "trail_stop")
-        await publisher.post_daily_report(DAY, [shared, private])
+        await publisher.post_daily_report(DAY, list(_closed_pair()))
+
+    assert posts["photos"] == 1  # the branded table card
+    assert posts["texts"] == []  # no duplicate text wall next to it
+
+
+@pytest.mark.asyncio
+async def test_daily_report_falls_back_to_tagged_text_when_photos_fail():
+    posts = {"texts": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("sendPhoto"):
+            return httpx.Response(400, json={"ok": False})
+        posts["texts"].append(json.loads(request.content).get("text", ""))
+        return httpx.Response(200, json={"ok": True})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        publisher = ChannelPublisher("token", "@chan", client=client)
+        await publisher.post_daily_report(DAY, list(_closed_pair()))
 
     text = posts["texts"][0]
     assert text.count("🟢") == 2

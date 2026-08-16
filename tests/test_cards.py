@@ -64,3 +64,23 @@ def test_losing_close_card_renders_without_flinching():
 
     png = cards.render_close_card(trade, close)
     assert png.startswith(PNG_MAGIC)
+
+
+def test_report_cards_render_as_valid_pngs():
+    from qqq_alpha.live.review import ReviewStats
+
+    daily = cards.render_daily_report_card(
+        date(2026, 8, 14),
+        [
+            {"label": "QQQ 731 PUT 0DTE", "return_pct": 68.1, "shared": True},
+            {"label": "QQQ 733 CALL 0DTE", "return_pct": -3.9, "shared": False},
+        ],
+    )
+    assert daily.startswith(PNG_MAGIC) and len(daily) > 10_000
+
+    stats = ReviewStats(closed=7, wins=4, losses=3, win_rate=57.1,
+                        expectancy_pct=12.4, best_pct=68.1, worst_pct=-41.7)
+    weekly = cards.render_weekly_report_card(
+        stats, [{"label": "QQQ 731 PUT 0DTE", "return_pct": 68.1}]
+    )
+    assert weekly.startswith(PNG_MAGIC) and len(weekly) > 10_000

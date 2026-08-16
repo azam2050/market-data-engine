@@ -207,25 +207,38 @@ class ChannelPublisher:
             )
             return
 
+        rows = [
+            {
+                "label": human_contract(t.occ_symbol, t.opened_at),
+                "return_pct": t.return_pct or 0.0,
+                "shared": t.shared_to_channel,
+            }
+            for t in closed_trades
+        ]
+        # the table renders as a branded card; the text version below is the
+        # fallback of record if drawing or photo delivery ever fails
         lines = [title, ""]
         total = 0.0
-        for trade in closed_trades:
-            result = trade.return_pct or 0.0
+        for row in rows:
+            result = float(row["return_pct"])
             total += result
             icon = "🟢" if result > 1 else ("⚪" if result >= -1 else "🔴")
-            tag = " 🔓" if trade.shared_to_channel else ""
-            lines.append(
-                f"{icon} {human_contract(trade.occ_symbol, trade.opened_at)}: "
-                f"{result:+.1f}%{tag}"
-            )
+            tag = " 🔓" if row["shared"] else ""
+            lines.append(f"{icon} {row['label']}: {result:+.1f}%{tag}")
+        returns = [float(r["return_pct"]) for r in rows]
+        gross_win = sum(r for r in returns if r > 0)
+        gross_loss = sum(r for r in returns if r < 0)
         lines += [
             "",
-            f"المحصلة: {total:+.1f}% (مجموع نتائج الطروحات)",
+            f"💚 إجمالي الأرباح: {gross_win:+.1f}%",
+            f"🔴 إجمالي الخسائر: {gross_loss:+.1f}%",
+            f"💰 الصافي: {total:+.1f}%",
             "النتائج كما أُغلقت فعليًا — لا نحسب طرحًا رابحًا لمجرد أنه لامس مستوى ثم انعكس.",
             "",
             f"⚠️ {DISCLAIMER}",
         ]
-        await self.post_text("\n".join(lines))
+        png = self._render_report("daily", day=day, rows=rows)
+        await self._post_card(png, f"📅 تقرير اليوم — {day.isoformat()}", "\n".join(lines))
 
     # ------------------------------------------------------------------
     async def post_weekly_report(self, stats, channel_trades: list[dict]) -> None:
@@ -239,6 +252,9 @@ class ChannelPublisher:
             f"✅ الرابحة: {stats.wins}",
             f"❌ الخاسرة: {stats.losses}",
             f"📈 نسبة الطروحات الرابحة: {stats.win_rate:.0f}%",
+            f"💚 إجمالي الأرباح: {stats.avg_win_pct * stats.wins:+.1f}%",
+            f"🔴 إجمالي الخسائر: {stats.avg_loss_pct * stats.losses:+.1f}%",
+            f"💰 الصافي: {stats.expectancy_pct * stats.closed:+.1f}%",
             f"💵 متوسط نتيجة الطرح: {stats.expectancy_pct:+.1f}%",
             f"🏆 أفضل طرح: {stats.best_pct:+.1f}% | أسوأ طرح: {stats.worst_pct:+.1f}%",
         ]
@@ -257,7 +273,25 @@ class ChannelPublisher:
             "",
             f"⚠️ {DISCLAIMER}",
         ]
-        await self.post_text("\n".join(lines))
+        png = self._render_report("weekly", stats=stats, channel_rows=channel_trades)
+        await self._post_card(png, "📊 التقرير الأسبوعي — بوت عقود الخيارات", "\n".join(lines))
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _render_report(kind: str, **kwargs) -> bytes | None:
+        """Best-effort report card. A drawing bug degrades to the text post."""
+        try:
+            from qqq_alpha.live import cards
+
+            if kind == "daily":
+                return cards.render_daily_report_card(kwargs["day"], kwargs["rows"])
+            if kind == "weekly":
+                return cards.render_weekly_report_card(
+                    kwargs["stats"], kwargs["channel_rows"]
+                )
+        except Exception:  # noqa: BLE001 - the table is garnish; the numbers must arrive
+            log.exception("report card rendering failed; posting text instead")
+        return None
 
     # ------------------------------------------------------------------
     async def post_education(self, day: date) -> None:
