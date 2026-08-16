@@ -1066,7 +1066,7 @@ class LiveEngine:
                 f" | منتهي: {counts.get('expired', 0)}"
             )
             return
-        if parts and parts[0].strip().lower() in {"معاينة", "preview"}:
+        if parts and parts[0].strip().lower() in {"معاينة", "معاينه", "preview"}:
             # the operator sees the consent gate exactly as a subscriber
             # would — real buttons, zero side effects
             from qqq_alpha.live.telegram import (
@@ -1080,7 +1080,7 @@ class LiveEngine:
                 await self.commands.send_with_buttons(
                     str(self.settings.telegram_chat_id),
                     consent_message(self.settings.trial_days),
-                    [("✅ أوافق وأقر بما سبق", PREVIEW_YES), ("❌ لا أوافق", PREVIEW_NO)],
+                    [("✅ أوافق وأقر", PREVIEW_YES), ("❌ لا أوافق", PREVIEW_NO)],
                 )
                 await self.commands.send(
                     str(self.settings.telegram_chat_id), cards_guide_message()

@@ -691,7 +691,7 @@ PREVIEW_YES = "preview:yes"
 PREVIEW_NO = "preview:no"
 
 CONSENT_BUTTONS: list[tuple[str, str]] = [
-    ("✅ أوافق وأقر بما سبق", CONSENT_YES),
+    ("✅ أوافق وأقر", CONSENT_YES),
     ("❌ لا أوافق", CONSENT_NO),
 ]
 
