@@ -316,8 +316,17 @@ async def test_a_holiday_is_walked_past_when_looking_for_yesterday(tmp_path):
             )
 
     await engine._load_prior_day(_HolidayClient(), date(2026, 3, 6))  # Friday
-    assert asked == [date(2026, 3, 5), date(2026, 3, 4)]  # skipped the empty day
+    # the walk starts at the holiday, gets nothing, and carries on — so the
+    # prior day is Wednesday, not the empty Thursday
+    assert asked[:2] == [date(2026, 3, 5), date(2026, 3, 4)]
     assert engine.prior_day is not None
+    assert engine.prior_day.close == synthetic_session("QQQ", date(2026, 3, 4), seed=5)[-1].close
+    # and the holiday contributes no bars to the hourly history
+    from qqq_alpha.config import MARKET_TZ as _TZ
+
+    assert date(2026, 3, 5) not in {
+        b.ts.astimezone(_TZ).date() for b in engine.history_bars
+    }
     # the heavyweights' closes come from the SAME session the index settled on,
     # so a leader's day change is measured against the same day as the index's
     assert engine.leader_prior_close
@@ -343,3 +352,46 @@ def test_resample_refuses_a_partial_trade_count():
 
     complete = [b.model_copy(update={"transactions": 10}) for b in bars]
     assert resample(complete, 5)[0].transactions == 50
+
+
+@pytest.mark.asyncio
+async def test_history_collects_five_sessions_for_the_hourly_chart(tmp_path):
+    """The hourly is the frame the day happens inside, and one session holds
+    six and a half hourly candles — not a chart. Five sessions make one."""
+    from qqq_alpha.brain.decider import HeuristicDecider
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.config import MARKET_TZ, Settings
+    from qqq_alpha.data.massive import TradingSession
+    from qqq_alpha.data.pricing import BlackScholesPricer
+    from qqq_alpha.journal import Journal
+    from qqq_alpha.live.engine import LiveEngine
+    from qqq_alpha.live.notifier import NullNotifier
+
+    settings = Settings(
+        massive_api_key="k", journal_dir=tmp_path / "j", data_dir=tmp_path / "d",
+        shadow_symbols_csv="",
+    )
+    engine = LiveEngine(
+        settings=settings, decider=HeuristicDecider(settings),
+        pricer=BlackScholesPricer(), playbook=Playbook(),
+        journal=Journal(tmp_path / "j", session_tag="test"), notifier=NullNotifier(),
+    )
+
+    class _Client:
+        async def session(self, symbol, day):
+            return TradingSession(
+                symbol=symbol, day=day,
+                regular=synthetic_session(symbol, day, seed=day.day),
+            )
+
+    await engine._load_prior_day(_Client(), date(2026, 3, 6))  # Friday
+
+    days = sorted({b.ts.astimezone(MARKET_TZ).date() for b in engine.history_bars})
+    assert len(days) == 5
+    assert days[-1] == date(2026, 3, 5)          # yesterday is included
+    assert date(2026, 2, 28) not in days          # and weekends are skipped
+    assert engine.history_bars == sorted(engine.history_bars, key=lambda b: b.ts)
+    # yesterday is still the prior day, not the oldest session collected
+    assert engine.prior_day.close == synthetic_session(
+        "QQQ", date(2026, 3, 5), seed=5
+    )[-1].close

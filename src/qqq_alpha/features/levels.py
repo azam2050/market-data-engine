@@ -65,6 +65,43 @@ def compute_levels(
     return levels
 
 
+def opening_gap(session_bars: list[Bar], prior_day: Bar | None) -> dict | None:
+    """Today's open against yesterday's close — and whether it has been filled.
+
+    The gap is the one piece of daily-timeframe information that matters to a
+    trade expiring this afternoon, because it names a specific level and a
+    specific behaviour: price either returns to yesterday's close or it does
+    not, and which of the two happens usually decides the character of the
+    session. Anything slower than that — weekly trends, multi-day ranges — is
+    context a 0DTE position will never live long enough to collect on.
+
+    ``filled`` means price has traded back through yesterday's close at some
+    point today. ``pct_to_fill`` is how far the current price still is from it,
+    signed in the direction price would have to travel.
+    """
+    if not session_bars or prior_day is None or prior_day.close <= 0:
+        return None
+
+    open_price = session_bars[0].open
+    close_ref = prior_day.close
+    gap_pct = (open_price - close_ref) / close_ref * 100.0
+    if abs(gap_pct) < 0.05:  # anything smaller is not a gap, it is a tick
+        return {"direction": "none", "pct": round(gap_pct, 3)}
+
+    session_high = max(b.high for b in session_bars)
+    session_low = min(b.low for b in session_bars)
+    filled = session_low <= close_ref <= session_high
+    price = session_bars[-1].close
+
+    return {
+        "direction": "up" if gap_pct > 0 else "down",
+        "pct": round(gap_pct, 3),
+        "fill_level": round(close_ref, 2),
+        "filled": filled,
+        "pct_to_fill": round((close_ref - price) / price * 100.0, 3),
+    }
+
+
 def nearest_levels(
     price: float, levels: dict[str, float | None], count: int = 3
 ) -> dict[str, list[tuple[str, float, float]]]:

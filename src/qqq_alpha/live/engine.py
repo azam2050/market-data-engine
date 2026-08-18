@@ -64,6 +64,11 @@ MISSED_LOOKAHEAD_MINUTES = 60
 # a lone bad bar is skipped and logged; this many in a row is not a glitch,
 # it is a broken engine that should stop loudly instead of trading blind
 MAX_CONSECUTIVE_BAR_FAILURES = 10
+# how many prior sessions to keep for the hourly chart, and how far back to
+# search for them. Five sessions give roughly 35 hourly candles — a real
+# chart — and ten calendar days covers a long weekend plus a holiday.
+HISTORY_SESSIONS = 5
+HISTORY_SEARCH_DAYS = 10
 # minute bars arrive every 60s during the session. Five quiet minutes is a
 # real outage, not a slow tick — long enough not to fire on a reconnect,
 # short enough that the operator hears about it while it still matters.
@@ -137,6 +142,10 @@ class LiveEngine:
         # each heavyweight's yesterday close, so its day change is the number
         # every screen quotes rather than "since the engine started watching"
         self.leader_prior_close: dict[str, float] = {}
+        # minute bars from the previous sessions, kept only to build the
+        # hourly chart: one day yields six and a half hourly candles, which
+        # is not enough for an EMA, a swing high, or a trend
+        self.history_bars: list[Bar] = []
         self.leader_bars: dict[str, list[Bar]] = {}
         self.recent_trades: list[Trade] = []
         self._current_day: date | None = None
@@ -399,25 +408,37 @@ class LiveEngine:
         same session the index is.
         """
         probe = today
-        for _ in range(5):
+        collected: list[list[Bar]] = []
+        for _ in range(HISTORY_SEARCH_DAYS):
+            if len(collected) >= HISTORY_SESSIONS:
+                break
             probe -= timedelta(days=1)
             if probe.weekday() >= 5:
                 continue
             try:
                 previous = await client.session(self.settings.primary_symbol, probe)
             except Exception as exc:  # noqa: BLE001 - levels are context, not a blocker
-                log.warning("prior-day fetch failed for %s: %s", probe, exc)
-                return
+                log.warning("history fetch failed for %s: %s", probe, exc)
+                break
             daily = previous.daily_bar
-            if daily is not None:
+            if daily is None:
+                continue  # a holiday returns an empty session, not an error
+            collected.append(list(previous.regular))
+            if len(collected) == 1:
+                # the first session found walking back IS yesterday — and it is
+                # reassigned every call, so a session roll refreshes it rather
+                # than keeping the day before last
                 self.prior_day = daily
                 log.info(
                     "prior day %s: H %.2f L %.2f C %.2f",
                     probe, daily.high, daily.low, daily.close,
                 )
                 await self._load_leader_closes(client, probe)
-                return
-        log.warning("no prior trading day found in the last 5 days before %s", today)
+
+        # oldest first, so the hourly resample reads chronologically
+        self.history_bars = [bar for session in reversed(collected) for bar in session]
+        if not collected:
+            log.warning("no prior trading day found in the days before %s", today)
 
     async def _load_leader_closes(self, client, day: date) -> None:
         """Yesterday's close for each heavyweight. Best-effort, one at a time:
@@ -504,6 +525,7 @@ class LiveEngine:
             overnight_high=self.overnight_high,
             overnight_low=self.overnight_low,
             leader_prior_close=self.leader_prior_close,
+            history_bars=self.history_bars,
             now=bar.ts,
             quality=quality,
         )

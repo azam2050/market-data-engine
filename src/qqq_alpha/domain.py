@@ -159,6 +159,12 @@ class MarketSnapshot(BaseModel):
     # narrowing range — it could only see what an EMA had already averaged away.
     recent_bars_1m: list[Bar] = Field(default_factory=list)
     recent_bars_5m: list[Bar] = Field(default_factory=list)
+    # the hourly chart, built across several sessions — a single day holds
+    # only six and a half hourly candles, which is not a chart
+    recent_bars_1h: list[Bar] = Field(default_factory=list)
+    hourly: dict = Field(default_factory=dict)
+    # today's open against yesterday's close, and whether it has filled
+    gap: dict = Field(default_factory=dict)
     # Dow-theory swing structure per timeframe: higher highs / lower lows,
     # the swing points themselves, and the level whose loss ends the trend
     structure: dict[str, dict] = Field(default_factory=dict)

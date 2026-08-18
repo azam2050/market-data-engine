@@ -22,7 +22,7 @@ from qqq_alpha.domain import (
 )
 from qqq_alpha.features import indicators, levels, structure
 from qqq_alpha.features.flow import flow_bias, summarize_flow
-from qqq_alpha.features.timeframes import TimeframeSet
+from qqq_alpha.features.timeframes import TimeframeSet, hourly
 
 # how much raw tape travels with the snapshot: 30 one-minute candles (the last
 # half hour, where a 0DTE entry actually lives) and 12 five-minute candles (the
@@ -34,6 +34,10 @@ RECENT_5M_BARS = 12
 # a divergence forming against the index, short enough that three of them
 # do not crowd out the index's own price action
 LEADER_5M_BARS = 6
+# how much of the hourly chart travels with the snapshot. Ten candles is
+# roughly a day and a half of hourly structure — the frame a 0DTE trade is
+# taken inside, without turning the prompt into a swing-trading brief.
+RECENT_1H_BARS = 10
 
 
 def _session_minute(ts: datetime) -> int:
@@ -66,6 +70,7 @@ class SnapshotBuilder:
         now: datetime | None = None,
         quality: DataQuality | None = None,
         leader_prior_close: dict[str, float] | None = None,
+        history_bars: list[Bar] | None = None,
     ) -> MarketSnapshot:
         if not session_bars:
             raise ValueError("cannot build a snapshot without bars")
@@ -85,6 +90,32 @@ class SnapshotBuilder:
         }
 
         lvl = levels.compute_levels(session_bars, prior_day, overnight_high, overnight_low)
+        gap = levels.opening_gap(session_bars, prior_day) or {}
+
+        # the hourly needs the previous sessions to exist at all; without
+        # them it is left empty rather than rendered from a stub
+        hourly_bars = hourly(list(history_bars or []) + list(session_bars))
+        hourly_pack: dict = {}
+        if len(hourly_bars) >= 6:
+            pack = indicators.compute_all(hourly_bars)
+            # two readings do not survive the change of timeframe honestly.
+            # rel_volume compares the newest bar to its predecessors, and the
+            # newest hourly bar is almost always half-formed — it would read as
+            # "volume is dying" when only thirty minutes of it exist. And
+            # mom_5m/15m/30m count BARS, not minutes, so on this timeframe they
+            # mean five, fifteen and thirty HOURS; left under their intraday
+            # names they would be read as something twelve times faster.
+            pack.pop("rel_volume", None)
+            for minutes in (5, 15, 30):
+                value = pack.pop(f"mom_{minutes}m", None)
+                if value is not None:
+                    pack[f"mom_{minutes}_hours"] = value
+            hourly_pack = {
+                "indicators": pack,
+                "structure": structure.describe(hourly_bars),
+                "sessions_covered": len({b.ts.astimezone(MARKET_TZ).date() for b in hourly_bars}),
+                "note": "the newest hourly candle is still forming",
+            }
         # None means "no tape on this run" and renders as UNAVAILABLE; an empty
         # list means "tape is live but quiet" and renders as zeros — the brain
         # must be able to tell those apart
@@ -126,6 +157,9 @@ class SnapshotBuilder:
             # prompt stays about price action rather than history
             recent_bars_1m=session_bars[-RECENT_1M_BARS:],
             recent_bars_5m=tfs.m5[-RECENT_5M_BARS:],
+            recent_bars_1h=hourly_bars[-RECENT_1H_BARS:] if hourly_pack else [],
+            hourly=hourly_pack,
+            gap=gap,
             # the swing skeleton of the day, on the two timeframes a
             # 0DTE trade is actually framed by
             structure={

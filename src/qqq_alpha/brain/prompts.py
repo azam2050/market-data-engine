@@ -191,7 +191,13 @@ def _candle_table(bars: list, label: str) -> str:
     # clicks at identical volume. The provider ships the trade count on every
     # bar and it was being thrown away.
     has_counts = any(b.transactions for b in bars)
-    header = f"{'time':>5}  {'open':>8} {'high':>8} {'low':>8} {'close':>8}  {'body':>6}  {'volume':>10}"
+    # a multi-session table (the hourly) repeats every clock time once per day,
+    # so "09:30" alone would name two different candles and any pattern read
+    # across them would be nonsense
+    spans_days = len({b.ts.astimezone(MARKET_TZ).date() for b in bars}) > 1
+    stamp = "%m-%d %H:%M" if spans_days else "%H:%M"
+    width = 11 if spans_days else 5
+    header = f"{'time':>{width}}  {'open':>8} {'high':>8} {'low':>8} {'close':>8}  {'body':>6}  {'volume':>10}"
     if has_counts:
         header += f"  {'avg_size':>8}"
     lines = [f"{label} ({len(bars)} candles)", header]
@@ -201,7 +207,7 @@ def _candle_table(bars: list, label: str) -> str:
         # the one number that separates a decisive candle from a rejection wick
         body = ((bar.close - bar.open) / span * 100) if span > 0 else 0.0
         row = (
-            f"{bar.ts.astimezone(MARKET_TZ).strftime('%H:%M'):>5}  "
+            f"{bar.ts.astimezone(MARKET_TZ).strftime(stamp):>{width}}  "
             f"{bar.open:>8.2f} {bar.high:>8.2f} {bar.low:>8.2f} {bar.close:>8.2f}  "
             f"{body:>+5.0f}%  {bar.volume:>10,}"
         )
@@ -288,6 +294,36 @@ def build_user_prompt(
             "worth more than the volume number alone. When price action and an "
             "indicator disagree, price action is the more recent fact.\n\n"
             + "\n\n".join(candles)
+        )
+
+    if snapshot.hourly:
+        block = [
+            "=== HOURLY (built across the last few sessions) ===",
+            "The frame the day is happening inside. A single session holds only "
+            "six and a half hourly candles, so this is built from several — "
+            "`sessions_covered` says how many. Use it for direction and for the "
+            "levels that matter beyond today: an intraday setup that fights the "
+            "hourly structure needs a much better reason than one that runs with "
+            "it, and the hourly swing levels are where the day's moves keep "
+            "stopping.",
+            _compact(snapshot.hourly),
+        ]
+        if snapshot.recent_bars_1h:
+            block.append(_candle_table(snapshot.recent_bars_1h, "HOURLY"))
+        sections.append("\n".join(block))
+
+    if snapshot.gap and snapshot.gap.get("direction") not in (None, "none"):
+        sections.append(
+            "=== OPENING GAP ===\n"
+            "Today's open against yesterday's close. This is the one "
+            "daily-timeframe fact a position expiring this afternoon can act "
+            "on, because it names a specific level and a specific behaviour: "
+            "`fill_level` is yesterday's close, and price either returns to it "
+            "or it does not. An unfilled gap that is holding is a trend day "
+            "signature and fading it is expensive; a gap that fills early often "
+            "keeps going the other way. `pct_to_fill` is how far price still "
+            "has to travel to close it, signed in the direction it would move.\n"
+            + _compact(snapshot.gap)
         )
 
     if snapshot.structure:

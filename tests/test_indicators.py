@@ -2,6 +2,7 @@ from datetime import date
 
 import pytest
 
+from qqq_alpha.config import MARKET_TZ
 from qqq_alpha.data.synthetic import synthetic_session
 from qqq_alpha.features import indicators, levels
 from qqq_alpha.features.snapshot import SnapshotBuilder
@@ -216,3 +217,112 @@ def test_prompt_renders_leader_candles_and_asks_for_a_divergence_read():
     assert "trend_5m" in prompt
     # the leaders follow the index's own price action, never displace it
     assert prompt.index("RAW PRICE ACTION") < prompt.index("INDEX HEAVYWEIGHTS")
+
+
+# ------------------------------------------------------- hourly and gaps
+def _multi_day():
+    from datetime import timedelta
+
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.domain import Bar
+
+    today = date(2026, 3, 6)  # Friday
+    days = [today - timedelta(days=d) for d in (7, 6, 5, 4, 1)]
+    history = [b for d in days for b in synthetic_session("QQQ", d, seed=d.day)]
+    prior = synthetic_session("QQQ", today - timedelta(days=1), seed=5)
+    prior_day = Bar(
+        symbol="QQQ", ts=prior[-1].ts, open=prior[0].open,
+        high=max(b.high for b in prior), low=min(b.low for b in prior),
+        close=prior[-1].close, volume=sum(b.volume for b in prior),
+    )
+    return today, history, prior_day
+
+
+def test_hourly_needs_several_sessions_to_be_a_chart_at_all():
+    """A regular session is 390 minutes: six and a half hourly candles. Not
+    enough for an EMA, a swing high, or a trend."""
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.timeframes import hourly
+
+    one_day = hourly(synthetic_session("QQQ", date(2026, 3, 6), seed=6))
+    assert len(one_day) == 7  # 09:30..15:30, the last one half-length
+
+    _, history, _ = _multi_day()
+    many = hourly(history)
+    assert len(many) > 30
+    # buckets are anchored per session, so days never bleed together
+    assert len({b.ts.astimezone(MARKET_TZ).date() for b in many}) == 5
+
+
+def test_hourly_pack_drops_the_readings_that_lie_on_this_timeframe():
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    today, history, prior_day = _multi_day()
+    bars = synthetic_session("QQQ", today, seed=12)
+    snapshot = SnapshotBuilder("QQQ").build(
+        session_bars=bars[:150], history_bars=history, prior_day=prior_day,
+        now=bars[149].ts,
+    )
+    pack = snapshot.hourly["indicators"]
+
+    # the newest hourly bar is half-formed, so relative volume would read as
+    # "volume is dying" when only part of the hour exists
+    assert "rel_volume" not in pack
+    # momentum counts BARS: on this timeframe that is hours, not minutes
+    assert "mom_5m" not in pack and "mom_5_hours" in pack
+    assert snapshot.hourly["sessions_covered"] == 6  # five prior plus today
+    assert len(snapshot.recent_bars_1h) == 10
+
+
+def test_multi_session_tables_carry_the_date_or_09_30_names_two_candles():
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.brain.prompts import build_user_prompt
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    today, history, prior_day = _multi_day()
+    bars = synthetic_session("QQQ", today, seed=12)
+    snapshot = SnapshotBuilder("QQQ").build(
+        session_bars=bars[:150], history_bars=history, prior_day=prior_day,
+        now=bars[149].ts,
+    )
+    prompt = build_user_prompt(snapshot, Playbook())
+
+    hourly_block = prompt[prompt.index("HOURLY (10 candles)") : prompt.index("=== OPENING GAP")]
+    assert "03-06 09:30" in hourly_block and "03-05 09:30" in hourly_block
+    # and the swing list too — the same clock time recurs every session
+    swings = snapshot.hourly["structure"]["swings"]
+    assert all("-" in s["time"] for s in swings)
+    # the single-session tables stay short: no date noise where it adds nothing
+    minute_block = prompt[prompt.index("1-MINUTE (30 candles)") : prompt.index("5-MINUTE")]
+    assert "03-06" not in minute_block
+
+
+def test_opening_gap_names_the_fill_level_and_whether_it_was_reached():
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.domain import Bar
+    from qqq_alpha.features.levels import opening_gap
+
+    bars = synthetic_session("QQQ", date(2026, 3, 6), seed=12)
+    session_low = min(b.low for b in bars)
+
+    def prior_with_close(close: float) -> Bar:
+        return Bar(symbol="QQQ", ts=bars[0].ts, open=close, high=close,
+                   low=close, close=close, volume=1)
+
+    # a gap up that price never traded back through
+    unfilled = opening_gap(bars, prior_with_close(session_low - 5.0))
+    assert unfilled["direction"] == "up"
+    assert unfilled["filled"] is False
+    assert unfilled["fill_level"] == round(session_low - 5.0, 2)
+
+    # a gap up whose fill level sits inside the day's range: filled
+    filled = opening_gap(bars, prior_with_close(bars[0].open - 0.5))
+    assert filled["filled"] is True
+
+    # a hair's difference is not a gap
+    flat = opening_gap(bars, prior_with_close(bars[0].open * 1.0001))
+    assert flat["direction"] == "none" and "fill_level" not in flat
+
+    assert opening_gap(bars, None) is None

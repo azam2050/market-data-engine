@@ -160,3 +160,19 @@ class TimeframeSet:
 
     def as_dict(self) -> dict[str, list[Bar]]:
         return {"1m": self.m1, "5m": self.m5, "15m": self.m15}
+
+
+def hourly(minute_bars: list[Bar]) -> list[Bar]:
+    """Sixty-minute bars — and this one deliberately wants several days of input.
+
+    A regular session is 390 minutes, so a single day yields six and a half
+    hourly candles: not enough for an EMA, not enough for a swing high, not
+    enough to be a chart. The hourly a trader actually reads spans the week,
+    which is why the engine loads the previous sessions rather than resampling
+    today on its own.
+
+    Buckets are anchored to each day's own 09:30 open, the same as every other
+    timeframe here, so a session yields 09:30/10:30/…/15:30 and days never
+    bleed into one another — five sessions give about 35 hourly candles.
+    """
+    return resample(minute_bars, 60)

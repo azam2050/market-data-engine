@@ -30,9 +30,13 @@ class Swing:
     price: float
     kind: str  # "high" or "low"
 
-    def as_row(self) -> dict:
+    def as_row(self, with_date: bool = False) -> dict:
+        """``with_date`` for a multi-session series (the hourly): every clock
+        time repeats once per day there, so "14:30" alone would name two
+        different swings and the sequence would read as nonsense."""
+        stamp = "%m-%d %H:%M" if with_date else "%H:%M"
         return {
-            "time": self.ts.astimezone(MARKET_TZ).strftime("%H:%M"),
+            "time": self.ts.astimezone(MARKET_TZ).strftime(stamp),
             "price": round(self.price, 2),
             "kind": self.kind,
         }
@@ -125,10 +129,11 @@ def describe(bars: list[Bar], width: int = PIVOT_WIDTH, keep: int = 6) -> dict:
     else:
         break_level, break_note = None, ""
 
+    spans_days = len({b.ts.astimezone(MARKET_TZ).date() for b in bars}) > 1
     return {
         "trend": trend,
         "why": reason,
         "structure_break_level": round(break_level, 2) if break_level else None,
         "structure_break_note": break_note,
-        "swings": [s.as_row() for s in recent],
+        "swings": [s.as_row(spans_days) for s in recent],
     }
