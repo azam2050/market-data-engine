@@ -377,7 +377,27 @@ def build_user_prompt(
             + _compact(options_pulse)
         )
 
-    if snapshot.leaders:
+    if snapshot.leader_detail:
+        block = [
+            "=== INDEX HEAVYWEIGHTS ===",
+            "QQQ is a weighted basket of these names, so they lead it far more "
+            "often than they follow. Each carries the same readings the index "
+            "itself gets — day change against yesterday's close, momentum, "
+            "position versus its own VWAP, relative volume, and its own Dow "
+            "structure on 5m and 15m — plus its recent five-minute candles.",
+            "Use them two ways. CONFIRMATION: an index breakout the heavyweights "
+            "are not making with it is thin, and usually fails. DIVERGENCE: when "
+            "the heavyweights turn before the index — a leader reclaiming its "
+            "VWAP or breaking its 5m structure while QQQ is still falling — that "
+            "is the earliest warning you get, and it is often the whole edge. "
+            "Say in your thesis whether the leaders confirm or contradict you.",
+            _compact(snapshot.leader_detail),
+        ]
+        for symbol, bars in snapshot.leader_bars_5m.items():
+            if bars:
+                block.append(_candle_table(bars, f"{symbol} 5-MINUTE"))
+        sections.append("\n".join(block))
+    elif snapshot.leaders:
         leaders = [
             {"symbol": b.symbol, "close": b.close, "volume": b.volume} for b in snapshot.leaders
         ]

@@ -163,6 +163,12 @@ class MarketSnapshot(BaseModel):
     # the swing points themselves, and the level whose loss ends the trend
     structure: dict[str, dict] = Field(default_factory=dict)
     leaders: list[Bar] = Field(default_factory=list)
+    # QQQ is a weighted basket of these names, so they lead it far more often
+    # than they follow. They used to reach the brain as one close and one
+    # volume each — the index got candles, structure and levels while the
+    # things that actually move it got three numbers.
+    leader_detail: dict[str, dict] = Field(default_factory=dict)
+    leader_bars_5m: dict[str, list[Bar]] = Field(default_factory=dict)
     indicators: dict[str, float | None] = Field(default_factory=dict)
     timeframes: dict[str, dict[str, float | None]] = Field(
         default_factory=dict,

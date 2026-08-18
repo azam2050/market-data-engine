@@ -30,6 +30,10 @@ from qqq_alpha.features.timeframes import TimeframeSet
 # between a model that reads price and one that only reads indicators.
 RECENT_1M_BARS = 30
 RECENT_5M_BARS = 12
+# each leader carries a compact five-minute tape of its own: enough to see
+# a divergence forming against the index, short enough that three of them
+# do not crowd out the index's own price action
+LEADER_5M_BARS = 6
 
 
 def _session_minute(ts: datetime) -> int:
@@ -61,6 +65,7 @@ class SnapshotBuilder:
         events: list[str] | None = None,
         now: datetime | None = None,
         quality: DataQuality | None = None,
+        leader_prior_close: dict[str, float] | None = None,
     ) -> MarketSnapshot:
         if not session_bars:
             raise ValueError("cannot build a snapshot without bars")
@@ -87,15 +92,21 @@ class SnapshotBuilder:
 
         leaders_last: list[Bar] = []
         leader_alignment = 0.0
+        leader_detail: dict[str, dict] = {}
+        leader_bars_5m: dict[str, list[Bar]] = {}
         if leader_bars:
             moves: list[float] = []
-            for bars in leader_bars.values():
+            for symbol, bars in leader_bars.items():
                 if not bars:
                     continue
                 leaders_last.append(bars[-1])
                 move = indicators.momentum_pct(bars, 15)
                 if move is not None:
                     moves.append(move)
+                leader_detail[symbol] = self._leader_digest(
+                    bars, (leader_prior_close or {}).get(symbol)
+                )
+                leader_bars_5m[symbol] = TimeframeSet.build(bars).m5[-LEADER_5M_BARS:]
             if moves:
                 positive = sum(1 for m in moves if m > 0)
                 leader_alignment = (positive / len(moves)) * 2 - 1
@@ -122,6 +133,8 @@ class SnapshotBuilder:
                 "15m": structure.describe(tfs.m15),
             },
             leaders=leaders_last,
+            leader_detail=leader_detail,
+            leader_bars_5m=leader_bars_5m,
             indicators=ind,
             timeframes=timeframe_packs,
             levels=lvl,
@@ -133,6 +146,43 @@ class SnapshotBuilder:
             data_quality=quality.summary() if quality else "",
             data_usable=quality.is_usable if quality else True,
         )
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _leader_digest(bars: list[Bar], prior_close: float | None) -> dict:
+        """One heavyweight, read the way the index itself is read.
+
+        A digest rather than three more candle tables: what a leader is *for*
+        is confirmation and divergence — is it making a new high while the
+        index is not, is it above its own VWAP, has its own swing structure
+        broken — and each of those is a number, not a chart. The five-minute
+        candles travel alongside for the price action itself.
+        """
+        tfs = TimeframeSet.build(bars)
+        last = bars[-1]
+        digest: dict = {
+            "last": last.close,
+            "change_15m_pct": indicators.momentum_pct(bars, 15),
+            "change_30m_pct": indicators.momentum_pct(bars, 30),
+            "vwap_dev_pct": indicators.vwap_deviation_pct(bars),
+            "rel_volume": indicators.relative_volume(bars),
+            "session_high": max(b.high for b in bars),
+            "session_low": min(b.low for b in bars),
+        }
+        if prior_close and prior_close > 0:
+            # the day change every screen in the world quotes, and the only way
+            # to know whether a leader gapped and is now fading it
+            digest["day_change_pct"] = round(
+                (last.close - prior_close) / prior_close * 100.0, 2
+            )
+            digest["prior_close"] = prior_close
+
+        five = structure.describe(tfs.m5)
+        fifteen = structure.describe(tfs.m15)
+        digest["trend_5m"] = five["trend"]
+        digest["trend_15m"] = fifteen["trend"]
+        digest["structure_break_5m"] = five["structure_break_level"]
+        return digest
 
     # ------------------------------------------------------------------
     @staticmethod

@@ -134,6 +134,9 @@ class LiveEngine:
         self.prior_day: Bar | None = None
         self.overnight_high: float | None = None
         self.overnight_low: float | None = None
+        # each heavyweight's yesterday close, so its day change is the number
+        # every screen quotes rather than "since the engine started watching"
+        self.leader_prior_close: dict[str, float] = {}
         self.leader_bars: dict[str, list[Bar]] = {}
         self.recent_trades: list[Trade] = []
         self._current_day: date | None = None
@@ -390,6 +393,10 @@ class LiveEngine:
         only honest way to find the previous *trading* day is to walk backwards
         until a day has bars. Five attempts covers a long weekend plus a
         holiday; failing that, the levels stay absent rather than wrong.
+
+        Once the day is identified, the heavyweights' closes for that same day
+        are fetched too, so every leader's day change is measured against the
+        same session the index is.
         """
         probe = today
         for _ in range(5):
@@ -408,8 +415,22 @@ class LiveEngine:
                     "prior day %s: H %.2f L %.2f C %.2f",
                     probe, daily.high, daily.low, daily.close,
                 )
+                await self._load_leader_closes(client, probe)
                 return
         log.warning("no prior trading day found in the last 5 days before %s", today)
+
+    async def _load_leader_closes(self, client, day: date) -> None:
+        """Yesterday's close for each heavyweight. Best-effort, one at a time:
+        a leader that fails simply has no day change rather than a wrong one."""
+        for symbol in self.settings.leader_symbols:
+            try:
+                session = await client.session(symbol, day)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("prior close fetch failed for %s: %s", symbol, exc)
+                continue
+            daily = session.daily_bar
+            if daily is not None:
+                self.leader_prior_close[symbol] = daily.close
 
     # ------------------------------------------------------------------
     async def _on_bar(self, bar: Bar) -> None:
@@ -482,6 +503,7 @@ class LiveEngine:
             prior_day=self.prior_day,
             overnight_high=self.overnight_high,
             overnight_low=self.overnight_low,
+            leader_prior_close=self.leader_prior_close,
             now=bar.ts,
             quality=quality,
         )

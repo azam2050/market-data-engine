@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from qqq_alpha.data.synthetic import synthetic_session
 from qqq_alpha.features import indicators, levels
 from qqq_alpha.features.snapshot import SnapshotBuilder
@@ -151,3 +153,66 @@ def test_prompt_carries_the_dow_structure_and_its_break_level():
     assert str(snapshot.structure["5m"]["structure_break_level"]) in prompt
     # structure is context for the candles, so it follows them
     assert prompt.index("RAW PRICE ACTION") < prompt.index("MARKET STRUCTURE (Dow)")
+
+
+# ------------------------------------------------------------- leaders
+def _leader_snapshot():
+    from datetime import date
+
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    day = date(2026, 3, 3)
+    qqq = synthetic_session("QQQ", day, seed=12, trend=0.02)
+    leaders = {
+        "NVDA": synthetic_session("NVDA", day, seed=31, trend=0.05),
+        "AAPL": synthetic_session("AAPL", day, seed=17, trend=-0.03),
+    }
+    prior = {"NVDA": leaders["NVDA"][0].open * 0.985}
+    return SnapshotBuilder("QQQ").build(
+        session_bars=qqq[:150],
+        leader_bars={k: v[:150] for k, v in leaders.items()},
+        leader_prior_close=prior,
+        now=qqq[149].ts,
+    )
+
+
+def test_leaders_get_the_same_reading_the_index_gets():
+    """They used to reach the brain as one close and one volume each — the
+    index got candles, structure and levels while the names that actually move
+    it got three numbers."""
+    snapshot = _leader_snapshot()
+
+    nvda = snapshot.leader_detail["NVDA"]
+    for key in (
+        "last", "change_15m_pct", "change_30m_pct", "vwap_dev_pct",
+        "rel_volume", "session_high", "session_low", "trend_5m", "trend_15m",
+    ):
+        assert key in nvda, key
+
+    # the day change is measured against yesterday's close, not against
+    # whenever the engine happened to start watching
+    assert nvda["day_change_pct"] == pytest.approx(2.46, abs=0.05)
+    assert nvda["prior_close"] == pytest.approx(snapshot.leader_detail["NVDA"]["prior_close"])
+
+    # a leader with no prior close reports no day change rather than a wrong one
+    assert "day_change_pct" not in snapshot.leader_detail["AAPL"]
+
+    # and each carries its own five-minute tape
+    assert len(snapshot.leader_bars_5m["NVDA"]) == 6
+    assert len(snapshot.leader_bars_5m["AAPL"]) == 6
+
+
+def test_prompt_renders_leader_candles_and_asks_for_a_divergence_read():
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.brain.prompts import build_user_prompt
+
+    snapshot = _leader_snapshot()
+    prompt = build_user_prompt(snapshot, Playbook())
+
+    assert "NVDA 5-MINUTE (6 candles)" in prompt
+    assert "AAPL 5-MINUTE (6 candles)" in prompt
+    assert "DIVERGENCE" in prompt and "CONFIRMATION" in prompt
+    assert "trend_5m" in prompt
+    # the leaders follow the index's own price action, never displace it
+    assert prompt.index("RAW PRICE ACTION") < prompt.index("INDEX HEAVYWEIGHTS")

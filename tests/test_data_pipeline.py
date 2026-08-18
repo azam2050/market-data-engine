@@ -304,7 +304,10 @@ async def test_a_holiday_is_walked_past_when_looking_for_yesterday(tmp_path):
 
     class _HolidayClient:
         async def session(self, symbol, day):
-            asked.append(day)
+            # only the index probes matter here; the leaders' closes are
+            # fetched for whichever day this search settles on
+            if symbol == "QQQ":
+                asked.append(day)
             # Thursday was a holiday: no bars at all
             if day == date(2026, 3, 5):
                 return TradingSession(symbol=symbol, day=day)
@@ -315,6 +318,12 @@ async def test_a_holiday_is_walked_past_when_looking_for_yesterday(tmp_path):
     await engine._load_prior_day(_HolidayClient(), date(2026, 3, 6))  # Friday
     assert asked == [date(2026, 3, 5), date(2026, 3, 4)]  # skipped the empty day
     assert engine.prior_day is not None
+    # the heavyweights' closes come from the SAME session the index settled on,
+    # so a leader's day change is measured against the same day as the index's
+    assert engine.leader_prior_close
+    for symbol in settings.leader_symbols:
+        expected = synthetic_session(symbol, date(2026, 3, 4), seed=5)[-1].close
+        assert engine.leader_prior_close[symbol] == expected
 
 
 def test_resample_refuses_a_partial_trade_count():
