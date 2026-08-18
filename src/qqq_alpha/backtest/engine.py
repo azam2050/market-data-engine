@@ -172,6 +172,7 @@ class Backtester:
             state.open_positions = len(manager.open_trades)
             state.trades_taken = len(result.trades)
             state.realized_return_pct = manager.realized_return_pct
+            state.realized_risk_pct = manager.realized_risk_pct
 
             # 2. build the view of the world
             snapshot = self.builder.build(

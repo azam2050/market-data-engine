@@ -252,3 +252,26 @@ class TradeManager:
     @property
     def realized_return_pct(self) -> float:
         return round(sum(t.return_pct or 0.0 for t in self.closed_trades), 2)
+
+    @property
+    def realized_risk_pct(self) -> float:
+        """Realized P&L as a share of the day's normal risk budget.
+
+        ``realized_return_pct`` sums raw *contract* returns, which is the right
+        number to show a subscriber ("the option lost 42%") and the wrong one to
+        police an account with. A quarter-size entry losing 42% costs about 11%
+        of a normal position — but the circuit breaker used to read the raw
+        42% and shut the desk for the rest of the day. That is exactly what
+        happened on 2026-08-17: one small stopped-out trade, and the engine
+        never looked at the market again.
+
+        Weighting each closed trade by the size it was actually taken at makes
+        the breaker measure damage to capital instead of drama in a contract.
+        """
+        return round(
+            sum(
+                (t.return_pct or 0.0) * (t.decision.size_factor or 1.0)
+                for t in self.closed_trades
+            ),
+            2,
+        )

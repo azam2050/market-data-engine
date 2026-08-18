@@ -21,6 +21,7 @@ from qqq_alpha.live.telegram import (
     BroadcastNotifier,
     JoinRequest,
     TelegramCommandListener,
+    TelegramNotifier,
 )
 from qqq_alpha.memory import Memory
 
@@ -345,3 +346,66 @@ async def test_preview_command_sends_terms_guide_and_sample_cards(tmp_path):
     assert methods.count("sendPhoto") >= 5  # watch, entry, live, scale-out, closes
     consent = next(p for m, p in calls if m == "sendMessage" and "reply_markup" in p)
     assert "إقرار وإخلاء مسؤولية" in consent["text"]
+
+
+# ---------------------------------------------------------------- delivery proof
+@pytest.mark.asyncio
+async def test_channel_check_reports_admin_rights_and_missing_membership():
+    """The operator could not tell a healthy channel from one the bot cannot
+    post in — in both cases their phone just shows the text audit copy."""
+    state = {"status": "administrator", "can_post_messages": True}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        if method == "getChat":
+            return httpx.Response(200, json={"ok": True, "result": {"title": "عقود الخيارات"}})
+        if method == "getMe":
+            return httpx.Response(200, json={"ok": True, "result": {"id": 555}})
+        if method == "getChatMember":
+            return httpx.Response(200, json={"ok": True, "result": state})
+        return httpx.Response(200, json={"ok": True, "result": {}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        notifier = TelegramNotifier("token", "admin", client=client)
+
+        assert "✅" in await notifier.check_channel(PRIVATE)
+
+        state.clear()
+        state.update({"status": "left"})
+        left = await notifier.check_channel(PRIVATE)
+        assert left.startswith("❌") and "ليس داخل القناة" in left
+
+
+@pytest.mark.asyncio
+async def test_check_command_posts_a_real_card_to_the_private_channel(tmp_path):
+    """"فحص" answers the question end to end: not "are the settings right"
+    but "did a card actually land in the channel"."""
+    posted: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        if method == "sendPhoto":
+            posted.append(request.content.decode("latin-1"))
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 9}})
+        if method == "getChat":
+            return httpx.Response(200, json={"ok": True, "result": {"title": "المشتركون"}})
+        if method == "getMe":
+            return httpx.Response(200, json={"ok": True, "result": {"id": 555}})
+        if method == "getChatMember":
+            return httpx.Response(
+                200,
+                json={"ok": True, "result": {"status": "administrator", "can_post_messages": True}},
+            )
+        return httpx.Response(200, json={"ok": True, "result": {}})
+
+    calls: list[tuple[str, dict]] = []
+    engine = _engine(tmp_path, calls)
+    memory = Memory(tmp_path / "notifier-memory.db")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        engine.notifier = BroadcastNotifier(
+            "token", "admin", memory, client=client, private_channel_id=PRIVATE
+        )
+        await engine._handle_command("فحص")
+
+    assert len(posted) == 1
+    assert PRIVATE in posted[0]  # the card went to the channel, not to the DM

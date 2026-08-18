@@ -139,6 +139,56 @@ class TelegramNotifier:
             await asyncio.sleep(BASE_RETRY_SEC * (2**attempt))
         return None
 
+    async def check_channel(self, chat_id: str) -> str:
+        """Ask Telegram whether we can actually publish in a channel.
+
+        Cards going to the operator's private chat instead of the subscribers'
+        channel is indistinguishable, from the outside, from cards going
+        nowhere: both look like "the bot messaged me". The operator had no way
+        to tell which was happening. This asks Telegram directly — does the
+        chat exist under this id, is the bot a member, and is it allowed to
+        post — and returns one Arabic line for their phone.
+        """
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=20.0)
+
+        async def call(method: str, payload: dict) -> dict | None:
+            try:
+                response = await self._client.post(
+                    f"{TELEGRAM_API}/bot{self.token}/{method}", json=payload
+                )
+                if response.status_code == 200:
+                    return response.json().get("result") or {}
+                log.warning("%s failed: %s %s", method, response.status_code, response.text[:200])
+                with contextlib.suppress(Exception):
+                    return {"_error": response.json().get("description", "")}
+                return None
+            except (httpx.TransportError, httpx.TimeoutException) as exc:
+                log.warning("%s failed (%s)", method, exc)
+                return None
+
+        chat = await call("getChat", {"chat_id": chat_id})
+        if not chat or "_error" in (chat or {}):
+            reason = (chat or {}).get("_error", "لا استجابة من تلجرام")
+            return f"❌ {chat_id} — القناة غير متاحة للبوت ({reason})"
+
+        title = chat.get("title") or chat.get("username") or chat_id
+        me = await call("getMe", {})
+        bot_id = (me or {}).get("id")
+        if not bot_id:
+            return f"⚠️ {title} — القناة موجودة، لكن تعذّر التحقق من صلاحيات البوت"
+
+        member = await call("getChatMember", {"chat_id": chat_id, "user_id": bot_id})
+        status = (member or {}).get("status", "")
+        if status == "administrator":
+            can_post = (member or {}).get("can_post_messages", True)
+            if can_post:
+                return f"✅ {title} — البوت مشرف ويستطيع النشر"
+            return f"❌ {title} — البوت مشرف لكن بدون صلاحية النشر"
+        if status in {"member", "creator"}:
+            return f"⚠️ {title} — البوت عضو وليس مشرفًا؛ النشر في القنوات يتطلب صلاحية مشرف"
+        return f"❌ {title} — البوت ليس داخل القناة (الحالة: {status or 'غير معروفة'})"
+
     async def _edit_photo(
         self, chat_id: str, message_id: int, png: bytes, caption: str = ""
     ) -> bool:
@@ -693,6 +743,15 @@ class BroadcastNotifier(TelegramNotifier):
                 )
             if not message_id:
                 await self._send(text, silent=False, chat_id=self.private_channel_id)
+                # a card that failed to reach the channel used to look, from
+                # the operator's phone, exactly like one that arrived: they
+                # get the same text copy either way. Say it plainly.
+                await self._send(
+                    f"⚠️ لم تُنشر البطاقة في القناة الخاصة ({self.private_channel_id}) — "
+                    "أُرسل النص بدلاً منها. تأكد أن البوت مشرف في القناة "
+                    'بصلاحية النشر (أرسل "فحص" لاختبار القناة).',
+                    silent=False,
+                )
             elif message_id > 0:
                 self._live_cards[trade.trade_id] = message_id
             await self._send(text, silent=False)  # the operator's audit copy

@@ -24,6 +24,13 @@ from qqq_alpha.features import indicators, levels
 from qqq_alpha.features.flow import flow_bias, summarize_flow
 from qqq_alpha.features.timeframes import TimeframeSet
 
+# how much raw tape travels with the snapshot: 30 one-minute candles (the last
+# half hour, where a 0DTE entry actually lives) and 12 five-minute candles (the
+# last hour of structure). Both are cheap in tokens and are the difference
+# between a model that reads price and one that only reads indicators.
+RECENT_1M_BARS = 30
+RECENT_5M_BARS = 12
+
 
 def _session_minute(ts: datetime) -> int:
     local = ts.astimezone(MARKET_TZ)
@@ -103,6 +110,11 @@ class SnapshotBuilder:
             ts=now,
             session_minute=_session_minute(now),
             underlying=last,
+            # the last half hour minute-by-minute, and the last hour in 5m
+            # candles — enough tape to read a pattern, short enough that the
+            # prompt stays about price action rather than history
+            recent_bars_1m=session_bars[-RECENT_1M_BARS:],
+            recent_bars_5m=tfs.m5[-RECENT_5M_BARS:],
             leaders=leaders_last,
             indicators=ind,
             timeframes=timeframe_packs,

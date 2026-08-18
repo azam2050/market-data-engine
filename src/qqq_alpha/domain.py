@@ -148,6 +148,12 @@ class MarketSnapshot(BaseModel):
     ts: datetime
     session_minute: int  # minutes since the 09:30 ET open
     underlying: Bar
+    # the raw tape, not a summary of it. Indicators are somebody else's
+    # opinion about the candles; a trader reads the candles. Without these
+    # the brain cannot see an engulfing bar, a rejection wick, or a
+    # narrowing range — it could only see what an EMA had already averaged away.
+    recent_bars_1m: list[Bar] = Field(default_factory=list)
+    recent_bars_5m: list[Bar] = Field(default_factory=list)
     leaders: list[Bar] = Field(default_factory=list)
     indicators: dict[str, float | None] = Field(default_factory=dict)
     timeframes: dict[str, dict[str, float | None]] = Field(

@@ -201,6 +201,7 @@ class ShadowStockDesk:
             trades_taken=book.trades_today,
             open_positions=len(book.manager.open_trades),
             realized_return_pct=book.manager.realized_return_pct,
+            realized_risk_pct=book.manager.realized_risk_pct,
         )
         pre = self.rails.pre_check(snapshot, state)
         if not pre.allowed:

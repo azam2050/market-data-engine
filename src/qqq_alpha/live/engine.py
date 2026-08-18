@@ -182,6 +182,11 @@ class LiveEngine:
         # blue under-watch cards published today — capped so a choppy session
         # cannot turn the watch card into noise
         self._watch_shared_today = 0
+        # the circuit breaker stops the desk for the rest of the day. That is a
+        # legitimate rail, but it used to happen in total silence — the
+        # operator's only symptom was a dashboard that stopped updating. It
+        # gets announced once per day now.
+        self._breaker_announced: date | None = None
 
     # ------------------------------------------------------------------
     def _persist(self) -> None:
@@ -274,6 +279,7 @@ class LiveEngine:
                 "واحدًا، والانضمام بطلب يوافق عليه البوت آليًا، والمنتهون "
                 "يُخرَجون تلقائيًا"
             )
+        await self._report_channel_health()
 
         await self._restore()
         await self._expire_subscribers()
@@ -437,10 +443,12 @@ class LiveEngine:
             trades_taken=self.status.trades_today,
             open_positions=len(self.manager.open_trades),
             realized_return_pct=self.manager.realized_return_pct,
+            realized_risk_pct=self.manager.realized_risk_pct,
         )
         pre = self.rails.pre_check(snapshot, state)
         if not pre.allowed:
             log.debug("rails blocked: %s", pre.blocks)
+            await self._announce_circuit_breaker(pre.blocks, state)
             self._queue_missed_check(snapshot, pre.blocks)
             return
 
@@ -568,6 +576,61 @@ class LiveEngine:
         ):
             await self.channel.post_watch(png, text)
         self._watch_shared_today += 1
+
+    # ------------------------------------------------------------------
+    async def _report_channel_health(self) -> None:
+        """Tell the operator, at boot, where the cards will actually land.
+
+        The operator's report that "the bot posts to me instead of the
+        channel" could not be answered from the outside: in private-channel
+        mode they receive the text audit copy either way, so a channel that
+        silently rejects every photo looks exactly like a healthy one. This
+        asks Telegram which is true and puts the answer on their phone before
+        the session starts.
+        """
+        from qqq_alpha.live.telegram import TelegramNotifier
+
+        if not isinstance(self.notifier, TelegramNotifier):
+            return
+        targets = [
+            ("قناة المشتركين الخاصة", self.settings.telegram_private_channel_id),
+            ("القناة العامة", self.settings.telegram_channel_id),
+        ]
+        lines = []
+        for label, chat_id in targets:
+            if not chat_id:
+                lines.append(f"➖ {label}: غير مُعدّة")
+                continue
+            try:
+                lines.append(f"{label}: {await self.notifier.check_channel(str(chat_id))}")
+            except Exception as exc:  # noqa: BLE001 - diagnostics never block a start
+                log.exception("channel health check failed for %s", chat_id)
+                lines.append(f"⚠️ {label}: تعذّر الفحص ({exc})")
+        await self.notifier.note("🔎 فحص قنوات النشر\n" + "\n".join(lines))
+
+    # ------------------------------------------------------------------
+    async def _announce_circuit_breaker(self, blocks: list[str], state: DayState) -> None:
+        """Say it out loud, once, the day the desk closes itself.
+
+        A tripped breaker means no further wake produces a decision for the
+        rest of the session. Until now that was invisible: no message, no
+        dashboard row, nothing — the operator watched a bot that had quietly
+        stopped looking at the market and had no way to know why.
+        """
+        if not any(block.startswith("circuit_breaker") for block in blocks):
+            return
+        today = datetime.now(MARKET_TZ).date()
+        if self._breaker_announced == today:
+            return
+        self._breaker_announced = today
+        await self.notifier.note(
+            "🛑 قاطع الخسارة اليومي فُعِّل — أُغلق المكتب لبقية الجلسة\n"
+            f"خسارة اليوم بعد وزن الحجم: {state.loss_measure_pct:+.1f}% "
+            f"(الحد {-abs(self.settings.daily_loss_circuit_breaker_pct):.0f}%)\n"
+            f"الرقم الخام على العقود: {state.realized_return_pct:+.1f}%\n"
+            "لن يُفتح أي طرح جديد حتى جلسة الغد. هذا قرار حماية رأس مال، "
+            "وليس عطلًا في النظام."
+        )
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -1142,6 +1205,35 @@ class LiveEngine:
                 for caption, png in self._preview_cards():
                     await self.commands.send_photo(admin, png, caption)
             return
+        if parts and parts[0].strip().lower() in {"فحص", "فحص القنوات", "check"}:
+            # the definitive answer to "is the bot posting to the channel or
+            # only to me?" — permissions first, then a real card actually sent
+            # to the private channel, and the delivery result reported back
+            await self._report_channel_health()
+            target = str(self.settings.telegram_private_channel_id or "")
+            if not target:
+                await self.notifier.note(
+                    "➖ لا توجد قناة خاصة مُعدّة (TELEGRAM_PRIVATE_CHANNEL_ID فارغ) — "
+                    "لذلك تصل البطاقات إلى المحادثة الخاصة بالبوت."
+                )
+                return
+            from qqq_alpha.live.telegram import TelegramNotifier
+
+            if not isinstance(self.notifier, TelegramNotifier):
+                return
+            samples = self._preview_cards()
+            if not samples:
+                await self.notifier.note("⚠️ تعذّر توليد بطاقة اختبار")
+                return
+            caption, png = samples[0]
+            delivered = await self.notifier._post_photo(
+                png, caption=f"🧪 بطاقة فحص — {caption}", silent=True, chat_id=target
+            )
+            await self.notifier.note(
+                f"🧪 أُرسلت بطاقة فحص إلى {target}: "
+                + ("✅ وصلت — افتح القناة وستجدها" if delivered else "❌ لم تصل")
+            )
+            return
         if len(parts) != 2 or not parts[1].isdigit():
             # any other operator text gets an answer on purpose: it is the
             # operator's one-tap proof that the inbound path is alive at all —
@@ -1149,7 +1241,8 @@ class LiveEngine:
             await self.notifier.note(
                 "✅ وصلتني رسالتك — استقبال الرسائل شغال.\n"
                 'الأوامر: "موافق <رقم>" / "رفض <رقم>" لقرارات الدروس، '
-                '"مشتركين" لعدد المشتركين، "معاينة" لتجربة رسالة الإقرار بأزرارها.'
+                '"مشتركين" لعدد المشتركين، "معاينة" لتجربة رسالة الإقرار بأزرارها، '
+                '"فحص" للتأكد أن البطاقات تصل إلى القناة الخاصة.'
             )
             return
 

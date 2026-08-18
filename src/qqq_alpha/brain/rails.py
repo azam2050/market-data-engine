@@ -55,6 +55,20 @@ class DayState:
     trades_taken: int = 0
     open_positions: int = 0
     realized_return_pct: float = 0.0
+    # the same P&L weighted by the size each trade was actually taken at.
+    # The breaker reads this one; ``realized_return_pct`` stays the raw
+    # contract number that reports and cards display. Defaults to None so a
+    # caller that has not been updated keeps the old (raw) behaviour instead
+    # of silently getting a breaker that never fires.
+    realized_risk_pct: float | None = None
+
+    @property
+    def loss_measure_pct(self) -> float:
+        return (
+            self.realized_risk_pct
+            if self.realized_risk_pct is not None
+            else self.realized_return_pct
+        )
 
 
 class SafetyRails:
@@ -100,9 +114,12 @@ class SafetyRails:
                 f"position_cap: {state.open_positions}/{self.settings.max_open_positions} open"
             )
 
-        if state.realized_return_pct <= -abs(self.settings.daily_loss_circuit_breaker_pct):
+        # measured on size-weighted damage, not on the raw contract return: a
+        # quarter-size trade stopping out at -42% costs ~-11% of a normal
+        # position and must not close the desk for the day
+        if state.loss_measure_pct <= -abs(self.settings.daily_loss_circuit_breaker_pct):
             blocks.append(
-                f"circuit_breaker: day at {state.realized_return_pct:.1f}% "
+                f"circuit_breaker: day at {state.loss_measure_pct:.1f}% of normal risk "
                 f"(limit -{self.settings.daily_loss_circuit_breaker_pct}%)"
             )
 

@@ -585,6 +585,77 @@ async def test_a_broken_prompt_becomes_a_safe_pass_not_a_crash(settings):
     assert "فشل تقني" in decision.thesis
 
 
+def test_realized_risk_weights_each_loss_by_the_size_it_was_taken_at():
+    """The number the circuit breaker reads must be damage to the account, not
+    drama in a contract."""
+    from qqq_alpha.domain import OptionType, Target
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    bars = synthetic_session("QQQ", DAY, seed=21)
+    snap = SnapshotBuilder("QQQ").build(bars[:80])
+    manager = TradeManager()
+    decision = Decision(
+        ts=snap.ts,
+        action=Action.ENTER,
+        direction=OptionType.PUT,
+        occ_symbol="O:QQQ260302P00485000",
+        targets=[Target(label="T1", price=0.0, return_pct=50, take_pct=50)],
+        stop_return_pct=-40,
+        confidence=6,
+        size_factor=0.5,
+    )
+    trade = manager.open_trade(decision, 1.00, snap)
+    manager.force_close(trade, 0.573, trade.opened_at + timedelta(minutes=20), "stop_hit")
+
+    assert manager.realized_return_pct == pytest.approx(-42.7, abs=0.1)
+    assert manager.realized_risk_pct == pytest.approx(-21.35, abs=0.1)
+
+
+@pytest.mark.asyncio
+async def test_a_tripped_breaker_is_announced_instead_of_halting_in_silence(
+    settings, tmp_path
+):
+    from qqq_alpha.brain.rails import DayState
+
+    engine = _engine(settings, tmp_path)
+    state = DayState(realized_return_pct=-60, realized_risk_pct=-60)
+    blocks = ["circuit_breaker: day at -60.0% of normal risk (limit -25.0%)"]
+
+    await engine._announce_circuit_breaker(blocks, state)
+    await engine._announce_circuit_breaker(blocks, state)  # same day: still one message
+
+    notes = [n for n in engine.notifier.notes if "قاطع الخسارة" in n]
+    assert len(notes) == 1
+    assert "-60.0%" in notes[0]
+
+    # an ordinary block is not an emergency and must stay quiet
+    engine.notifier.notes.clear()
+    await engine._announce_circuit_breaker(["daily_trade_cap: 2/2"], state)
+    assert engine.notifier.notes == []
+
+
+def test_prompt_shows_the_brain_the_actual_candles():
+    """The operator's read of 2026-08-17 — "it trades on indicators, not on
+    candles" — was literally true: no OHLC ever reached the model."""
+    from qqq_alpha.brain.prompts import build_user_prompt
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    bars = synthetic_session("QQQ", DAY, seed=12)
+    snapshot = SnapshotBuilder("QQQ").build(bars[:120])
+    assert len(snapshot.recent_bars_1m) == 30
+    assert snapshot.recent_bars_1m[-1].ts == bars[119].ts
+
+    prompt = build_user_prompt(snapshot, Playbook())
+    assert "RAW PRICE ACTION" in prompt
+    assert "1-MINUTE (30 candles)" in prompt
+    assert "5-MINUTE" in prompt
+    # the closing candle's own numbers are in there, to the cent
+    last = snapshot.recent_bars_1m[-1]
+    assert f"{last.high:.2f}" in prompt and f"{last.low:.2f}" in prompt
+    # and the price action comes before the derived views, as the prompt orders
+    assert prompt.index("RAW PRICE ACTION") < prompt.index("MULTI-TIMEFRAME VIEW")
+
+
 def test_prompt_carries_todays_earlier_decisions():
     """Plan continuity: 2026-08-11 produced zero trades on a clean trend day
     because every wake named a trigger and the next wake quietly re-derived a

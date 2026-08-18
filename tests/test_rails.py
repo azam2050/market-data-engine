@@ -52,6 +52,29 @@ def test_rails_block_circuit_breaker(settings, snapshot):
     assert any(b.startswith("circuit_breaker") for b in verdict.blocks)
 
 
+def test_circuit_breaker_measures_risk_not_contract_drama(settings, snapshot):
+    """2026-08-17: one HALF-size trade stopped out at -42.7% and the desk went
+    quiet for the rest of the day. -42.7% on half a position is ~-21% of normal
+    risk — nowhere near the -25% limit. The breaker must read the weighted
+    number, and the day must stay open."""
+    snapshot.data_age_sec = 5
+    state = DayState(
+        trades_taken=1,
+        realized_return_pct=-42.7,  # what the contract did
+        realized_risk_pct=-42.7 * 0.5,  # what it cost at the size taken
+    )
+    verdict = SafetyRails(settings).pre_check(snapshot, state)
+    assert verdict.allowed, verdict.blocks
+
+
+def test_circuit_breaker_still_closes_the_day_on_a_full_size_hit(settings, snapshot):
+    snapshot.data_age_sec = 5
+    state = DayState(realized_return_pct=-40, realized_risk_pct=-40.0)
+    verdict = SafetyRails(settings).pre_check(snapshot, state)
+    assert not verdict.allowed
+    assert any(b.startswith("circuit_breaker") for b in verdict.blocks)
+
+
 def test_rails_hold_no_market_opinion(settings, snapshot):
     """A strongly bearish tape must not be blocked — that is the brain's call."""
     snapshot.data_age_sec = 5

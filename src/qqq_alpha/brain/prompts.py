@@ -23,7 +23,7 @@ WHAT YOU ARE LOOKING FOR
 Asymmetric setups: a realistic move in QQQ that produces at least +50% on the option contract, against a clearly defined invalidation. You are hunting quality, not activity. Passing is a real answer and often the correct one — a typical session offers at most one or two genuine opportunities, and many offer none.
 
 HOW TO THINK
-1. Read the tape first. What is the market actually doing right now — trending, coiling, reverting, fighting at a level?
+1. Read the tape first — the raw candles, before any indicator. You are given the last 30 one-minute and 12 five-minute candles with open, high, low, close and volume. Read them the way a discretionary trader does: where is price relative to the last hour's range, are bodies expanding or shrinking, which side is being rejected by wicks, is volume arriving on the up-candles or the down-candles? An engulfing candle at a level with volume behind it is a real signal and you are expected to act on it; so is a long upper wick into resistance, an inside-bar coil before expansion, or three consecutive failed pushes. Indicators are a compressed summary of these same candles and always lag them — when the two disagree, the candles are the newer fact. State in your thesis what the price action itself is doing, not only what the indicators read.
 2. Weigh the evidence. Observations carry a directional score and a confidence. Conflicting evidence is information: it usually means wait, not enter.
 3. Institutional flow is the highest-value input when it is aggressive and repeated. A single large block may be a hedge, not a bet — treat it with suspicion.
 4. Ask what has to be true for this to work, and what price proves you wrong. If you cannot name the invalidation, you do not have a trade.
@@ -39,6 +39,9 @@ Once you enter, a mechanical exit engine runs the position — you do not manage
 
 SINGLE-STOCK SHADOW DESK
 Sometimes the snapshot you receive is for a single stock (NVDA, TSLA, AAPL, …) rather than QQQ. That is a shadow evaluation: your decision is recorded and scored against what the market then did, but no signal is sent and no capital moves — this is how a new symbol earns its way onto the live desk. Apply the same discipline with two adjustments. First, single names carry WEEKLY expiries: whatever expiry_dte you give resolves to the nearest Friday contract. Second, a contract with days of life left moves and decays far more slowly than 0DTE — a +50% target needs a proportionally larger move in the underlying, expected_hold_minutes should reflect a slower thesis, and lunch-hour theta panic does not apply at Wednesday's pace. Everything else — a numeric invalidation level, honest confidence, PASS as a first-class answer — is unchanged.
+
+AFTER A STOP
+A stop-out is a price event, not a verdict on your read. Two opposite mistakes live here and you must avoid both. The first is revenge: re-entering because you dislike the loss, with no fresh evidence — the daily cap is a ceiling, never a quota, and a one-trade day is a professional day. The second is superstition: refusing a genuinely valid setup for the rest of the session merely because an earlier trade in the same direction was stopped. If the tape has since produced new evidence — a reclaimed level, an engulfing candle at the failed area, flow turning over — then the second entry qualifies from zero on that evidence exactly like the first, and being stopped earlier neither helps nor hurts its case. Say explicitly in your thesis which of the two situations you are in.
 
 LATE-SESSION ENTRIES
 Past the configured cutoff (see execution warnings), a same-day (0DTE) entry is blocked — brokers themselves restrict trading same-day contracts as expiry nears, this is not just caution on our side. A next-day (1DTE) contract is not affected by that cutoff. If the evidence is strong late in the session, set expiry_dte to 1 rather than assuming no trade is possible — theta is far less brutal with a full extra day of time value.
@@ -162,6 +165,30 @@ def _compact(payload: Any) -> str:
     return json.dumps(payload, indent=2, default=str, ensure_ascii=False)
 
 
+def _candle_table(bars: list, label: str) -> str:
+    """A fixed-width OHLCV table — the tape as a trader would read it.
+
+    JSON would cost roughly three times the tokens and be far harder to scan
+    for a pattern that spans two or three adjacent candles, which is the whole
+    reason these bars are here.
+    """
+    lines = [
+        f"{label} ({len(bars)} candles)",
+        f"{'time':>5}  {'open':>8} {'high':>8} {'low':>8} {'close':>8}  {'body':>6}  {'volume':>10}",
+    ]
+    for bar in bars:
+        span = bar.high - bar.low
+        # share of the candle's range occupied by its body, signed by direction:
+        # the one number that separates a decisive candle from a rejection wick
+        body = ((bar.close - bar.open) / span * 100) if span > 0 else 0.0
+        lines.append(
+            f"{bar.ts.astimezone(MARKET_TZ).strftime('%H:%M'):>5}  "
+            f"{bar.open:>8.2f} {bar.high:>8.2f} {bar.low:>8.2f} {bar.close:>8.2f}  "
+            f"{body:>+5.0f}%  {bar.volume:>10,}"
+        )
+    return "\n".join(lines)
+
+
 def build_user_prompt(
     snapshot: MarketSnapshot,
     playbook: Playbook,
@@ -212,6 +239,28 @@ def build_user_prompt(
             "The first minutes after a release are violent whipsaw where stops die; "
             "the tradeable move is the trend that emerges once the reaction picks a "
             "side. Weigh every setup against where you are relative to the event."
+        )
+
+    # the raw tape comes BEFORE the derived views on purpose: rule 1 of HOW TO
+    # THINK is "read the tape first", and a prompt that opened with indicators
+    # was quietly telling the model to do the opposite
+    candles = []
+    if snapshot.recent_bars_1m:
+        candles.append(_candle_table(snapshot.recent_bars_1m, "1-MINUTE"))
+    if snapshot.recent_bars_5m:
+        candles.append(_candle_table(snapshot.recent_bars_5m, "5-MINUTE"))
+    if candles:
+        sections.append(
+            "=== RAW PRICE ACTION (candles, oldest → newest) ===\n"
+            "This is the tape itself. Read it before anything derived: the "
+            "structure of the last few candles — engulfing bodies, rejection "
+            "wicks, inside bars, a range that is narrowing or expanding, "
+            "volume arriving on one side — is evidence in its own right, and "
+            "no indicator below carries it. `body` is the signed share of the "
+            "candle's range taken by its body: +90% is a decisive candle, "
+            "±15% is indecision, and the sign is the direction. When price "
+            "action and an indicator disagree, price action is the more "
+            "recent fact.\n\n" + "\n\n".join(candles)
         )
 
     if snapshot.timeframes:
