@@ -650,7 +650,7 @@ class LiveEngine:
         return None
 
     # ------------------------------------------------------------------
-    async def _report_channel_health(self) -> None:
+    async def _report_channel_health(self) -> str:
         """Tell the operator, at boot, where the cards will actually land.
 
         The operator's report that "the bot posts to me instead of the
@@ -658,32 +658,47 @@ class LiveEngine:
         mode they receive the text audit copy either way, so a channel that
         silently rejects every photo looks exactly like a healthy one. This
         asks Telegram which is true and puts the answer on their phone before
-        the session starts.
+        the session starts. Returns the private channel's verdict so فحص can
+        state one conclusion instead of two lines that may disagree.
         """
         telegram = self._telegram()
         if telegram is None:
-            return
+            return ""
         targets = [
-            ("قناة المشتركين الخاصة", self.settings.telegram_private_channel_id),
-            ("القناة العامة", self.settings.telegram_channel_id),
-        ]
-        lines = []
-        for label, chat_id in targets:
-            if not chat_id:
+            (
+                "قناة المشتركين الخاصة",
+                self.settings.telegram_private_channel_id,
                 # the single most likely cause of "the cards come to me instead
                 # of the channel", and previously indistinguishable from every
                 # other cause: name it outright
-                lines.append(
-                    f"❌ {label}: غير مُعدّة — المتغير فارغ، لذلك تصل البطاقات "
-                    "إلى محادثة البوت وليس إلى القناة"
-                )
-                continue
-            try:
-                lines.append(f"{label} ({chat_id}): {await telegram.check_channel(str(chat_id))}")
-            except Exception as exc:  # noqa: BLE001 - diagnostics never block a start
-                log.exception("channel health check failed for %s", chat_id)
-                lines.append(f"⚠️ {label}: تعذّر الفحص ({exc})")
+                "غير مُعدّة — المتغير TELEGRAM_PRIVATE_CHANNEL_ID فارغ، ولهذا "
+                "تصل البطاقات إلى محادثة البوت بدل القناة",
+            ),
+            (
+                "القناة العامة",
+                self.settings.telegram_channel_id,
+                # a different fact entirely: nothing is misrouted, the public
+                # package is simply switched off
+                "غير مُعدّة — النشر العام معطّل (لا تقارير ولا طروحات حية للجمهور)",
+            ),
+        ]
+        lines: list[str] = []
+        private_verdict = ""
+        for index, (label, chat_id, unset_note) in enumerate(targets):
+            if not chat_id:
+                verdict = f"❌ {unset_note}"
+                lines.append(f"{label}: {verdict}")
+            else:
+                try:
+                    verdict = await telegram.check_channel(str(chat_id))
+                except Exception as exc:  # noqa: BLE001 - diagnostics never block a start
+                    log.exception("channel health check failed for %s", chat_id)
+                    verdict = f"⚠️ تعذّر الفحص ({exc})"
+                lines.append(f"{label} ({chat_id}): {verdict}")
+            if index == 0:
+                private_verdict = verdict
         await self.notifier.note("🔎 فحص قنوات النشر\n" + "\n".join(lines))
+        return private_verdict
 
     # ------------------------------------------------------------------
     async def _announce_circuit_breaker(self, blocks: list[str], state: DayState) -> None:
@@ -1354,7 +1369,7 @@ class LiveEngine:
             # loop, so an operator running فحص mid-session never delays a bar
             _, card_report = await asyncio.to_thread(_cards.self_test)
             await self.notifier.note(card_report)
-            await self._report_channel_health()
+            private_verdict = await self._report_channel_health()
             target = str(self.settings.telegram_private_channel_id or "")
             if not target:
                 await self.notifier.note(
@@ -1374,10 +1389,29 @@ class LiveEngine:
             delivered = await telegram._post_photo(
                 png, caption=f"🧪 بطاقة فحص — {caption}", silent=True, chat_id=target
             )
-            await self.notifier.note(
-                f"🧪 أُرسلت بطاقة فحص إلى {target}: "
-                + ("✅ وصلت — افتح القناة وستجدها" if delivered else "❌ لم تصل")
-            )
+            # one conclusion, not two lines that can contradict each other: the
+            # dry run produced a report saying the channel was unreachable and,
+            # directly under it, "✅ the test card arrived"
+            if delivered:
+                # if the permission check disagreed with the delivery, say both
+                # rather than picking the happier one — a green conclusion
+                # printed under a red diagnostic is worse than no conclusion
+                caveat = (
+                    ""
+                    if private_verdict.startswith("✅")
+                    else f"\n⚠️ لكن فحص الصلاحيات قال: {private_verdict}"
+                )
+                await self.notifier.note(
+                    f"🧪 الخلاصة: ✅ البطاقات تصل إلى القناة الخاصة ({target}) — "
+                    "افتح القناة وستجد بطاقة الفحص فيها الآن." + caveat
+                )
+            else:
+                await self.notifier.note(
+                    f"🧪 الخلاصة: ❌ البطاقات لا تصل إلى القناة الخاصة ({target})\n"
+                    f"حالة القناة: {private_verdict}\n"
+                    "ولهذا تصل النسخة النصية إليك وحدك. صحّح ما ورد أعلاه ثم "
+                    'أرسل "فحص" مرة أخرى.'
+                )
             return
         if len(parts) != 2 or not parts[1].isdigit():
             # any other operator text gets an answer on purpose: it is the

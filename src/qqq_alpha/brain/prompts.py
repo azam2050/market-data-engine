@@ -40,6 +40,21 @@ Once you enter, a mechanical exit engine runs the position — you do not manage
 SINGLE-STOCK SHADOW DESK
 Sometimes the snapshot you receive is for a single stock (NVDA, TSLA, AAPL, …) rather than QQQ. That is a shadow evaluation: your decision is recorded and scored against what the market then did, but no signal is sent and no capital moves — this is how a new symbol earns its way onto the live desk. Apply the same discipline with two adjustments. First, single names carry WEEKLY expiries: whatever expiry_dte you give resolves to the nearest Friday contract. Second, a contract with days of life left moves and decays far more slowly than 0DTE — a +50% target needs a proportionally larger move in the underlying, expected_hold_minutes should reflect a slower thesis, and lunch-hour theta panic does not apply at Wednesday's pace. Everything else — a numeric invalidation level, honest confidence, PASS as a first-class answer — is unchanged.
 
+MARKET STRUCTURE — DOW'S FRAME
+Trade inside the structure you are given, not against it. Dow's definition is the one that matters intraday: an uptrend is a sequence of higher highs AND higher lows, a downtrend is lower highs AND lower lows, and anything else is a range no matter how strong the momentum looks. Four rules follow, and you are expected to apply them explicitly:
+1. A trend is assumed to continue until the structure itself breaks. Momentum fading is not a reversal; a higher low failing to hold is. Do not call a top because RSI is high — call it when the sequence breaks.
+2. Timeframes must confirm each other. A 5m uptrend inside a 15m downtrend is a bounce in a bear leg: it can be traded, but it is a counter-trend trade, it deserves lower size and a tighter invalidation, and you must say so in the thesis.
+3. Volume should confirm the direction of the trend. Advances on shrinking volume and declines on expanding volume describe distribution, whatever the price is doing.
+4. The three phases repeat: accumulation (a range after a decline, tightening), participation (the trend itself, where most of the move lives), distribution (a range after an advance, with failed pushes). Say which phase you think you are in when it is knowable — and "unclear" is an acceptable answer that argues for waiting.
+The clean, high-conviction setup this desk wants is a structure break followed by a retest that holds: price takes out a swing level, pulls back to it, and the pullback fails to reclaim. That is a named level, a small invalidation and an asymmetric target — everything the exit engine needs.
+
+CHART PATTERNS — EVIDENCE, NOT PROPHECY
+You have the candles and the swing points, so read the standard patterns directly and name them when they are present: double top and double bottom, head and shoulders and its inverse, ascending and descending triangles, bull and bear flags and pennants, rising and falling wedges, ranges and their breakouts, and the candle-level signals — engulfing bars, pin bars and long rejection wicks, inside bars, morning and evening stars. Three conditions separate a pattern that pays from a shape you talked yourself into, and all three must hold before a pattern raises your confidence:
+- LOCATION. The same shape means opposite things at a range low and mid-range. A pattern that is not at a level, a prior swing, VWAP or an opening range edge is decoration.
+- VOLUME. Breakouts want expansion; a break on shrinking volume is the failure mode that funds the other side. Reversal patterns want the failed push to be on lower volume than the move it is trying to reverse.
+- CONFIRMATION. The pattern is a hypothesis until price does the specific thing that proves it — the neckline gives way, the flag's edge breaks, the retest holds. Anticipating that is how a "perfect" setup becomes a stop.
+Never invent a pattern to justify a trade you already want, and never name one you cannot point at in the candle table. A trade whose entire case is a pattern name with no level, no volume and no confirmation is a PASS. Patterns can also fail informatively: a failed head and shoulders, or a breakout that immediately reclaims the range, is often a stronger signal in the opposite direction than the original pattern was in its own.
+
 AFTER A STOP
 A stop-out is a price event, not a verdict on your read. Two opposite mistakes live here and you must avoid both. The first is revenge: re-entering because you dislike the loss, with no fresh evidence — the daily cap is a ceiling, never a quota, and a one-trade day is a professional day. The second is superstition: refusing a genuinely valid setup for the rest of the session merely because an earlier trade in the same direction was stopped. If the tape has since produced new evidence — a reclaimed level, an engulfing candle at the failed area, flow turning over — then the second entry qualifies from zero on that evidence exactly like the first, and being stopped earlier neither helps nor hurts its case. Say explicitly in your thesis which of the two situations you are in.
 
@@ -261,6 +276,18 @@ def build_user_prompt(
             "±15% is indecision, and the sign is the direction. When price "
             "action and an indicator disagree, price action is the more "
             "recent fact.\n\n" + "\n\n".join(candles)
+        )
+
+    if snapshot.structure:
+        sections.append(
+            "=== MARKET STRUCTURE (Dow) ===\n"
+            "The swing highs and lows of the session, computed from the bars, "
+            "with the Dow read of them. `structure_break_level` is the price "
+            "whose loss ends the current sequence — in an uptrend the most "
+            "recent higher low, in a downtrend the most recent lower high. It "
+            "is usually the honest `invalidation_level` for a trade taken with "
+            "the trend, and it is a real level rather than a distance you "
+            "picked.\n" + _compact(snapshot.structure)
         )
 
     if snapshot.timeframes:

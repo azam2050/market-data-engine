@@ -454,5 +454,9 @@ async def test_an_unset_private_channel_is_named_as_the_cause_at_startup(tmp_pat
         await engine._report_channel_health()
 
     report = "\n".join(notes.notes)
-    assert "قناة المشتركين الخاصة" in report
-    assert "المتغير فارغ" in report
+    assert "TELEGRAM_PRIVATE_CHANNEL_ID فارغ" in report
+    assert "تصل البطاقات إلى محادثة البوت" in report
+    # the public channel being unset is a DIFFERENT fact — nothing is
+    # misrouted there, public publishing is simply off — and saying the same
+    # sentence about both would send the operator hunting the wrong problem
+    assert "النشر العام معطّل" in report

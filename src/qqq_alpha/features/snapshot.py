@@ -20,7 +20,7 @@ from qqq_alpha.domain import (
     MarketSnapshot,
     Observation,
 )
-from qqq_alpha.features import indicators, levels
+from qqq_alpha.features import indicators, levels, structure
 from qqq_alpha.features.flow import flow_bias, summarize_flow
 from qqq_alpha.features.timeframes import TimeframeSet
 
@@ -115,6 +115,12 @@ class SnapshotBuilder:
             # prompt stays about price action rather than history
             recent_bars_1m=session_bars[-RECENT_1M_BARS:],
             recent_bars_5m=tfs.m5[-RECENT_5M_BARS:],
+            # the swing skeleton of the day, on the two timeframes a
+            # 0DTE trade is actually framed by
+            structure={
+                "5m": structure.describe(tfs.m5),
+                "15m": structure.describe(tfs.m15),
+            },
             leaders=leaders_last,
             indicators=ind,
             timeframes=timeframe_packs,

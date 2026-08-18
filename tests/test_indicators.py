@@ -73,3 +73,81 @@ def test_observations_never_reject():
     for obs in snap.observations:
         assert -1.0 <= obs.score <= 1.0
         assert 0.0 <= obs.confidence <= 1.0
+
+
+# ---------------------------------------------------------------- structure
+def test_swing_points_alternate_and_find_the_real_extremes():
+    from datetime import UTC, datetime, timedelta
+
+    from qqq_alpha.domain import Bar
+    from qqq_alpha.features.structure import swing_points
+
+    # a clean zigzag: up to 110, down to 95, up to 120, down to 105
+    path = [100, 104, 110, 106, 99, 95, 101, 112, 120, 116, 109, 105, 111]
+    start = datetime(2026, 3, 2, 14, 30, tzinfo=UTC)
+    bars = [
+        Bar(symbol="QQQ", ts=start + timedelta(minutes=i), open=p, high=p + 0.5,
+            low=p - 0.5, close=p, volume=1000)
+        for i, p in enumerate(path)
+    ]
+    swings = swing_points(bars)
+    kinds = [s.kind for s in swings]
+    assert kinds == sorted(set(kinds), key=kinds.index) or all(
+        kinds[i] != kinds[i + 1] for i in range(len(kinds) - 1)
+    ), "swings must alternate high/low"
+    assert any(abs(s.price - 120.5) < 0.01 for s in swings if s.kind == "high")
+    assert any(abs(s.price - 94.5) < 0.01 for s in swings if s.kind == "low")
+
+
+def test_dow_trend_needs_both_higher_highs_and_higher_lows():
+    from qqq_alpha.features.structure import Swing, classify
+
+    def swings(prices):
+        return [Swing(ts=None, price=p, kind=k) for p, k in prices]
+
+    uptrend = swings([(100, "high"), (95, "low"), (110, "high"), (99, "low")])
+    assert classify(uptrend)[0] == "uptrend"
+
+    downtrend = swings([(110, "high"), (99, "low"), (105, "high"), (94, "low")])
+    assert classify(downtrend)[0] == "downtrend"
+
+    # a higher high with a LOWER low is a widening range, never an uptrend —
+    # calling it one is how a desk buys the top of a box
+    expanding = swings([(100, "high"), (95, "low"), (110, "high"), (90, "low")])
+    assert classify(expanding)[0] == "expanding_range"
+
+    coil = swings([(110, "high"), (90, "low"), (105, "high"), (95, "low")])
+    assert classify(coil)[0] == "contracting_range"
+
+
+def test_structure_break_level_is_the_last_higher_low_in_an_uptrend():
+    from datetime import date
+
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    bars = synthetic_session("QQQ", date(2026, 3, 2), seed=12, trend=0.02)
+    snapshot = SnapshotBuilder("QQQ").build(bars[:150])
+    five = snapshot.structure["5m"]
+    assert five["trend"] == "uptrend"
+    lows = [s["price"] for s in five["swings"] if s["kind"] == "low"]
+    assert five["structure_break_level"] == lows[-1]
+
+
+def test_prompt_carries_the_dow_structure_and_its_break_level():
+    from datetime import date
+
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.brain.prompts import build_user_prompt
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    bars = synthetic_session("QQQ", date(2026, 3, 2), seed=12, trend=0.02)
+    snapshot = SnapshotBuilder("QQQ").build(bars[:150])
+    prompt = build_user_prompt(snapshot, Playbook())
+
+    assert "MARKET STRUCTURE (Dow)" in prompt
+    assert "structure_break_level" in prompt
+    assert str(snapshot.structure["5m"]["structure_break_level"]) in prompt
+    # structure is context for the candles, so it follows them
+    assert prompt.index("RAW PRICE ACTION") < prompt.index("MARKET STRUCTURE (Dow)")

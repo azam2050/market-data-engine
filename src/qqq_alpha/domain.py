@@ -154,6 +154,9 @@ class MarketSnapshot(BaseModel):
     # narrowing range — it could only see what an EMA had already averaged away.
     recent_bars_1m: list[Bar] = Field(default_factory=list)
     recent_bars_5m: list[Bar] = Field(default_factory=list)
+    # Dow-theory swing structure per timeframe: higher highs / lower lows,
+    # the swing points themselves, and the level whose loss ends the trend
+    structure: dict[str, dict] = Field(default_factory=dict)
     leaders: list[Bar] = Field(default_factory=list)
     indicators: dict[str, float | None] = Field(default_factory=dict)
     timeframes: dict[str, dict[str, float | None]] = Field(
