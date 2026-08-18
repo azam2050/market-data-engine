@@ -632,6 +632,24 @@ class LiveEngine:
             await self.notifier.note("✅ عادت بيانات السوق — المحرك يعمل بشكل طبيعي")
 
     # ------------------------------------------------------------------
+    def _telegram(self):
+        """The Telegram notifier actually in use, wherever it is wrapped.
+
+        In production ``self.notifier`` is a FanoutNotifier holding a console
+        notifier and a BroadcastNotifier — so an ``isinstance`` check against
+        TelegramNotifier is False, and any diagnostic guarded by one becomes a
+        silent no-op on the exact deployment it was written for. Unwrap once,
+        here, instead of getting this wrong at every call site.
+        """
+        from qqq_alpha.live.telegram import TelegramNotifier
+
+        candidates = [self.notifier, *getattr(self.notifier, "notifiers", [])]
+        for candidate in candidates:
+            if isinstance(candidate, TelegramNotifier):
+                return candidate
+        return None
+
+    # ------------------------------------------------------------------
     async def _report_channel_health(self) -> None:
         """Tell the operator, at boot, where the cards will actually land.
 
@@ -642,9 +660,8 @@ class LiveEngine:
         asks Telegram which is true and puts the answer on their phone before
         the session starts.
         """
-        from qqq_alpha.live.telegram import TelegramNotifier
-
-        if not isinstance(self.notifier, TelegramNotifier):
+        telegram = self._telegram()
+        if telegram is None:
             return
         targets = [
             ("قناة المشتركين الخاصة", self.settings.telegram_private_channel_id),
@@ -653,10 +670,16 @@ class LiveEngine:
         lines = []
         for label, chat_id in targets:
             if not chat_id:
-                lines.append(f"➖ {label}: غير مُعدّة")
+                # the single most likely cause of "the cards come to me instead
+                # of the channel", and previously indistinguishable from every
+                # other cause: name it outright
+                lines.append(
+                    f"❌ {label}: غير مُعدّة — المتغير فارغ، لذلك تصل البطاقات "
+                    "إلى محادثة البوت وليس إلى القناة"
+                )
                 continue
             try:
-                lines.append(f"{label}: {await self.notifier.check_channel(str(chat_id))}")
+                lines.append(f"{label} ({chat_id}): {await telegram.check_channel(str(chat_id))}")
             except Exception as exc:  # noqa: BLE001 - diagnostics never block a start
                 log.exception("channel health check failed for %s", chat_id)
                 lines.append(f"⚠️ {label}: تعذّر الفحص ({exc})")
@@ -1339,16 +1362,16 @@ class LiveEngine:
                     "لذلك تصل البطاقات إلى المحادثة الخاصة بالبوت."
                 )
                 return
-            from qqq_alpha.live.telegram import TelegramNotifier
-
-            if not isinstance(self.notifier, TelegramNotifier):
+            telegram = self._telegram()
+            if telegram is None:
+                await self.notifier.note("⚠️ لا يوجد اتصال تلجرام لتشغيل الفحص")
                 return
             samples = self._preview_cards()
             if not samples:
                 await self.notifier.note("⚠️ تعذّر توليد بطاقة اختبار")
                 return
             caption, png = samples[0]
-            delivered = await self.notifier._post_photo(
+            delivered = await telegram._post_photo(
                 png, caption=f"🧪 بطاقة فحص — {caption}", silent=True, chat_id=target
             )
             await self.notifier.note(

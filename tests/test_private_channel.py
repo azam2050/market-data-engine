@@ -19,6 +19,7 @@ from qqq_alpha.live.engine import LiveEngine
 from qqq_alpha.live.notifier import NullNotifier
 from qqq_alpha.live.telegram import (
     BroadcastNotifier,
+    FanoutNotifier,
     JoinRequest,
     TelegramCommandListener,
     TelegramNotifier,
@@ -402,10 +403,56 @@ async def test_check_command_posts_a_real_card_to_the_private_channel(tmp_path):
     engine = _engine(tmp_path, calls)
     memory = Memory(tmp_path / "notifier-memory.db")
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        engine.notifier = BroadcastNotifier(
-            "token", "admin", memory, client=client, private_channel_id=PRIVATE
+        # exactly how production wires it: the Telegram notifier is WRAPPED in
+        # a fanout beside the console one. A diagnostic that isinstance-checks
+        # engine.notifier directly is a no-op on the only deployment that
+        # matters — which is what this test exists to prevent.
+        engine.notifier = FanoutNotifier(
+            NullNotifier(),
+            BroadcastNotifier(
+                "token", "admin", memory, client=client, private_channel_id=PRIVATE
+            ),
         )
         await engine._handle_command("فحص")
 
     assert len(posted) == 1
     assert PRIVATE in posted[0]  # the card went to the channel, not to the DM
+
+
+@pytest.mark.asyncio
+async def test_an_unset_private_channel_is_named_as_the_cause_at_startup(tmp_path):
+    """"Why do the cards come to me instead of the channel?" has one overwhelmingly
+    likely answer, and the engine must say it out loud rather than leave the
+    operator to guess between four indistinguishable causes."""
+    from qqq_alpha.brain.decider import HeuristicDecider
+    from qqq_alpha.config import Settings as S
+
+    settings = S(
+        massive_api_key="k",
+        journal_dir=tmp_path / "journal",
+        data_dir=tmp_path / "data",
+        telegram_bot_token="token",
+        telegram_chat_id="admin",
+        telegram_private_channel_id="",  # the misconfiguration under test
+        shadow_symbols_csv="",
+    )
+    engine = LiveEngine(
+        settings=settings,
+        decider=HeuristicDecider(settings),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=NullNotifier(),
+    )
+    memory = Memory(tmp_path / "n.db")
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True, "result": {}}))
+    ) as client:
+        broadcast = BroadcastNotifier("token", "admin", memory, client=client)
+        notes = NullNotifier()
+        engine.notifier = FanoutNotifier(notes, broadcast)
+        await engine._report_channel_health()
+
+    report = "\n".join(notes.notes)
+    assert "قناة المشتركين الخاصة" in report
+    assert "المتغير فارغ" in report
