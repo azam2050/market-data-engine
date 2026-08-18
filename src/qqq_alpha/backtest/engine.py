@@ -206,6 +206,7 @@ class Backtester:
                 # than approximated from the session's own open.
                 leader_prior_close=leader_prior_close,
                 history_bars=history_bars,
+                leader_priority=self.settings.leader_symbols,
                 now=now,
                 quality=quality,
             )

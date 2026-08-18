@@ -326,3 +326,34 @@ def test_opening_gap_names_the_fill_level_and_whether_it_was_reached():
     assert flat["direction"] == "none" and "fill_level" not in flat
 
     assert opening_gap(bars, None) is None
+
+
+def test_leader_order_is_by_weight_not_by_whichever_bar_arrived_first():
+    """leader_bars is keyed by websocket arrival order, which differs between
+    restarts. Presenting the heavyweights in a different order every session
+    is unreadable churn — and would have made "the top five" arbitrary."""
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    day = date(2026, 3, 6)
+    names = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA", "NFLX", "AMD"]
+    qqq = synthetic_session("QQQ", day, seed=12)
+    # arrival order scrambled, exactly as a live feed would deliver it
+    scrambled = {s: synthetic_session(s, day, seed=i + 3)[:150]
+                 for i, s in enumerate(reversed(names))}
+
+    snapshot = SnapshotBuilder("QQQ").build(
+        session_bars=qqq[:150], leader_bars=scrambled,
+        leader_priority=names, now=qqq[149].ts,
+    )
+
+    assert list(snapshot.leader_detail) == names          # every name, in weight order
+    assert list(snapshot.leader_bars_5m) == names[:5]     # only the heaviest get a tape
+    # a symbol the caller did not rank still appears, behind the ranked ones
+    extra = dict(scrambled)
+    extra["XYZ"] = synthetic_session("XYZ", day, seed=99)[:150]
+    ranked = SnapshotBuilder("QQQ").build(
+        session_bars=qqq[:150], leader_bars=extra,
+        leader_priority=names, now=qqq[149].ts,
+    )
+    assert list(ranked.leader_detail)[-1] == "XYZ"

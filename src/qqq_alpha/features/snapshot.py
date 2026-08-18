@@ -34,6 +34,10 @@ RECENT_5M_BARS = 12
 # a divergence forming against the index, short enough that three of them
 # do not crowd out the index's own price action
 LEADER_5M_BARS = 6
+# how many heavyweights get a candle table of their own. QQQ's top holdings
+# are close to half the index; the tail is a rounding error, and ten tapes
+# would bury the index's own price action under names that cannot move it.
+LEADER_CANDLE_SYMBOLS = 5
 # how much of the hourly chart travels with the snapshot. Ten candles is
 # roughly a day and a half of hourly structure — the frame a 0DTE trade is
 # taken inside, without turning the prompt into a swing-trading brief.
@@ -71,6 +75,7 @@ class SnapshotBuilder:
         quality: DataQuality | None = None,
         leader_prior_close: dict[str, float] | None = None,
         history_bars: list[Bar] | None = None,
+        leader_priority: list[str] | None = None,
     ) -> MarketSnapshot:
         if not session_bars:
             raise ValueError("cannot build a snapshot without bars")
@@ -126,18 +131,33 @@ class SnapshotBuilder:
         leader_detail: dict[str, dict] = {}
         leader_bars_5m: dict[str, list[Bar]] = {}
         if leader_bars:
+            # the dict is keyed by arrival order off the websocket, which
+            # differs between restarts. Presenting the heavyweights in a
+            # different order every session is both unreadable and pointless
+            # churn, so the caller's weight order wins and anything unlisted
+            # falls in alphabetically behind it.
+            priority = [s for s in (leader_priority or []) if s in leader_bars]
+            ordered = priority + sorted(set(leader_bars) - set(priority))
+
             moves: list[float] = []
-            for symbol, bars in leader_bars.items():
+            for rank, symbol in enumerate(ordered):
+                bars = leader_bars[symbol]
                 if not bars:
                     continue
                 leaders_last.append(bars[-1])
                 move = indicators.momentum_pct(bars, 15)
                 if move is not None:
                     moves.append(move)
+                # every name gets the numbers — they are compact and each one
+                # can carry a divergence
                 leader_detail[symbol] = self._leader_digest(
                     bars, (leader_prior_close or {}).get(symbol)
                 )
-                leader_bars_5m[symbol] = TimeframeSet.build(bars).m5[-LEADER_5M_BARS:]
+                # ...but only the heaviest get a candle table. Ten tapes would
+                # bury the index's own price action, and the bottom of this
+                # list is a rounding error in QQQ's weighting.
+                if rank < LEADER_CANDLE_SYMBOLS:
+                    leader_bars_5m[symbol] = TimeframeSet.build(bars).m5[-LEADER_5M_BARS:]
             if moves:
                 positive = sum(1 for m in moves if m > 0)
                 leader_alignment = (positive / len(moves)) * 2 - 1

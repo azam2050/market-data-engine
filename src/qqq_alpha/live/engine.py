@@ -526,6 +526,7 @@ class LiveEngine:
             overnight_low=self.overnight_low,
             leader_prior_close=self.leader_prior_close,
             history_bars=self.history_bars,
+            leader_priority=self.settings.leader_symbols,
             now=bar.ts,
             quality=quality,
         )
