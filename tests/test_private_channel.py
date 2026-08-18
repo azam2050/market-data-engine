@@ -485,3 +485,30 @@ async def test_an_unset_private_channel_is_named_as_the_cause_at_startup(tmp_pat
     # misrouted there, public publishing is simply off — and saying the same
     # sentence about both would send the operator hunting the wrong problem
     assert "النشر العام معطّل" in report
+
+
+@pytest.mark.asyncio
+async def test_a_missing_minus_sign_is_named_as_the_typo_it_is():
+    """Telegram answers a positive id with a bare "chat not found", which says
+    nothing about why. The most common cause is a dropped minus sign."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("getChat"):
+            return httpx.Response(
+                400, json={"ok": False, "description": "Bad Request: chat not found"}
+            )
+        return httpx.Response(200, json={"ok": True, "result": {}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        notifier = TelegramNotifier("token", "admin", client=client)
+
+        no_minus = await notifier.check_channel("1001234567890")
+        assert "الشرطة ناقصة" in no_minus
+
+        wrong_prefix = await notifier.check_channel("-1234567890")
+        assert "يجب أن يبدأ بـ -100" in wrong_prefix
+
+        # a well-formed id that simply is not reachable keeps the plain wording
+        well_formed = await notifier.check_channel("-1001234567890")
+        assert "الشرطة ناقصة" not in well_formed
+        assert "القناة غير متاحة للبوت" in well_formed

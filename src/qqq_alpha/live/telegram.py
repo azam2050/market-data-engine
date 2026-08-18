@@ -180,9 +180,23 @@ class TelegramNotifier:
                 log.warning("%s failed (%s)", method, exc)
                 return None
 
+        # a channel id is a negative number beginning -100. Dropping the minus
+        # sign when copying it is the single easiest mistake to make, and
+        # Telegram's answer for the resulting positive number ("chat not
+        # found") says nothing about the cause — so check the shape first and
+        # name the typo outright.
+        shape = ""
+        if not chat_id.startswith("@"):
+            if not chat_id.startswith("-"):
+                shape = "الشرطة ناقصة في بداية المعرّف — معرّفات القنوات سالبة دائمًا"
+            elif not chat_id.startswith("-100"):
+                shape = "معرّف القناة يجب أن يبدأ بـ -100"
+
         chat = await call("getChat", {"chat_id": chat_id})
         if not chat or "_error" in (chat or {}):
             reason = (chat or {}).get("_error", "لا استجابة من تلجرام")
+            if shape:
+                return f"❌ {chat_id} — {shape} (رد تلجرام: {reason})"
             return f"❌ {chat_id} — القناة غير متاحة للبوت ({reason})"
 
         title = chat.get("title") or chat.get("username") or chat_id
