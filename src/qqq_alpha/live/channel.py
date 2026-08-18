@@ -305,6 +305,67 @@ class ChannelPublisher:
         png = self._render_report("weekly", stats=stats, channel_rows=channel_trades)
         await self._post_card(png, "📊 التقرير الأسبوعي — بوت عقود الخيارات", "\n".join(lines))
 
+    async def post_monthly_report(
+        self,
+        month: date,
+        stats,
+        daily_returns: list[tuple[date, float]],
+        channel_trades: list[dict],
+    ) -> None:
+        """The month's statement — the curve, the weeks, the drawdown.
+
+        Posted once, after the last session of the month. Where the daily card
+        is a receipt and the weekly one a summary, this is the document a
+        prospective subscriber judges the desk by, so it leads with the shape
+        of the month rather than with its best number.
+        """
+        if stats.closed == 0:
+            return
+        from qqq_alpha.live.cards import ARABIC_MONTHS
+
+        label = f"{ARABIC_MONTHS[month.month - 1]} {month.year}"
+        net = sum(value for _, value in daily_returns)
+        green = sum(1 for _, v in daily_returns if v > 1)
+        red = sum(1 for _, v in daily_returns if v < -1)
+        peak = drawdown = 0.0
+        running = 0.0
+        for _, value in daily_returns:
+            running += value
+            peak = max(peak, running)
+            drawdown = min(drawdown, running - peak)
+
+        lines = [
+            f"🗓️ البيان الشهري — {label}",
+            "",
+            f"💰 صافي الشهر: {net:+.1f}%",
+            f"📌 الطروحات المغلقة: {stats.closed}",
+            f"✅ الرابحة: {stats.wins} | ❌ الخاسرة: {stats.losses}"
+            f" | 📈 النسبة: {stats.win_rate:.0f}%",
+            f"🟢 جلسات رابحة: {green} | 🔴 جلسات خاسرة: {red}",
+            f"🏆 أفضل طرح: {stats.best_pct:+.1f}% | أسوأ طرح: {stats.worst_pct:+.1f}%",
+            f"📉 أقصى تراجع خلال الشهر: {drawdown:+.1f}%",
+            f"💵 متوسط نتيجة الطرح: {stats.expectancy_pct:+.1f}%",
+        ]
+        if channel_trades:
+            lines += ["", "🔓 طروحات نُشرت حية هنا قبل نتيجتها:"]
+            for row in channel_trades:
+                lines.append(
+                    f"   • {row.get('label', '?')}: "
+                    f"{float(row.get('return_pct') or 0):+.1f}%"
+                )
+        lines += [
+            "",
+            "أقصى تراجع يعني أكبر هبوط من قمة المسار التراكمي إلى قاعه خلال "
+            "الشهر — ننشره لأن الرقم الصافي وحده لا يخبرك كيف كان شعور الطريق.",
+            "",
+            f"⚠️ {DISCLAIMER}",
+        ]
+        png = self._render_report(
+            "monthly", month=month, stats=stats,
+            daily_returns=daily_returns, channel_rows=channel_trades,
+        )
+        await self._post_card(png, f"🗓️ البيان الشهري — {label}", "\n".join(lines))
+
     # ------------------------------------------------------------------
     @staticmethod
     def _render_report(kind: str, **kwargs) -> bytes | None:
@@ -317,6 +378,11 @@ class ChannelPublisher:
             if kind == "weekly":
                 return cards.render_weekly_report_card(
                     kwargs["stats"], kwargs["channel_rows"]
+                )
+            if kind == "monthly":
+                return cards.render_monthly_report_card(
+                    kwargs["month"], kwargs["stats"],
+                    kwargs["daily_returns"], kwargs["channel_rows"],
                 )
         except Exception:  # noqa: BLE001 - the table is garnish; the numbers must arrive
             log.exception("report card rendering failed; posting text instead")

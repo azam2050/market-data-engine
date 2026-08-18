@@ -866,8 +866,60 @@ class LiveEngine:
                         }
                     )
                 await self.channel.post_weekly_report(stats, channel_rows)
+            if self._is_last_session_of_month(day):
+                await self._publish_channel_monthly(day)
         except Exception:  # noqa: BLE001 - the shop window must never stop the desk
             log.exception("channel daily publishing failed")
+
+    @staticmethod
+    def _is_last_session_of_month(day: date) -> bool:
+        """True when no weekday remains in this month after ``day``.
+
+        Deliberately calendar-only: market holidays would make the true last
+        session earlier, and posting the statement a day late is a far smaller
+        problem than never posting it because the engine was waiting for a
+        session that a holiday deleted.
+        """
+        if day.weekday() >= 5:
+            return False
+        probe = day + timedelta(days=1)
+        while probe.month == day.month:
+            if probe.weekday() < 5:
+                return False
+            probe += timedelta(days=1)
+        return True
+
+    async def _publish_channel_monthly(self, day: date) -> None:
+        """The month's statement. Its daily series and its trade statistics are
+        read from the same journal rows, so the curve's final value and the net
+        in the totals panel can never disagree."""
+        if self.channel is None:
+            return
+        month_start = day.replace(day=1)
+        period = load_period(self.settings.journal_dir, since=month_start, until=day)
+        stats = review(period)
+
+        by_day: dict[date, float] = {}
+        channel_rows: list[dict] = []
+        for row in period.closed:
+            opened = row.get("opened_at")
+            try:
+                when = datetime.fromisoformat(opened) if opened else datetime.now(UTC)
+            except ValueError:
+                when = datetime.now(UTC)
+            session = when.astimezone(MARKET_TZ).date()
+            result = float(row.get("return_pct") or 0.0)
+            by_day[session] = by_day.get(session, 0.0) + result
+            if row.get("shared_to_channel"):
+                channel_rows.append(
+                    {"label": human_contract(row.get("occ_symbol", ""), when),
+                     "return_pct": result}
+                )
+
+        daily_returns = sorted(by_day.items())
+        await self.channel.post_monthly_report(
+            month_start, stats, daily_returns, channel_rows
+        )
 
     async def _roll_session(self, new_day: date) -> None:
         """New session: flatten, archive, reset counters."""
@@ -1401,6 +1453,25 @@ class LiveEngine:
                 samples.append((
                     "🔴 نموذج: إغلاق خاسر", cards.render_close_card(trade2, close2)
                 ))
+
+            samples.append((
+                "📄 نموذج: التقرير اليومي",
+                cards.render_daily_report_card(
+                    date(2026, 8, 14),
+                    [{"label": "QQQ 731 PUT 0DTE", "return_pct": 67.6, "shared": True},
+                     {"label": "QQQ 733 CALL 0DTE", "return_pct": -41.3, "shared": False}],
+                ),
+            ))
+            samples.append((
+                "🗓️ نموذج: البيان الشهري",
+                cards.render_monthly_report_card(
+                    date(2026, 8, 1), cards._sample_stats(),
+                    [(date(2026, 8, 3) + timedelta(days=index), value)
+                     for index, value in enumerate(
+                         [12.5, -8.0, 31.2, -15.4, 22.0, 5.5, -21.0, 44.0])],
+                    [{"label": "QQQ 731 PUT 0DTE", "return_pct": 44.0}],
+                ),
+            ))
         except Exception:  # noqa: BLE001 - a preview must never crash the engine
             log.exception("preview card rendering failed")
         return samples

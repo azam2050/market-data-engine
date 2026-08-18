@@ -293,3 +293,52 @@ async def test_qualified_waits_publish_at_most_two_watch_cards(tmp_path):
     assert len(notifier.watches) == 2
     assert "تحت المراقبة" in notifier.watches[0]
     assert "ليس طرحًا بعد" in notifier.watches[0]
+
+
+# ---------------------------------------------------------------- monthly
+@pytest.mark.asyncio
+async def test_monthly_statement_posts_as_a_card_with_the_drawdown():
+    posts, transport = _recorder()
+    from qqq_alpha.live.review import ReviewStats
+
+    stats = ReviewStats(
+        closed=8, wins=5, losses=3, win_rate=62.5, expectancy_pct=8.9,
+        avg_win_pct=23.0, avg_loss_pct=-14.8, best_pct=44.0, worst_pct=-21.0,
+    )
+    series = [
+        (date(2026, 8, 3) + timedelta(days=i), v)
+        for i, v in enumerate([12.5, -8.0, 31.2, -15.4, 22.0, 5.5, -21.0, 44.0])
+    ]
+    async with httpx.AsyncClient(transport=transport) as client:
+        publisher = ChannelPublisher("token", "@chan", client=client)
+        await publisher.post_monthly_report(date(2026, 8, 1), stats, series, [])
+
+    assert posts["photos"] == 1
+    assert posts["texts"] == []
+
+
+@pytest.mark.asyncio
+async def test_an_empty_month_publishes_nothing():
+    posts, transport = _recorder()
+    from qqq_alpha.live.review import ReviewStats
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        publisher = ChannelPublisher("token", "@chan", client=client)
+        await publisher.post_monthly_report(date(2026, 8, 1), ReviewStats(), [], [])
+
+    assert posts["photos"] == 0 and posts["texts"] == []
+
+
+def test_the_statement_goes_out_after_the_months_last_weekday():
+    """August 2026 ends on a Monday, so the 31st is the last session — and the
+    28th (that month's last Friday) must NOT trigger it."""
+    from qqq_alpha.live.engine import LiveEngine
+
+    assert LiveEngine._is_last_session_of_month(date(2026, 8, 31))
+    assert not LiveEngine._is_last_session_of_month(date(2026, 8, 28))
+    # September 2026 ends on a Wednesday
+    assert LiveEngine._is_last_session_of_month(date(2026, 9, 30))
+    assert not LiveEngine._is_last_session_of_month(date(2026, 9, 29))
+    # a month ending at the weekend: the last Friday carries the statement
+    assert LiveEngine._is_last_session_of_month(date(2026, 10, 30))
+    assert not LiveEngine._is_last_session_of_month(date(2026, 10, 31))  # Saturday
