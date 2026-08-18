@@ -126,6 +126,14 @@ class LiveEngine:
         self.manager = TradeManager()
         self.status = LiveStatus()
         self.session_bars: list[Bar] = []
+        # the reference levels every desk has drawn before the bell: yesterday's
+        # candle (which also yields the classic pivot, R1 and S1) and the
+        # overnight range. The backtester has always passed these; the live
+        # engine never did, so live ran blind to the most-watched levels of the
+        # day and quietly disagreed with its own backtest.
+        self.prior_day: Bar | None = None
+        self.overnight_high: float | None = None
+        self.overnight_low: float | None = None
         self.leader_bars: dict[str, list[Bar]] = {}
         self.recent_trades: list[Trade] = []
         self._current_day: date | None = None
@@ -357,6 +365,11 @@ class LiveEngine:
                         f"warm start: {len(self.session_bars)} bars restored "
                         f"({session.quality.summary() if session.quality else 'no verdict'})"
                     )
+                # pre-market is fetched anyway as part of the same day; its
+                # high and low are among the most-watched levels of the session
+                self.overnight_high = session.premarket_high
+                self.overnight_low = session.premarket_low
+                await self._load_prior_day(client, today)
 
                 for symbol in self.settings.leader_symbols:
                     leader = await client.session(symbol, today)
@@ -369,6 +382,34 @@ class LiveEngine:
             self.status.last_error = f"warm_start_failed: {exc}"
             log.warning("warm start failed: %s", exc)
             await self.notifier.note(f"warm start failed ({exc}); starting cold")
+
+    async def _load_prior_day(self, client, today: date) -> None:
+        """Yesterday's candle — walking back past weekends and holidays.
+
+        A market holiday returns an empty session rather than an error, so the
+        only honest way to find the previous *trading* day is to walk backwards
+        until a day has bars. Five attempts covers a long weekend plus a
+        holiday; failing that, the levels stay absent rather than wrong.
+        """
+        probe = today
+        for _ in range(5):
+            probe -= timedelta(days=1)
+            if probe.weekday() >= 5:
+                continue
+            try:
+                previous = await client.session(self.settings.primary_symbol, probe)
+            except Exception as exc:  # noqa: BLE001 - levels are context, not a blocker
+                log.warning("prior-day fetch failed for %s: %s", probe, exc)
+                return
+            daily = previous.daily_bar
+            if daily is not None:
+                self.prior_day = daily
+                log.info(
+                    "prior day %s: H %.2f L %.2f C %.2f",
+                    probe, daily.high, daily.low, daily.close,
+                )
+                return
+        log.warning("no prior trading day found in the last 5 days before %s", today)
 
     # ------------------------------------------------------------------
     async def _on_bar(self, bar: Bar) -> None:
@@ -438,6 +479,9 @@ class LiveEngine:
             session_bars=self.session_bars,
             leader_bars=self.leader_bars or None,
             flow_events=flow_events,
+            prior_day=self.prior_day,
+            overnight_high=self.overnight_high,
+            overnight_low=self.overnight_low,
             now=bar.ts,
             quality=quality,
         )
@@ -1016,6 +1060,17 @@ class LiveEngine:
         self._watch_shared_today = 0
         self._current_day = new_day
         self._tape_alerted = False
+        # yesterday changed at midnight: today's session must be measured
+        # against the day that just closed, not the one before it
+        if self.settings.massive_api_key:
+            try:
+                async with MassiveClient(self.settings) as client:
+                    await self._load_prior_day(client, new_day)
+                    session = await client.session(self.settings.primary_symbol, new_day)
+                    self.overnight_high = session.premarket_high
+                    self.overnight_low = session.premarket_low
+            except Exception:  # noqa: BLE001 - a level refresh never blocks a session
+                log.exception("reference level refresh failed at session roll")
         self._persist()
         await self._expire_subscribers()
         # a positive daily sign of life. Absence of signals is ambiguous —

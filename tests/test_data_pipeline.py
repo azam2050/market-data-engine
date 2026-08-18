@@ -7,6 +7,8 @@ other, and gaps nobody noticed.
 
 from datetime import date, datetime, timedelta
 
+import pytest
+
 from qqq_alpha.config import MARKET_TZ
 from qqq_alpha.data.quality import dedupe, fill_gaps, inspect_session
 from qqq_alpha.data.synthetic import synthetic_session
@@ -200,3 +202,116 @@ def test_transactions_survive_resampling():
 
 def _unused(_: timedelta) -> None:  # pragma: no cover
     return None
+
+
+# ------------------------------------------------------- reference levels
+def test_daily_bar_rolls_the_session_into_one_candle():
+    from datetime import date
+
+    from qqq_alpha.data.massive import TradingSession
+    from qqq_alpha.data.synthetic import synthetic_session
+
+    bars = synthetic_session("QQQ", date(2026, 3, 2), seed=7)
+    session = TradingSession(symbol="QQQ", day=date(2026, 3, 2), regular=bars)
+    daily = session.daily_bar
+
+    assert daily is not None
+    assert daily.open == bars[0].open
+    assert daily.close == bars[-1].close
+    assert daily.high == max(b.high for b in bars)
+    assert daily.low == min(b.low for b in bars)
+    assert daily.volume == sum(b.volume for b in bars)
+    assert TradingSession(symbol="QQQ", day=date(2026, 3, 2)).daily_bar is None
+
+
+@pytest.mark.asyncio
+async def test_live_engine_is_no_longer_blind_to_yesterday(tmp_path):
+    """The backtester always passed prior_day; the live engine never did, so
+    live ran without yesterday's high/low/close — and therefore without the
+    classic pivot, R1 and S1 — while its own backtest had them."""
+    from datetime import date, timedelta
+
+    from qqq_alpha.brain.decider import HeuristicDecider
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.config import Settings
+    from qqq_alpha.data.massive import TradingSession
+    from qqq_alpha.data.pricing import BlackScholesPricer
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.journal import Journal
+    from qqq_alpha.live.engine import LiveEngine
+    from qqq_alpha.live.notifier import NullNotifier
+
+    today = date(2026, 3, 3)  # a Tuesday
+    settings = Settings(
+        massive_api_key="k", journal_dir=tmp_path / "j", data_dir=tmp_path / "d",
+        shadow_symbols_csv="",
+    )
+    engine = LiveEngine(
+        settings=settings, decider=HeuristicDecider(settings),
+        pricer=BlackScholesPricer(), playbook=Playbook(),
+        journal=Journal(tmp_path / "j", session_tag="test"), notifier=NullNotifier(),
+    )
+
+    class _Client:
+        async def session(self, symbol, day):
+            return TradingSession(
+                symbol=symbol, day=day,
+                regular=synthetic_session("QQQ", day, seed=day.day),
+            )
+
+    await engine._load_prior_day(_Client(), today)
+    assert engine.prior_day is not None
+    yesterday = synthetic_session("QQQ", today - timedelta(days=1), seed=2)
+    assert engine.prior_day.high == max(b.high for b in yesterday)
+
+    engine.overnight_high, engine.overnight_low = 512.40, 508.10
+    engine.session_bars = synthetic_session("QQQ", today, seed=3)
+    snapshot = engine.builder.build(
+        session_bars=engine.session_bars,
+        prior_day=engine.prior_day,
+        overnight_high=engine.overnight_high,
+        overnight_low=engine.overnight_low,
+    )
+    for level in ("prior_high", "prior_low", "prior_close", "pivot", "r1", "s1"):
+        assert snapshot.levels.get(level) is not None, level
+    assert snapshot.levels["overnight_high"] == 512.40
+
+
+@pytest.mark.asyncio
+async def test_a_holiday_is_walked_past_when_looking_for_yesterday(tmp_path):
+    from datetime import date
+
+    from qqq_alpha.brain.decider import HeuristicDecider
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.config import Settings
+    from qqq_alpha.data.massive import TradingSession
+    from qqq_alpha.data.pricing import BlackScholesPricer
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.journal import Journal
+    from qqq_alpha.live.engine import LiveEngine
+    from qqq_alpha.live.notifier import NullNotifier
+
+    settings = Settings(
+        massive_api_key="k", journal_dir=tmp_path / "j", data_dir=tmp_path / "d",
+        shadow_symbols_csv="",
+    )
+    engine = LiveEngine(
+        settings=settings, decider=HeuristicDecider(settings),
+        pricer=BlackScholesPricer(), playbook=Playbook(),
+        journal=Journal(tmp_path / "j", session_tag="test"), notifier=NullNotifier(),
+    )
+    asked: list[date] = []
+
+    class _HolidayClient:
+        async def session(self, symbol, day):
+            asked.append(day)
+            # Thursday was a holiday: no bars at all
+            if day == date(2026, 3, 5):
+                return TradingSession(symbol=symbol, day=day)
+            return TradingSession(
+                symbol=symbol, day=day, regular=synthetic_session("QQQ", day, seed=5)
+            )
+
+    await engine._load_prior_day(_HolidayClient(), date(2026, 3, 6))  # Friday
+    assert asked == [date(2026, 3, 5), date(2026, 3, 4)]  # skipped the empty day
+    assert engine.prior_day is not None

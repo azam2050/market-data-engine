@@ -40,6 +40,29 @@ class TradingSession:
     def is_usable(self) -> bool:
         return bool(self.regular) and (self.quality is None or self.quality.is_usable)
 
+    @property
+    def daily_bar(self) -> Bar | None:
+        """The whole regular session rolled into one daily candle.
+
+        Yesterday's high, low and close are the levels every desk on the street
+        has drawn on its chart, and the classic pivot is computed from exactly
+        these three numbers. Rolling them up here — from the same minute bars
+        everything else uses — keeps them arithmetically consistent with the
+        intraday view rather than coming from a second, differently-adjusted
+        endpoint.
+        """
+        if not self.regular:
+            return None
+        return Bar(
+            symbol=self.symbol,
+            ts=self.regular[-1].ts,
+            open=self.regular[0].open,
+            high=max(b.high for b in self.regular),
+            low=min(b.low for b in self.regular),
+            close=self.regular[-1].close,
+            volume=sum(b.volume for b in self.regular),
+        )
+
 MAX_RETRIES = 4
 BACKOFF_BASE_SEC = 1.5
 

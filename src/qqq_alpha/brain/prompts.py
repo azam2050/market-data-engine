@@ -187,20 +187,28 @@ def _candle_table(bars: list, label: str) -> str:
     for a pattern that spans two or three adjacent candles, which is the whole
     reason these bars are here.
     """
-    lines = [
-        f"{label} ({len(bars)} candles)",
-        f"{'time':>5}  {'open':>8} {'high':>8} {'low':>8} {'close':>8}  {'body':>6}  {'volume':>10}",
-    ]
+    # average trade size separates one institution from a thousand retail
+    # clicks at identical volume. The provider ships the trade count on every
+    # bar and it was being thrown away.
+    has_counts = any(b.transactions for b in bars)
+    header = f"{'time':>5}  {'open':>8} {'high':>8} {'low':>8} {'close':>8}  {'body':>6}  {'volume':>10}"
+    if has_counts:
+        header += f"  {'avg_size':>8}"
+    lines = [f"{label} ({len(bars)} candles)", header]
     for bar in bars:
         span = bar.high - bar.low
         # share of the candle's range occupied by its body, signed by direction:
         # the one number that separates a decisive candle from a rejection wick
         body = ((bar.close - bar.open) / span * 100) if span > 0 else 0.0
-        lines.append(
+        row = (
             f"{bar.ts.astimezone(MARKET_TZ).strftime('%H:%M'):>5}  "
             f"{bar.open:>8.2f} {bar.high:>8.2f} {bar.low:>8.2f} {bar.close:>8.2f}  "
             f"{body:>+5.0f}%  {bar.volume:>10,}"
         )
+        if has_counts:
+            average = bar.volume / bar.transactions if bar.transactions else 0.0
+            row += f"  {average:>8.0f}"
+        lines.append(row)
     return "\n".join(lines)
 
 
@@ -273,9 +281,13 @@ def build_user_prompt(
             "volume arriving on one side — is evidence in its own right, and "
             "no indicator below carries it. `body` is the signed share of the "
             "candle's range taken by its body: +90% is a decisive candle, "
-            "±15% is indecision, and the sign is the direction. When price "
-            "action and an indicator disagree, price action is the more "
-            "recent fact.\n\n" + "\n\n".join(candles)
+            "±15% is indecision, and the sign is the direction. `avg_size` is "
+            "volume divided by the number of trades in that candle — the same "
+            "volume printed in far fewer, far larger trades is one participant "
+            "with size, not the crowd, and a spike in avg_size at a level is "
+            "worth more than the volume number alone. When price action and an "
+            "indicator disagree, price action is the more recent fact.\n\n"
+            + "\n\n".join(candles)
         )
 
     if snapshot.structure:
@@ -327,7 +339,14 @@ def build_user_prompt(
 
     if snapshot.flow:
         flow = snapshot.flow.model_dump(mode="json")
-        sections.append("=== INSTITUTIONAL OPTIONS FLOW ===\n" + _compact(flow))
+        sections.append(
+            "=== INSTITUTIONAL OPTIONS FLOW ===\n"
+            "`net_premium_0dte` is money betting on today; `net_premium_dated` "
+            "bought time, and a large dated flow against a small 0DTE flow is "
+            "more often a hedge or a position than a call on the next hour. "
+            "Weigh the 0DTE number for an intraday thesis and treat the dated "
+            "one as background.\n" + _compact(flow)
+        )
     else:
         sections.append(
             "=== INSTITUTIONAL OPTIONS FLOW ===\nUNAVAILABLE — no options tape on the current "

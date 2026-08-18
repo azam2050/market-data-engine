@@ -112,6 +112,11 @@ class FlowSummary(BaseModel):
     net_premium: float = 0.0
     call_put_ratio: float | None = None
     urgency: float = 0.0  # 0..1, how aggressive the tape is right now
+    # the same premium means opposite things depending on what it bought: a
+    # 0DTE sweep is a bet on the next hour, a dated one is very often a hedge
+    # or a position, and lumping them together hid the difference entirely
+    net_premium_0dte: float = 0.0
+    net_premium_dated: float = 0.0
     notable: list[FlowEvent] = Field(default_factory=list)
 
 

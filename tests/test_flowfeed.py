@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from qqq_alpha.config import Settings
+from qqq_alpha.config import MARKET_TZ, Settings
 from qqq_alpha.data.chain import ChainSnapshot, LiveChainPricer
 from qqq_alpha.data.massive import MassiveError
 from qqq_alpha.domain import FlowKind, OptionContract, OptionType
@@ -140,3 +140,36 @@ async def test_a_failed_poll_never_raises(settings, pricer):
     feed._fetch = broken_fetch
     assert await feed.poll(NOW, spot=702.0) == []
     assert not feed.disabled  # transient failure is not an entitlement problem
+
+
+def test_flow_separates_money_betting_on_today_from_money_buying_time():
+    """A 0DTE sweep is a call on the next hour; a dated one is very often a
+    hedge. Netting them together hid the difference completely."""
+    from datetime import UTC, date, datetime
+
+    from qqq_alpha.domain import FlowEvent, OptionType
+    from qqq_alpha.features.flow import summarize_flow
+
+    now = datetime(2026, 3, 2, 18, 0, tzinfo=UTC)  # 13:00 ET
+    today = now.astimezone(MARKET_TZ).date()
+
+    def event(expiry: date, option_type: OptionType, aggressor: str, premium: float):
+        return FlowEvent(
+            ts=now, occ_symbol="O:QQQ", underlying="QQQ", option_type=option_type,
+            strike=500.0, expiry=expiry, price=1.0,
+            size=int(premium / 100), premium=premium, aggressor=aggressor,
+        )
+
+    summary = summarize_flow(
+        [
+            event(today, OptionType.CALL, "BUY", 300_000),      # +300k on today
+            event(date(2026, 4, 17), OptionType.PUT, "BUY", 900_000),  # -900k dated
+        ],
+        now,
+    )
+
+    assert summary.net_premium_0dte == 300_000
+    assert summary.net_premium_dated == -900_000
+    # the blended number alone would read as heavily bearish, which is exactly
+    # the reading a large dated hedge should NOT produce for an intraday thesis
+    assert summary.net_premium == -600_000

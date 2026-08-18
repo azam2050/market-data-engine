@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+from qqq_alpha.config import MARKET_TZ
 from qqq_alpha.domain import FlowEvent, FlowKind, FlowSummary, OptionType
 
 BLOCK_PREMIUM_USD = 100_000.0
@@ -98,12 +99,18 @@ def summarize_flow(
         else:
             summary.put_premium += event.premium
         summary.net_premium += directional_premium
+        if event.expiry <= now.astimezone(MARKET_TZ).date():
+            summary.net_premium_0dte += directional_premium
+        else:
+            summary.net_premium_dated += directional_premium
 
         if event.kind is FlowKind.SWEEP:
             summary.sweep_count += 1
         elif event.kind is FlowKind.BLOCK:
             summary.block_count += 1
 
+    summary.net_premium_0dte = round(summary.net_premium_0dte, 2)
+    summary.net_premium_dated = round(summary.net_premium_dated, 2)
     summary.call_premium = round(summary.call_premium, 2)
     summary.put_premium = round(summary.put_premium, 2)
     summary.net_premium = round(summary.net_premium, 2)
