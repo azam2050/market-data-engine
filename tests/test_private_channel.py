@@ -354,7 +354,13 @@ async def test_preview_command_sends_terms_guide_and_sample_cards(tmp_path):
 async def test_channel_check_reports_admin_rights_and_missing_membership():
     """The operator could not tell a healthy channel from one the bot cannot
     post in — in both cases their phone just shows the text audit copy."""
-    state = {"status": "administrator", "can_post_messages": True}
+    state = {
+        "status": "administrator",
+        "can_post_messages": True,
+        "can_edit_messages": True,
+        "can_invite_users": True,
+        "can_restrict_members": True,
+    }
 
     def handler(request: httpx.Request) -> httpx.Response:
         method = request.url.path.rsplit("/", 1)[-1]
@@ -370,6 +376,25 @@ async def test_channel_check_reports_admin_rights_and_missing_membership():
         notifier = TelegramNotifier("token", "admin", client=client)
 
         assert "✅" in await notifier.check_channel(PRIVATE)
+
+        # posting alone is not enough: the living card needs edit rights, the
+        # invite links need invite rights, and expiry needs ban rights. A bot
+        # granted only "post" used to pass this check and then fail silently
+        # on every one of those, weeks later.
+        state.pop("can_edit_messages")
+        state.pop("can_restrict_members")
+        partial = await notifier.check_channel(PRIVATE)
+        assert partial.startswith("❌")
+        assert "البطاقة الحية" in partial
+        assert "إخراج المنتهية" in partial
+        # the public channel only ever posts, so the same bot passes there
+        assert (await notifier.check_channel(PRIVATE, full_rights=False)).startswith("✅")
+
+        state.clear()
+        state.update({"status": "member"})
+        as_member = await notifier.check_channel(PRIVATE)
+        assert "عضو وليس مشرفًا" in as_member
+        assert "إضافة مشرف" in as_member  # the fix, in the message itself
 
         state.clear()
         state.update({"status": "left"})

@@ -690,7 +690,12 @@ class LiveEngine:
                 lines.append(f"{label}: {verdict}")
             else:
                 try:
-                    verdict = await telegram.check_channel(str(chat_id))
+                    # the public channel only ever posts; the private one also
+                    # edits living cards, issues invite links and removes
+                    # expired subscribers, so it needs the full set
+                    verdict = await telegram.check_channel(
+                        str(chat_id), full_rights=(index == 0)
+                    )
                 except Exception as exc:  # noqa: BLE001 - diagnostics never block a start
                     log.exception("channel health check failed for %s", chat_id)
                     verdict = f"⚠️ تعذّر الفحص ({exc})"

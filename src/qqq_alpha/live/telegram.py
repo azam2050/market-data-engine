@@ -139,15 +139,28 @@ class TelegramNotifier:
             await asyncio.sleep(BASE_RETRY_SEC * (2**attempt))
         return None
 
-    async def check_channel(self, chat_id: str) -> str:
+    # every admin right this desk actually uses, and the feature that breaks
+    # without it. Checking only can_post_messages would let the operator fix
+    # "posting", see a green tick, and then discover weeks later that the
+    # living card never refreshed and expired subscribers were never removed.
+    CHANNEL_RIGHTS: tuple[tuple[str, str], ...] = (
+        ("can_post_messages", "نشر الرسائل (البطاقات نفسها)"),
+        ("can_edit_messages", "تعديل الرسائل (تحديث البطاقة الحية)"),
+        ("can_invite_users", "دعوة المستخدمين (روابط الاشتراك وقبول الطلبات)"),
+        ("can_restrict_members", "حظر المستخدمين (إخراج المنتهية اشتراكاتهم)"),
+    )
+
+    async def check_channel(self, chat_id: str, full_rights: bool = True) -> str:
         """Ask Telegram whether we can actually publish in a channel.
 
         Cards going to the operator's private chat instead of the subscribers'
         channel is indistinguishable, from the outside, from cards going
         nowhere: both look like "the bot messaged me". The operator had no way
         to tell which was happening. This asks Telegram directly — does the
-        chat exist under this id, is the bot a member, and is it allowed to
-        post — and returns one Arabic line for their phone.
+        chat exist under this id, is the bot an admin, and does it hold every
+        right the desk depends on — and returns one Arabic line for their
+        phone. ``full_rights`` is False for the public channel, which only
+        ever needs to post.
         """
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=20.0)
@@ -180,14 +193,31 @@ class TelegramNotifier:
 
         member = await call("getChatMember", {"chat_id": chat_id, "user_id": bot_id})
         status = (member or {}).get("status", "")
-        if status == "administrator":
-            can_post = (member or {}).get("can_post_messages", True)
-            if can_post:
-                return f"✅ {title} — البوت مشرف ويستطيع النشر"
-            return f"❌ {title} — البوت مشرف لكن بدون صلاحية النشر"
-        if status in {"member", "creator"}:
-            return f"⚠️ {title} — البوت عضو وليس مشرفًا؛ النشر في القنوات يتطلب صلاحية مشرف"
-        return f"❌ {title} — البوت ليس داخل القناة (الحالة: {status or 'غير معروفة'})"
+        if status not in {"administrator", "creator"}:
+            if status == "member":
+                return (
+                    f"⚠️ {title} — البوت عضو وليس مشرفًا. النشر في القنوات يتطلب "
+                    "صلاحية مشرف: افتح القناة ← اسم القناة ← المشرفون ← إضافة مشرف "
+                    "← اختر البوت"
+                )
+            return f"❌ {title} — البوت ليس داخل القناة (الحالة: {status or 'غير معروفة'})"
+
+        required = self.CHANNEL_RIGHTS if full_rights else self.CHANNEL_RIGHTS[:1]
+        # a creator holds everything implicitly; for an administrator Telegram
+        # omits a right it did not grant, so absent is treated as absent — not
+        # as a permissive default, which is how the old check passed a bot that
+        # could not post
+        missing = [
+            label
+            for key, label in required
+            if status == "administrator" and not (member or {}).get(key, False)
+        ]
+        if missing:
+            return (
+                f"❌ {title} — البوت مشرف لكن تنقصه صلاحيات:\n"
+                + "\n".join(f"      • {label}" for label in missing)
+            )
+        return f"✅ {title} — البوت مشرف بكل الصلاحيات المطلوبة"
 
     async def _edit_photo(
         self, chat_id: str, message_id: int, png: bytes, caption: str = ""
