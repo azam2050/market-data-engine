@@ -44,6 +44,9 @@ log = logging.getLogger(__name__)
 
 WARMUP_BARS = 30
 MISSED_LOOKAHEAD_MINUTES = 60
+# how many earlier sessions feed the hourly chart — the same number the
+# live engine loads, so both build the identical timeframe
+HISTORY_SESSIONS = 5
 
 
 @dataclass
@@ -110,7 +113,21 @@ class Backtester:
         result = BacktestResult(price_source_is_approximate=self.pricer.is_approximation)
         recent_trades: list[Trade] = []
 
-        for day in sorted(sessions):
+        ordered = sorted(sessions)
+        for position, day in enumerate(ordered):
+            # the replay already holds every earlier session, so the hourly
+            # chart and the leaders' prior closes cost nothing here. Passing
+            # them is what keeps the backtest measuring the SAME engine that
+            # runs live — a divergence in either direction makes the record a
+            # statement about a system nobody is running.
+            previous = ordered[max(0, position - HISTORY_SESSIONS) : position]
+            history = [bar for earlier in previous for bar in sessions[earlier]]
+            leader_prior_close: dict[str, float] = {}
+            if previous and leader_sessions:
+                for symbol, bars in (leader_sessions.get(previous[-1]) or {}).items():
+                    if bars:
+                        leader_prior_close[symbol] = bars[-1].close
+
             day_result = await self.run_day(
                 day=day,
                 session_bars=sessions[day],
@@ -118,6 +135,8 @@ class Backtester:
                 flow_events=(flow_sessions or {}).get(day),
                 prior_day=(prior_days or {}).get(day),
                 recent_trades=recent_trades,
+                history_bars=history,
+                leader_prior_close=leader_prior_close,
             )
             result.days.append(day_result)
             recent_trades.extend(day_result.trades)
@@ -141,6 +160,8 @@ class Backtester:
         flow_events: list[FlowEvent] | None = None,
         prior_day: Bar | None = None,
         recent_trades: list[Trade] | None = None,
+        history_bars: list[Bar] | None = None,
+        leader_prior_close: dict[str, float] | None = None,
     ) -> DayResult:
         result = DayResult(day=day)
         # inspect the day once; the verdict rides along with every snapshot so
@@ -180,6 +201,11 @@ class Backtester:
                 leader_bars=self._slice_leaders(leader_bars, now),
                 flow_events=[e for e in (flow_events or []) if e.ts <= now],
                 prior_day=prior_day,
+                # the replay reads regular-hours bars only, so the overnight
+                # range genuinely is not knowable here. Left absent rather
+                # than approximated from the session's own open.
+                leader_prior_close=leader_prior_close,
+                history_bars=history_bars,
                 now=now,
                 quality=quality,
             )
