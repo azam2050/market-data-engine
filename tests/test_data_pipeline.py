@@ -315,3 +315,22 @@ async def test_a_holiday_is_walked_past_when_looking_for_yesterday(tmp_path):
     await engine._load_prior_day(_HolidayClient(), date(2026, 3, 6))  # Friday
     assert asked == [date(2026, 3, 5), date(2026, 3, 4)]  # skipped the empty day
     assert engine.prior_day is not None
+
+
+def test_resample_refuses_a_partial_trade_count():
+    """A partial sum of trade counts would sit beside a complete volume total,
+    and the average-trade-size the brain reads would be inflated by exactly the
+    fraction of bars that were missing their count."""
+    start = datetime(2026, 3, 2, 14, 30, tzinfo=MARKET_TZ)
+    bars = [
+        Bar(symbol="QQQ", ts=start + timedelta(minutes=i), open=100, high=101,
+            low=99, close=100, volume=1000, transactions=(10 if i < 3 else None))
+        for i in range(5)
+    ]
+    rolled = resample(bars, 5)
+    assert len(rolled) == 1
+    assert rolled[0].volume == 5000
+    assert rolled[0].transactions is None  # not 30
+
+    complete = [b.model_copy(update={"transactions": 10}) for b in bars]
+    assert resample(complete, 5)[0].transactions == 50

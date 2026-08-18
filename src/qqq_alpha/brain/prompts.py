@@ -363,6 +363,17 @@ def build_user_prompt(
             "voting for a bottom — watch for the reversal instead of chasing the move "
             "down, and the reverse holds too. This is cumulative volume without "
             "aggressor side, so treat it as directional context, not confirmation.\n"
+            "`unusual_activity` lists strikes whose day volume exceeds their open "
+            "interest. Open interest is every contract that existed at the open, so "
+            "volume above it cannot all be traders closing what was already there — "
+            "most of it is NEW positioning, and a high vol_oi_ratio on a strike "
+            "nobody was holding is the shape of somebody starting something. It is "
+            "the only whale signal here that covers the WHOLE chain rather than the "
+            "strikes nearest the money, so it is where a desk quietly building an "
+            "out-of-the-money position becomes visible; `distance_pct` says how far "
+            "from spot that is. It carries no aggressor side, so it tells you "
+            "positioning is new, never which way it leans — pair it with the live "
+            "flow and with price before drawing a direction from it.\n"
             + _compact(options_pulse)
         )
 

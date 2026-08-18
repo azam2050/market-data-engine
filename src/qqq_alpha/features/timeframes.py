@@ -113,7 +113,12 @@ def resample(bars: list[Bar], minutes: int) -> list[Bar]:
             weight += b.volume
         vwap = round(weighted / weight, 4) if weight > 0 else None
 
-        transactions = [b.transactions for b in group if b.transactions is not None]
+        # only sum when EVERY bar in the bucket carries a count. A partial sum
+        # would sit next to a complete volume total, and the ratio the brain
+        # reads as "average trade size" would be inflated by exactly the
+        # fraction of bars that were missing their count.
+        counts = [b.transactions for b in group if b.transactions is not None]
+        transactions = counts if len(counts) == len(group) else []
 
         out.append(
             Bar(

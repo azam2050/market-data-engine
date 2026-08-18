@@ -796,11 +796,20 @@ class LiveEngine:
             chain_pulse(
                 self.settings.primary_symbol,
                 list(self.pricer.snapshot.contracts.values()),
+                spot=bar.close,
             )
             if self.pricer.snapshot is not None
             else None
         )
-        await self.pulse.refresh_leaders(bar.ts.astimezone(MARKET_TZ).date())
+        # each leader's last price, so its unusual strikes can be labelled with
+        # how far from the money they sit — a 6% OTM call bought in size reads
+        # very differently from one at the money
+        spots = {
+            symbol: bars[-1].close
+            for symbol, bars in self.leader_bars.items()
+            if bars
+        }
+        await self.pulse.refresh_leaders(bar.ts.astimezone(MARKET_TZ).date(), spots)
         rows = self.pulse.rows(primary)
         return rows or None
 

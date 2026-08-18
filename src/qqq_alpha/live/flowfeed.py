@@ -35,7 +35,12 @@ log = logging.getLogger(__name__)
 # a print below this premium is retail noise for an index option; letting it
 # into the totals would drown the institutional signal the summary exists for
 MIN_PRINT_PREMIUM_USD = 10_000.0
-CONTRACTS_PER_SIDE = 5
+# each contract costs one request per poll, so this is a real budget decision.
+# Five per side covered roughly ±1% on QQQ, which misses the strike a desk
+# reaches for when it wants cheap convexity. Eight widens that meaningfully for
+# six more requests a minute; anything genuinely far out of the money is caught
+# by the whole-chain unusual-activity scan in pulse.py, which costs nothing.
+CONTRACTS_PER_SIDE = 8
 WINDOW_MINUTES = 45
 FIRST_POLL_LOOKBACK_MIN = 15
 

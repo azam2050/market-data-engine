@@ -2,6 +2,8 @@
 
 from datetime import date
 
+import pytest
+
 from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.brain.prompts import build_user_prompt
 from qqq_alpha.data.pulse import chain_pulse, nearest_weekly_expiry
@@ -97,3 +99,60 @@ def test_prompt_omits_the_section_without_pulse_data():
     snapshot = SnapshotBuilder("QQQ").build(bars[:120])
     prompt = build_user_prompt(snapshot, Playbook(), options_pulse=None)
     assert "OPTIONS PULSE" not in prompt
+
+
+# ------------------------------------------------------ unusual activity
+def _c(strike: float, kind: str, volume: int, oi: int):
+    from datetime import date
+
+    from qqq_alpha.domain import OptionContract, OptionType
+
+    return OptionContract(
+        occ_symbol=f"O:QQQ260303{kind[0]}{int(strike):08d}",
+        underlying="QQQ", option_type=OptionType[kind], strike=strike,
+        expiry=date(2026, 3, 3), bid=1.0, ask=1.1, volume=volume, open_interest=oi,
+    )
+
+
+def test_unusual_activity_ranks_by_ratio_so_far_strikes_are_not_buried():
+    """The at-the-money strike always wins on raw volume, which is exactly why
+    a desk building an out-of-the-money position was invisible. Ranking by
+    volume-over-open-interest surfaces it."""
+    from qqq_alpha.data.pulse import unusual_activity
+
+    rows = unusual_activity(
+        [
+            _c(488, "CALL", 41_000, 52_000),  # huge volume, but OI is bigger: not new
+            _c(495, "CALL", 7_200, 410),      # small volume, 17x its OI: new
+            _c(489, "CALL", 9_000, 600),      # 15x
+            _c(470, "PUT", 2_000, 30_000),    # existing position being traded
+            _c(462, "PUT", 120, 10),          # 12x but far too thin to mean anything
+        ],
+        spot=487.5,
+    )
+
+    assert [r["strike"] for r in rows] == [495.0, 489.0]
+    assert rows[0]["vol_oi_ratio"] == pytest.approx(17.56, abs=0.01)
+    assert rows[0]["distance_pct"] == pytest.approx(1.54, abs=0.01)  # above spot
+    # the ATM strike and the closing trade are correctly excluded
+    assert all(r["strike"] not in (488.0, 470.0) for r in rows)
+
+
+def test_unusual_activity_marks_direction_of_distance():
+    from qqq_alpha.data.pulse import unusual_activity
+
+    rows = unusual_activity([_c(480, "PUT", 5_100, 900)], spot=487.5)
+    assert rows[0]["distance_pct"] < 0  # below spot
+    # without a spot the rows still render, just unlabelled
+    assert "distance_pct" not in unusual_activity([_c(480, "PUT", 5_100, 900)])[0]
+
+
+def test_chain_pulse_carries_unusual_activity_and_omits_it_when_empty():
+    from qqq_alpha.data.pulse import chain_pulse
+
+    busy = chain_pulse("QQQ", [_c(495, "CALL", 7_200, 410), _c(487, "PUT", 30_000, 44_000)],
+                       spot=487.5)
+    assert busy is not None and busy["unusual_activity"][0]["strike"] == 495.0
+
+    quiet = chain_pulse("QQQ", [_c(488, "CALL", 41_000, 52_000)], spot=487.5)
+    assert quiet is not None and "unusual_activity" not in quiet
