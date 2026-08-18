@@ -23,7 +23,7 @@ from qqq_alpha.brain.attention import AttentionEngine
 from qqq_alpha.brain.decider import Decider, next_expiry, occ_symbol
 from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.brain.rails import DayState, SafetyRails, infeasible
-from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, Settings
+from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, REGULAR_OPEN, Settings
 from qqq_alpha.data.calendar import todays_events
 from qqq_alpha.data.chain import LiveChainPricer
 from qqq_alpha.data.massive import MassiveClient
@@ -64,6 +64,10 @@ MISSED_LOOKAHEAD_MINUTES = 60
 # a lone bad bar is skipped and logged; this many in a row is not a glitch,
 # it is a broken engine that should stop loudly instead of trading blind
 MAX_CONSECUTIVE_BAR_FAILURES = 10
+# minute bars arrive every 60s during the session. Five quiet minutes is a
+# real outage, not a slow tick — long enough not to fire on a reconnect,
+# short enough that the operator hears about it while it still matters.
+TAPE_SILENCE_ALERT_SEC = 300
 
 
 @dataclass
@@ -152,6 +156,7 @@ class LiveEngine:
         )
         self._command_task: asyncio.Task | None = None
         self._dashboard_task: asyncio.Task | None = None
+        self._watchdog_task: asyncio.Task | None = None
         # "price of the day": where options money is concentrating, for QQQ and
         # the leaders — context even when the tape itself is quiet
         self.pulse = PulseTracker(self.settings)
@@ -187,6 +192,9 @@ class LiveEngine:
         # operator's only symptom was a dashboard that stopped updating. It
         # gets announced once per day now.
         self._breaker_announced: date | None = None
+        # whether a market-data outage is currently being reported, so the
+        # watchdog speaks on the edges instead of once a minute
+        self._tape_alerted = False
 
     # ------------------------------------------------------------------
     def _persist(self) -> None:
@@ -280,6 +288,8 @@ class LiveEngine:
                 "يُخرَجون تلقائيًا"
             )
         await self._report_channel_health()
+        # from here on, a market-data outage is announced instead of silent
+        self._watchdog_task = asyncio.create_task(self._watch_the_tape())
 
         await self._restore()
         await self._expire_subscribers()
@@ -578,6 +588,50 @@ class LiveEngine:
         self._watch_shared_today += 1
 
     # ------------------------------------------------------------------
+    async def _watch_the_tape(self) -> None:
+        """Notice when the bars stop arriving, and say so.
+
+        Every outage the engine can suffer while still running looks identical
+        from outside: no cards, no notes, nothing. The stream already
+        reconnects on its own with backoff, so a provider hiccup heals without
+        help — but a long one used to pass in complete silence, and silence is
+        the one thing an operator with paying subscribers cannot accept. This
+        loop watches the clock against the last bar during market hours and
+        reports both the outage and the recovery.
+        """
+        while True:
+            await asyncio.sleep(60)
+            with contextlib.suppress(Exception):
+                await self._tape_tick(datetime.now(MARKET_TZ))
+
+    async def _tape_tick(self, now: datetime) -> None:
+        """One watchdog evaluation. Alerts on the edges only — an outage is
+        announced once when it starts and once when it clears, never every
+        minute in between."""
+        in_session = now.weekday() < 5 and REGULAR_OPEN <= now.time() <= REGULAR_CLOSE
+        last_bar = self.status.last_bar_at
+        age = (
+            (now.astimezone(UTC) - last_bar).total_seconds()
+            if last_bar is not None
+            else None
+        )
+        if not in_session or age is None:
+            self._tape_alerted = False
+            return
+
+        if age >= TAPE_SILENCE_ALERT_SEC and not self._tape_alerted:
+            self._tape_alerted = True
+            await self.notifier.note(
+                f"⚠️ انقطاع في بيانات السوق — لم تصل أي شمعة منذ {age / 60:.0f} دقيقة\n"
+                f"محاولات إعادة الاتصال: {self.status.reconnects}\n"
+                "المحرك يعيد الاتصال تلقائيًا. لن يصدر أي طرح جديد حتى تعود "
+                "البيانات، والصفقات المفتوحة لا تُدار بدون أسعار."
+            )
+        elif age < TAPE_SILENCE_ALERT_SEC and self._tape_alerted:
+            self._tape_alerted = False
+            await self.notifier.note("✅ عادت بيانات السوق — المحرك يعمل بشكل طبيعي")
+
+    # ------------------------------------------------------------------
     async def _report_channel_health(self) -> None:
         """Tell the operator, at boot, where the cards will actually land.
 
@@ -866,8 +920,18 @@ class LiveEngine:
         self.status.open_positions = 0
         self._watch_shared_today = 0
         self._current_day = new_day
+        self._tape_alerted = False
         self._persist()
         await self._expire_subscribers()
+        # a positive daily sign of life. Absence of signals is ambiguous —
+        # a quiet market and a dead engine look the same — so the engine says
+        # good morning on its own every session, and a morning with no such
+        # message is itself the alarm.
+        await self.notifier.note(
+            f"🌅 جلسة {new_day.isoformat()} بدأت — المحرك متصل ويستقبل البيانات\n"
+            f"الشموع المستلمة حتى الآن: {self.status.bars_received} | "
+            f"إعادة الاتصال: {self.status.reconnects}"
+        )
         log.info("rolled into session %s", new_day)
 
     # ------------------------------------------------------------------
@@ -1209,6 +1273,12 @@ class LiveEngine:
             # the definitive answer to "is the bot posting to the channel or
             # only to me?" — permissions first, then a real card actually sent
             # to the private channel, and the delivery result reported back
+            from qqq_alpha.live import cards as _cards
+
+            # rendering seven cards is a few seconds of CPU: off the event
+            # loop, so an operator running فحص mid-session never delays a bar
+            _, card_report = await asyncio.to_thread(_cards.self_test)
+            await self.notifier.note(card_report)
             await self._report_channel_health()
             target = str(self.settings.telegram_private_channel_id or "")
             if not target:
@@ -1368,6 +1438,10 @@ class LiveEngine:
             raise
 
     async def _shutdown(self) -> None:
+        if self._watchdog_task is not None:
+            self._watchdog_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._watchdog_task
         if self._dashboard_task is not None:
             self._dashboard_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

@@ -261,6 +261,31 @@ async def _check_delivery(settings: Settings) -> CheckResult:
     return CheckResult("تلقرام", ok, message[:200])
 
 
+async def _check_cards(settings: Settings) -> CheckResult:
+    """Draw one of every card and verify every Arabic letter has a glyph.
+
+    The cards are the product a subscriber sees. They have failed in
+    production exactly once, and invisibly: a rebuild dropped libraqm, the
+    renderer fell back to presentation forms, the brand font was missing some
+    of them, and the cards shipped as rows of empty boxes until a human
+    noticed. Rendering happens in-process with no network, so there is no
+    excuse for not testing it on every boot.
+    """
+    def run() -> tuple[bool, str]:
+        from qqq_alpha.live import cards
+
+        return cards.self_test()
+
+    try:
+        ok, message = await asyncio.to_thread(run)
+    except Exception as exc:  # noqa: BLE001 - a broken renderer is a warning, not a crash
+        log.exception("card self-test raised")
+        return CheckResult("البطاقات", False, f"تعذّر تشغيل الفحص: {exc}"[:200])
+    # not fatal: text signals still go out, and stopping the desk over a
+    # drawing bug would be the more expensive failure
+    return CheckResult("البطاقات", ok, message.split("\n", 1)[-1][:200])
+
+
 async def run_preflight(settings: Settings, include_brain: bool = True) -> PreflightReport:
     """Run every startup check. Never raises — the report is the result."""
     report = PreflightReport(ran_at=datetime.now(MARKET_TZ))
@@ -280,6 +305,7 @@ async def run_preflight(settings: Settings, include_brain: bool = True) -> Prefl
     if include_brain:
         checks.append(_check_brain(settings))
     checks.append(_check_delivery(settings))
+    checks.append(_check_cards(settings))
 
     results = await asyncio.gather(*checks, return_exceptions=True)
     for result in results:

@@ -50,6 +50,30 @@ def create_app(
     def _ctx(**extra: Any) -> dict[str, Any]:
         return {"status": status, **extra}
 
+    @app.get("/health")
+    def health():
+        """Unauthenticated liveness probe — deliberately the one open route.
+
+        A process that has been killed cannot report that it was killed. The
+        only way to learn that the engine died is for something outside it to
+        notice, so this endpoint exists for an external uptime monitor to poll
+        every few minutes. It exposes no trades, no keys and no subscriber
+        data: just "this process is answering, and here is when it last saw a
+        bar".
+        """
+        from datetime import UTC, datetime
+
+        last_bar = getattr(status, "last_bar_at", None) if status else None
+        age = (datetime.now(UTC) - last_bar).total_seconds() if last_bar else None
+        return {
+            "ok": True,
+            "started_at": getattr(status, "started_at", None) if status else None,
+            "last_bar_at": last_bar,
+            "last_bar_age_sec": round(age) if age is not None else None,
+            "trades_today": getattr(status, "trades_today", None) if status else None,
+            "reconnects": getattr(status, "reconnects", None) if status else None,
+        }
+
     @app.get("/")
     def overview(request: Request, _: str = Depends(login)):
         counts = data.memory_counts(settings)

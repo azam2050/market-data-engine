@@ -102,3 +102,41 @@ def test_cards_survive_a_raqm_less_environment(monkeypatch):
         datetime(2026, 8, 14, 15, 49, tzinfo=UTC), level=732.5,
     )
     assert png.startswith(PNG_MAGIC)
+
+
+# ---------------------------------------------------------------- self-test
+def test_card_self_test_passes_on_the_shipped_configuration():
+    from qqq_alpha.live import cards
+
+    ok, message = cards.self_test()
+    assert ok, message
+    assert "سليم" in message
+
+
+def test_card_self_test_catches_the_tofu_regression(monkeypatch):
+    """The exact production failure: a rebuild loses libraqm, the renderer
+    falls back to presentation forms, and the brand font has no glyphs for
+    some of them. Nothing detected it — subscribers saw empty boxes. This
+    reproduces that build and asserts the self-test refuses it."""
+    from qqq_alpha.live import cards
+
+    monkeypatch.setattr(cards, "RAQM", False)
+    monkeypatch.setattr(cards, "_FAMILY", ("Tajawal-Regular.ttf", "Tajawal-Bold.ttf"))
+    monkeypatch.setattr(cards, "_fonts", {})
+
+    ok, message = cards.self_test()
+    assert not ok
+    assert "مربعات فارغة" in message
+    assert "U+FE" in message  # the presentation forms Tajawal does not carry
+
+
+def test_a_broken_renderer_is_reported_not_raised(monkeypatch):
+    from qqq_alpha.live import cards
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cards, "render_close_card", explode)
+    ok, message = cards.self_test()
+    assert not ok
+    assert "تعذّر الرسم" in message

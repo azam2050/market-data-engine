@@ -106,8 +106,17 @@ def _legacy_shape(text: str) -> str:
     return get_display(arabic_reshaper.reshape(text))
 
 
+# when a self-test is running, every string that goes to the canvas is recorded
+# here. It is the only way to check the *actual* vocabulary a card draws rather
+# than a guess at it — and guessing is what let 17 missing presentation forms
+# reach production as tofu boxes.
+_capture: list[str] | None = None
+
+
 def _rtl(draw: ImageDraw.ImageDraw, xy, text: str, font, fill, anchor: str) -> None:
     """Arabic (or mixed) text with proper shaping, RTL base direction."""
+    if _capture is not None:
+        _capture.append(text)
     if RAQM:
         draw.text(xy, text, font=font, fill=fill, anchor=anchor, direction="rtl", language="ar")
     else:
@@ -571,3 +580,134 @@ def render_watch_card(
             _font(22), MUTED, "mm",
         )
         return _png(img)
+
+
+# ---------------------------------------------------------------------------
+# Self-test — proof, on every boot, that the cards actually render in Arabic.
+# ---------------------------------------------------------------------------
+def _glyph_is_missing(font: ImageFont.FreeTypeFont, char: str) -> bool:
+    """True when the font has no glyph for this character.
+
+    FreeType silently substitutes .notdef for anything a font does not cover —
+    the empty box a subscriber reads as a broken product. Comparing a
+    character's rendered bitmap against the bitmap of a codepoint no font maps
+    detects that substitution directly, whatever shape .notdef happens to be
+    in the current font. It tests the real drawing path rather than trusting a
+    cmap table, which is the reason it will catch the next font regression too.
+    """
+    reference = font.getmask("", mode="L")  # private use area: never mapped
+    candidate = font.getmask(char, mode="L")
+    return (candidate.size, bytes(candidate)) == (reference.size, bytes(reference))
+
+
+def self_test() -> tuple[bool, str]:
+    """Render one of every card, then check every character actually drawn.
+
+    Returns (ok, Arabic report). This is the automated version of the failure
+    that shipped once already: a rebuild lost libraqm, the renderer fell back
+    to presentation forms, the brand font was missing 17 of them, and cards
+    went out as rows of tofu boxes. Nothing warned anyone — the operator saw it
+    on their phone. Now the engine sees it first, at boot, and says so.
+    """
+    global _capture
+
+    from datetime import date
+
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.domain import Action, Decision, OptionType, Target, TradeUpdate
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+    from qqq_alpha.trades import TradeManager
+
+    problems: list[str] = []
+    rendered = 0
+    _capture = []
+    try:
+        bars = synthetic_session("QQQ", date(2026, 8, 14), seed=15)
+        snapshot = SnapshotBuilder("QQQ").build(bars[:80])
+        decision = Decision(
+            ts=snapshot.ts,
+            action=Action.ENTER,
+            direction=OptionType.CALL,
+            occ_symbol="O:QQQ260814C00580000",
+            targets=[Target(label="T1", price=1.62, return_pct=50, take_pct=50)],
+            stop_price=0.72, stop_return_pct=-40, invalidation_level=578.40,
+            confidence=7, size_factor=0.5,
+            thesis="ارتداد من دعم مع ابتلاع صاعد وحجم مؤكد",
+            invalidation="كسر 578.40 يلغي الفكرة",
+            risks=["تقلب قبل بيانات التضخم"],
+        )
+        manager = TradeManager()
+        trade = manager.open_trade(decision, 1.08, snapshot)
+        live = TradeUpdate(
+            trade_id=trade.trade_id, ts=trade.opened_at, price=1.31,
+            return_pct=21.3, note="status: open",
+        )
+        win = TradeUpdate(
+            trade_id=trade.trade_id, ts=trade.opened_at, price=1.62,
+            return_pct=50.0, note="closed:trail_stop (+50.0%)",
+        )
+        loss = TradeUpdate(
+            trade_id=trade.trade_id, ts=trade.opened_at, price=0.72,
+            return_pct=-33.3, note="closed:stop_hit (-33.3%)",
+        )
+        trade.exit_reason = "trail_stop"
+
+        renders = [
+            ("بطاقة الطرح", lambda: render_entry_card(trade, False)),
+            ("البطاقة الحية", lambda: render_entry_card(trade, False, live=live)),
+            ("بطاقة تأمين النصف", lambda: render_scale_out_card(trade, live)),
+            ("بطاقة إغلاق رابح", lambda: render_close_card(trade, win)),
+            ("بطاقة إغلاق خاسر", lambda: render_close_card(trade, loss)),
+            ("بطاقة المراقبة", lambda: render_watch_card(
+                "QQQ", "صعود CALL", "اختراق 580.10 بحجم", 7, trade.opened_at, level=578.40
+            )),
+            ("التقرير اليومي", lambda: render_daily_report_card(
+                date(2026, 8, 14),
+                [{"label": "QQQ 580 CALL", "return_pct": 50.0, "shared": True},
+                 {"label": "QQQ 578 PUT", "return_pct": -33.3, "shared": False}],
+            )),
+        ]
+        for label, render in renders:
+            try:
+                png = render()
+                if not png:
+                    problems.append(f"{label}: خرجت فارغة")
+                else:
+                    rendered += 1
+            except Exception as exc:  # noqa: BLE001 - collect, do not abort
+                log.exception("card self-test failed on %s", label)
+                problems.append(f"{label}: تعذّر الرسم ({exc})")
+
+        vocabulary = "".join(_capture)
+    finally:
+        _capture = None
+
+    # every character that reached the canvas, shaped exactly as the live draw
+    # path shapes it, checked against the regular and bold faces we ship
+    drawn = vocabulary if RAQM else _legacy_shape(vocabulary)
+    missing: set[str] = set()
+    for bold in (False, True):
+        font = _font(40, bold=bold)
+        for char in set(drawn):
+            if char.isspace() or char in missing:
+                continue
+            if _glyph_is_missing(font, char):
+                missing.add(char)
+    if missing:
+        codes = " ".join(f"U+{ord(c):04X}" for c in sorted(missing)[:8])
+        problems.append(
+            f"{len(missing)} حرفًا بلا شكل في الخط — ستظهر مربعات فارغة ({codes})"
+        )
+
+    engine = "libraqm" if RAQM else "الوضع الاحتياطي"
+    family = _FAMILY[0].split("-")[0]
+    if problems:
+        return False, (
+            "❌ فحص البطاقات فشل\n"
+            f"الخط: {family} | التشكيل: {engine}\n" + "\n".join(f"• {p}" for p in problems)
+        )
+    return True, (
+        f"✅ فحص البطاقات سليم — {rendered} بطاقة رُسمت، "
+        f"و{len(set(drawn)) - 1} حرفًا عربيًا كلها لها أشكال\n"
+        f"الخط: {family} | التشكيل: {engine}"
+    )

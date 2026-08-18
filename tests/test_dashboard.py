@@ -228,3 +228,26 @@ def test_classify_entry_flags_a_playbook_override():
 
 def test_classify_entry_is_silent_without_an_override():
     assert classify_entry({"decision": {"overrides": []}}) is None
+
+
+def test_health_is_open_and_leaks_nothing(tmp_path):
+    """The one unauthenticated route: an external uptime monitor must be able
+    to poll it, because a process that has been killed cannot report that it
+    was killed. It carries liveness only — no trades, no keys, no subscribers."""
+    from datetime import UTC, datetime, timedelta
+
+    from qqq_alpha.live.engine import LiveStatus
+
+    status = LiveStatus()
+    status.started_at = datetime.now(UTC) - timedelta(hours=2)
+    status.last_bar_at = datetime.now(UTC) - timedelta(seconds=90)
+    client = TestClient(create_app(_settings(tmp_path), status=status))
+
+    response = client.get("/health")  # deliberately no auth
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert 80 <= body["last_bar_age_sec"] <= 100
+    assert set(body) == {
+        "ok", "started_at", "last_bar_at", "last_bar_age_sec", "trades_today", "reconnects"
+    }
