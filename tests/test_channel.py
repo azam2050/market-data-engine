@@ -147,17 +147,31 @@ async def test_daily_report_falls_back_to_tagged_text_when_photos_fail():
 
 @pytest.mark.asyncio
 async def test_education_series_cycles_without_repeating_adjacent_slots():
-    posts, transport = _recorder()
-    async with httpx.AsyncClient(transport=transport) as client:
+    captions: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # the lesson now travels as a card; its title rides in the caption
+        body = request.content.decode("utf-8", errors="ignore")
+        captions.append(body)
+        return httpx.Response(200, json={"ok": True})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         publisher = ChannelPublisher("token", "@chan", client=client)
         tuesday, thursday = date(2026, 3, 3), date(2026, 3, 5)
         await publisher.post_education(tuesday)
         await publisher.post_education(thursday)
         await publisher.post_education(tuesday + timedelta(weeks=1))
 
-    assert len(posts["texts"]) == 3
-    assert len(set(posts["texts"])) == 3  # three different lessons
-    assert all("سلسلة حماية رأس المال" in t for t in posts["texts"])
+    titles = [
+        next(
+            (line for line in body.splitlines() if "سلسلة حماية رأس المال" in line),
+            "",
+        )
+        for body in captions
+    ]
+    assert len(titles) == 3
+    assert len(set(titles)) == 3  # three different lessons
+    assert all(t for t in titles)
     assert len(EDUCATION_SERIES) >= 6
 
 
@@ -342,3 +356,70 @@ def test_the_statement_goes_out_after_the_months_last_weekday():
     # a month ending at the weekend: the last Friday carries the statement
     assert LiveEngine._is_last_session_of_month(date(2026, 10, 30))
     assert not LiveEngine._is_last_session_of_month(date(2026, 10, 31))  # Saturday
+
+
+# ---------------------------------------------------------------- follow-ups
+@pytest.mark.asyncio
+async def test_a_reached_level_goes_out_as_a_card_not_a_line_of_text():
+    """The moment a level we named in advance is hit is the most engaging beat
+    in the lifecycle — it used to be the only one rendered as plain text,
+    sandwiched between two cards."""
+    from qqq_alpha.domain import TradeUpdate
+
+    posts, transport = _recorder()
+    trade = _trade(shared=True)
+    update = TradeUpdate(
+        trade_id=trade.trade_id, ts=trade.opened_at + timedelta(minutes=9),
+        price=1.55, return_pct=55.0, note="target:T1 reached (+50%)",
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        publisher = ChannelPublisher("token", "@chan", client=client)
+        await publisher.post_trade_update(trade, update, delayed=False)
+
+    assert posts["photos"] == 1
+    assert posts["texts"] == []
+
+
+@pytest.mark.asyncio
+async def test_the_education_series_goes_out_as_a_card():
+    posts, transport = _recorder()
+    async with httpx.AsyncClient(transport=transport) as client:
+        publisher = ChannelPublisher("token", "@chan", client=client)
+        await publisher.post_education(date(2026, 3, 3))
+
+    assert posts["photos"] == 1
+    assert posts["texts"] == []  # no wall of text beside the card
+
+
+@pytest.mark.asyncio
+async def test_education_falls_back_to_the_full_text_when_the_photo_fails():
+    """The lesson is the content; losing its styling is acceptable, losing the
+    lesson is not."""
+    posts = {"texts": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("sendPhoto"):
+            return httpx.Response(400, json={"ok": False})
+        posts["texts"].append(json.loads(request.content).get("text", ""))
+        return httpx.Response(200, json={"ok": True})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        publisher = ChannelPublisher("token", "@chan", client=client)
+        await publisher.post_education(date(2026, 3, 3))
+
+    assert "سلسلة حماية رأس المال" in posts["texts"][0]
+    assert "القاعدة" in posts["texts"][0]
+
+
+def test_education_card_parses_title_body_and_rule():
+    from io import BytesIO
+
+    from PIL import Image
+
+    from qqq_alpha.live.cards import render_education_card
+
+    for lesson in EDUCATION_SERIES:
+        png = render_education_card(lesson)
+        assert png.startswith(b"\x89PNG")
+        # each card sizes itself to its own text rather than clipping it
+        assert Image.open(BytesIO(png)).height > 600

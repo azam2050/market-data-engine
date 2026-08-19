@@ -206,8 +206,11 @@ class ChannelPublisher:
             png = BroadcastNotifier._render_card("scale_out", trade, update, delayed)
             caption = "🔓 متابعة الطرح الحي: تم تأمين التكلفة — بيع نصف الكمية آليًا"
         elif update.note.startswith("target:"):
-            png = None
-            caption = ""
+            png = BroadcastNotifier._render_card("target", trade, update, delayed)
+            caption = (
+                f"🔓 متابعة الطرح الحي: مستوى المتابعة تحقق عند "
+                f"{update.return_pct:+.1f}% — الطرح ما زال مفتوحًا"
+            )
         else:
             return  # anything unrecognised stays out of the channel
 
@@ -379,6 +382,8 @@ class ChannelPublisher:
                 return cards.render_weekly_report_card(
                     kwargs["stats"], kwargs["channel_rows"]
                 )
+            if kind == "education":
+                return cards.render_education_card(kwargs["lesson"])
             if kind == "monthly":
                 return cards.render_monthly_report_card(
                     kwargs["month"], kwargs["stats"],
@@ -395,7 +400,11 @@ class ChannelPublisher:
         year, week, weekday = day.isocalendar()
         slot = 0 if weekday <= 2 else 1
         index = ((year * 53 + week) * 2 + slot) % len(EDUCATION_SERIES)
-        await self.post_text(EDUCATION_SERIES[index] + f"\n\n⚠️ {DISCLAIMER}")
+        lesson = EDUCATION_SERIES[index]
+        png = self._render_report("education", lesson=lesson)
+        await self._post_card(
+            png, lesson.split("\n", 1)[0], lesson + f"\n\n⚠️ {DISCLAIMER}"
+        )
 
     async def aclose(self) -> None:
         await self._notifier.aclose()

@@ -755,6 +755,8 @@ class BroadcastNotifier(TelegramNotifier):
                 return cards.render_entry_card(trade, delayed, live=update)
             if kind == "scale_out" and update is not None:
                 return cards.render_scale_out_card(trade, update)
+            if kind == "target" and update is not None:
+                return cards.render_update_card(trade, update)
             if kind == "close" and update is not None:
                 return cards.render_close_card(trade, update)
         except Exception:  # noqa: BLE001 - a drawing bug must never cost a signal
@@ -824,6 +826,10 @@ class BroadcastNotifier(TelegramNotifier):
             self._live_cards.pop(trade.trade_id, None)
         elif update.note.startswith("scale_out"):
             card = self._render_card("scale_out", trade, update, delayed)
+        elif update.note.startswith("target:"):
+            # the level we named in advance just got hit — the most engaging
+            # beat in the lifecycle, and it used to go out as a line of text
+            card = self._render_card("target", trade, update, delayed)
         noteworthy = update.note.startswith(("closed:", "target:", "scale_out"))
         await self._broadcast(
             format_update(trade, update, delayed), silent=not noteworthy, card=card

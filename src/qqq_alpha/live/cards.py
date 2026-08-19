@@ -212,8 +212,17 @@ def _chip(draw: ImageDraw.ImageDraw, center_x: float, y: int, text: str, color: 
     _rtl(draw, (center_x, y), text, font, color, "mm")
 
 
-def _footer(draw: ImageDraw.ImageDraw, when: datetime, delayed: bool, note: str = "") -> None:
-    y = H - 128
+def _footer(
+    draw: ImageDraw.ImageDraw,
+    when: datetime,
+    delayed: bool,
+    note: str = "",
+    height: int = H,
+) -> None:
+    """``height`` for cards that size themselves to their content — pinning the
+    footer to the module's default canvas height silently overlapped it with
+    the last panel the moment a card grew."""
+    y = height - 128
     if note:
         _rtl(draw, (W / 2, y), note, _font(26), MUTED, "mm")
         y += 38
@@ -348,6 +357,150 @@ def render_scale_out_card(trade: Trade, update: TradeUpdate) -> bytes:
         y += 44
 
     _footer(draw, update.ts, delayed=False)
+    return _png(img)
+
+
+def render_update_card(trade: Trade, update: TradeUpdate) -> bytes:
+    """A watch level was reached while the study is still open.
+
+    This moment used to go out as a line of text between two cards — the one
+    beat in the whole lifecycle where a follower is most engaged (the level we
+    named in advance just got hit) and it looked like a log entry. It is the
+    same event as any other stage, so it gets the same card.
+    """
+    targets = trade.decision.targets[:3]
+    note = (
+        f"مضى على الطرح {int((update.ts - trade.opened_at).total_seconds() // 60)} دقيقة "
+        "— لم يُغلق بعد. الإدارة الآلية مستمرة: النصف مؤمَّن والباقي بوقف متحرك من القمة"
+    )
+    probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    note_lines = _wrap(probe, note, _font(28, bold=True), W - 2 * MARGIN - 60)[:2]
+    # sized to its content: the targets panel is optional and the note wraps,
+    # so a fixed canvas would either clip them or leave a hole
+    height = (
+        226 + 360 + (84 + 4 * 60 + 24)
+        + ((84 + len(targets) * 60 + 24) if targets else 0)
+        + len(note_lines) * 42 + 190
+    )
+
+    with _stage("live"):
+        img, draw = _canvas(height)
+        y = _header(draw, "متابعة حية: مستوى متابعة تحقق")
+
+        _panel(draw, (MARGIN, y, W - MARGIN, y + 330), outline=GREEN)
+        _rtl(draw, (W / 2, y + 78), "الطرح ما زال مفتوحًا", _font(58, bold=True), GREEN, "mm")
+        draw.text(
+            (W / 2, y + 180), f"{update.return_pct:+.1f}%", font=_font(96, bold=True),
+            fill=GREEN if update.return_pct > 0 else RED, anchor="mm",
+        )
+        # the note carries which level, e.g. "target:T1 reached (+50%)"
+        label = update.note.split(":", 1)[-1].split(" reached")[0].strip() or "T1"
+        _chip(draw, W / 2, y + 272, f"مستوى المتابعة {label} تحقق", GOLD)
+        y += 360
+
+        row_y, y = _titled_panel(draw, y, "التفاصيل", 4)
+        _row(draw, row_y, "العقد", human_contract(trade.occ_symbol, trade.opened_at), TEXT)
+        _row(draw, row_y + 60, "سعر الطرح", f"${trade.entry_price:.2f}", MUTED)
+        _row(draw, row_y + 120, "السعر الآن", f"${update.price:.2f}", GREEN)
+        _row(draw, row_y + 180, "أقصى ربح وصله", f"{trade.max_favorable_pct:+.1f}%", GOLD)
+
+        # what a follower actually wants while a study is still running: which
+        # levels are already behind us and which are still ahead
+        if targets:
+            row_y, y = _titled_panel(draw, y, "مستويات المتابعة", len(targets))
+            for index, target in enumerate(targets, start=1):
+                done = trade.max_favorable_pct >= target.return_pct
+                _row(
+                    draw, row_y,
+                    f"المستوى {index} (+{target.return_pct:.0f}%)",
+                    "تحقق" if done else "لم يتحقق",
+                    GREEN if done else MUTED,
+                    value_rtl=True,
+                )
+                row_y += 60
+        y += 16
+        for line in note_lines:
+            _rtl(draw, (W / 2, y), line, _font(28, bold=True), TEXT, "mm")
+            y += 42
+
+        _footer(draw, update.ts, delayed=False, height=height)
+        return _png(img)
+
+
+# ---------------------------------------------------------------- education
+def render_education_card(lesson: str) -> bytes:
+    """One lesson from the capital-preservation series, as a card.
+
+    The series was going out as a wall of text indistinguishable from a pinned
+    notice — which is a strange way to present the content that is supposed to
+    justify the channel existing. The text is parsed rather than re-authored:
+    first line is the title, the closing "القاعدة:" line is the takeaway, and
+    everything between is the body.
+    """
+    parts = [block.strip() for block in lesson.strip().split("\n\n") if block.strip()]
+    title = parts[0] if parts else "سلسلة حماية رأس المال"
+    rule = ""
+    body_parts = parts[1:]
+    if body_parts and body_parts[-1].startswith("القاعدة"):
+        rule = body_parts.pop()
+    body = " ".join(body_parts)
+
+    # the series number sits in the title as (١) — pull it out for the chip
+    chip = "سلسلة حماية رأس المال"
+    heading = title
+    if "—" in title:
+        left, right = title.split("—", 1)
+        chip = left.replace("📚", "").strip() or chip
+        heading = right.strip()
+
+    img = draw = None
+    with _stage(None):
+        # measure first: the body length decides the card's height, so a long
+        # lesson is never clipped and a short one carries no dead space
+        probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+        heading_lines = _wrap(probe, heading, _font(44, bold=True), W - 2 * MARGIN - 80)
+        body_lines = _wrap(probe, body, _font(30), W - 2 * MARGIN - 80)
+        rule_lines = _wrap(probe, rule, _font(32, bold=True), W - 2 * MARGIN - 120) if rule else []
+
+        height = (
+            226 + 100 + len(heading_lines) * 60 + 30
+            + len(body_lines) * 48 + 40
+            + (len(rule_lines) * 46 + 70 if rule_lines else 0)
+            + 170
+        )
+        img, draw = _canvas(height)
+        y = _header(draw, "محتوى تعليمي")
+
+        _chip(draw, W / 2, y + 34, chip, GOLD)
+        y += 90
+        for line in heading_lines:
+            _rtl(draw, (W / 2, y + 26), line, _font(44, bold=True), TEXT, "mm")
+            y += 60
+        y += 20
+
+        _panel(draw, (MARGIN, y, W - MARGIN, y + len(body_lines) * 48 + 40))
+        y += 34
+        for line in body_lines:
+            _rtl(draw, (W - MARGIN - 40, y), line, _font(30), TEXT, "rm")
+            y += 48
+        y += 30
+
+        if rule_lines:
+            box_height = len(rule_lines) * 46 + 48
+            draw.rounded_rectangle(
+                (MARGIN, y, W - MARGIN, y + box_height), radius=22, outline=GOLD, width=3
+            )
+            y += 40
+            for line in rule_lines:
+                _rtl(draw, (W / 2, y), line, _font(32, bold=True), GOLD, "mm")
+                y += 46
+            y += 30
+
+    _rtl(
+        draw, (W / 2, height - 92),
+        "محتوى تعليمي وليس توصية استثمارية — الخيارات عالية المخاطر والقرار مسؤوليتك",
+        _font(24), MUTED, "mm",
+    )
     return _png(img)
 
 
@@ -895,6 +1048,14 @@ def render_watch_card(
 # ---------------------------------------------------------------------------
 # Self-test — proof, on every boot, that the cards actually render in Arabic.
 # ---------------------------------------------------------------------------
+_SAMPLE_LESSON = (
+    "📚 سلسلة حماية رأس المال (١) — لماذا نبيع النصف عند +35%؟\n\n"
+    "أخطر لحظة في أي صفقة رابحة هي لحظة الطمع: الورقة خضراء، والنفس تقول "
+    "\"خلها تكمل\". نظامنا لا يتفاوض مع هذه اللحظة — عند +35% يبيع نصف الكمية آليًا.\n\n"
+    "القاعدة: أمِّن بقاءك أولًا، ثم اسمح لنفسك بالحلم."
+)
+
+
 def _sample_stats():
     """Stand-in period statistics for the self-test and the operator preview."""
     from qqq_alpha.live.review import ReviewStats
@@ -966,6 +1127,10 @@ def self_test() -> tuple[bool, str]:
             trade_id=trade.trade_id, ts=trade.opened_at, price=1.62,
             return_pct=50.0, note="closed:trail_stop (+50.0%)",
         )
+        target = TradeUpdate(
+            trade_id=trade.trade_id, ts=trade.opened_at, price=1.62,
+            return_pct=50.0, note="target:T1 reached (+50%)",
+        )
         loss = TradeUpdate(
             trade_id=trade.trade_id, ts=trade.opened_at, price=0.72,
             return_pct=-33.3, note="closed:stop_hit (-33.3%)",
@@ -976,6 +1141,8 @@ def self_test() -> tuple[bool, str]:
             ("بطاقة الطرح", lambda: render_entry_card(trade, False)),
             ("البطاقة الحية", lambda: render_entry_card(trade, False, live=live)),
             ("بطاقة تأمين النصف", lambda: render_scale_out_card(trade, live)),
+            ("بطاقة المتابعة", lambda: render_update_card(trade, target)),
+            ("بطاقة تعليمية", lambda: render_education_card(_SAMPLE_LESSON)),
             ("بطاقة إغلاق رابح", lambda: render_close_card(trade, win)),
             ("بطاقة إغلاق خاسر", lambda: render_close_card(trade, loss)),
             ("بطاقة المراقبة", lambda: render_watch_card(

@@ -1625,6 +1625,18 @@ class LiveEngine:
                     "🔴 نموذج: إغلاق خاسر", cards.render_close_card(trade2, close2)
                 ))
 
+            follow_up = TradeUpdate(
+                ts=trade.opened_at + timedelta(minutes=14), price=2.68,
+                return_pct=49.7, note="target:T1 reached (+50%)",
+            )
+            samples.append((
+                "🟢 نموذج: بطاقة المتابعة (مستوى تحقق)",
+                cards.render_update_card(trade, follow_up),
+            ))
+            samples.append((
+                "📚 نموذج: البطاقة التعليمية",
+                cards.render_education_card(cards._SAMPLE_LESSON),
+            ))
             samples.append((
                 "📄 نموذج: التقرير اليومي",
                 cards.render_daily_report_card(
