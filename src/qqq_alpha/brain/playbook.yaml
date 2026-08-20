@@ -9,7 +9,7 @@
 #
 # version is bumped by the learning loop, never by hand.
 # =============================================================================
-version: 7
+version: 8
 updated: "2026-08-15"
 notes: >
   Seed playbook plus live-evidence entries. 2026-08-06 (missed V-reversal, then
@@ -21,7 +21,11 @@ notes: >
   all day while every shallow failed bounce — the actual entry — went untaken.
   (v4 was the operator-approved lesson L002.) v7 adds QUOTA_IS_NOT_A_SIGNAL
   after the operator observed second trades that read as obligation rather
-  than conviction (2026-08-13's -41.7% second entry).
+  than conviction (2026-08-13's -41.7% second entry). v8 widens the daily
+  cap to three and restates that rule for it: on 2026-08-19 the cap was
+  full at 10:29 because a losing trade had spent the second slot, so when
+  the brain's own declared CALL level came in during the afternoon rally it
+  was never woken to judge it.
 
 mission: >
   Find asymmetric intraday setups on QQQ options where a realistic move in the
@@ -178,19 +182,22 @@ caution:
   - id: QUOTA_IS_NOT_A_SIGNAL
     condition: >
       Considering an ENTER whose honest main driver is that trade slots remain
-      for the day — especially the second trade after the first has closed
+      for the day — any entry after the first, and most of all the last slot
     note: >
-      The daily cap is a ceiling, not a quota, and an unused second slot is not
-      a missed opportunity. Evidence 2026-08-13: after the day's first trade
+      The daily cap is a ceiling, not a quota, and an unused slot is not a
+      missed opportunity. Evidence 2026-08-13: after the day's first trade
       banked +65%, the second entry leaned on counter-rule pressure without a
       fresh failed-bounce structure and lost -41.7%. The counter-rules in
       PERFECT_ENTRY_TRAP and EXHAUSTED_EXTREME_ENTRY exist to stop
       perfect-entry paralysis DURING an aligned trend — they never mean "you
       owe the day a trade", and they reset once a trade has been taken: after
-      any completed trade, a second entry must qualify from zero on its own
-      evidence, exactly as if it were the first of the day. A one-trade day —
-      or ending the day flat after a win or a loss — is a fully professional
-      outcome.
+      any completed trade, every further entry must qualify from zero on its
+      own evidence, exactly as if it were the first of the day. A one-trade
+      day — or ending the day flat after a win or a loss — is a fully
+      professional outcome. The cap was widened in 2026-08 so that a genuine
+      third setup is not turned away by arithmetic; that is a wider door, not
+      a longer to-do list, and the honest test is unchanged: would you take
+      this trade if it were the only one you were allowed all week?
 
 # ---------------------------------------------------------------------------
 # Contract selection preferences.

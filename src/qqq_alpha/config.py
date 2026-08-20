@@ -60,7 +60,11 @@ class Settings(BaseSettings):
     shadow_max_brain_calls_per_day: int = 3
 
     # operating limits — soft by design, see brain/rails.py
-    max_trades_per_day: int = 2
+    # three chances a day, never three obligations. The cap that actually
+    # governs risk is max_open_positions: one trade at a time, so a further
+    # slot only opens once the desk is flat, and the circuit breaker still
+    # closes the day on real damage regardless of slots left.
+    max_trades_per_day: int = 3
     max_open_positions: int = 1
     daily_loss_circuit_breaker_pct: float = 25.0
     min_target_return_pct: float = 50.0

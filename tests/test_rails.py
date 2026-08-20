@@ -40,9 +40,41 @@ def test_rails_block_stale_data(settings, snapshot):
 
 def test_rails_block_daily_trade_cap(settings, snapshot):
     snapshot.data_age_sec = 5
-    verdict = SafetyRails(settings).pre_check(snapshot, DayState(trades_taken=2))
+    at_cap = DayState(trades_taken=settings.max_trades_per_day)
+    verdict = SafetyRails(settings).pre_check(snapshot, at_cap)
     assert not verdict.allowed
     assert any(b.startswith("daily_trade_cap") for b in verdict.blocks)
+
+
+def test_a_third_setup_is_not_turned_away_by_arithmetic(settings, snapshot):
+    """2026-08-19: the cap was full at 10:29 because a losing trade had spent
+    the second slot, so the afternoon rally — which met the brain's own
+    declared CALL level — never reached a wake at all."""
+    snapshot.data_age_sec = 5
+    verdict = SafetyRails(settings).pre_check(snapshot, DayState(trades_taken=2))
+    assert verdict.allowed, verdict.blocks
+
+
+def test_a_further_slot_stays_shut_while_a_trade_is_live(settings, snapshot):
+    """Three chances a day, one at a time. The position cap is the real
+    governor: a spare slot must never mean a second position."""
+    snapshot.data_age_sec = 5
+    verdict = SafetyRails(settings).pre_check(
+        snapshot, DayState(trades_taken=1, open_positions=1)
+    )
+    assert not verdict.allowed
+    assert any(b.startswith("position_cap") for b in verdict.blocks)
+
+
+def test_the_breaker_still_closes_the_day_with_slots_to_spare(settings, snapshot):
+    """A wider cap must not widen the damage: real losses end the day whatever
+    the slot count says."""
+    snapshot.data_age_sec = 5
+    verdict = SafetyRails(settings).pre_check(
+        snapshot, DayState(trades_taken=1, realized_risk_pct=-30)
+    )
+    assert not verdict.allowed
+    assert any(b.startswith("circuit_breaker") for b in verdict.blocks)
 
 
 def test_rails_block_circuit_breaker(settings, snapshot):
