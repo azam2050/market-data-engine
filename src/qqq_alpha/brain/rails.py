@@ -1,10 +1,14 @@
 """Safety rails.
 
-Only two kinds of rule are allowed to live here:
+Only three kinds of rule are allowed to live here:
 
 1. **Execution feasibility** — the trade physically cannot be taken or filled
    sensibly (no data, market closed, dead contract).
 2. **Capital protection** — hard stops on how much damage one day can do.
+3. **Self-consistency** — the brain does not get to contradict, minutes later,
+   a numeric condition it put in writing (see ``commitment_check`` and
+   ``brain/commitments.py``). This one judges the brain against itself, never
+   against a view of the market, which is why it is allowed here at all.
 
 Nothing about *market opinion* belongs in this file. Whether a setup is good is
 the brain's judgement. Confusing the two is what turns a trading system into a
@@ -19,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import time
 
+from qqq_alpha.brain import commitments
 from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, REGULAR_OPEN, Settings
 from qqq_alpha.domain import (
     Action,
@@ -191,6 +196,30 @@ class SafetyRails:
             )
 
         return RailVerdict(allowed=not blocks, blocks=blocks, warnings=warnings)
+
+    # ------------------------------------------------------------------
+    def commitment_check(
+        self,
+        decision: Decision,
+        snapshot: MarketSnapshot,
+        prior_decisions: list[Decision],
+    ) -> RailVerdict:
+        """Hold the brain to the numeric trigger it declared. See brain/commitments.py.
+
+        This is not a market opinion — the rail forms no view on whether the
+        level was the right one. It only refuses an entry that contradicts, by
+        minutes, a condition the brain itself put in writing.
+        """
+        block = commitments.check(
+            decision, snapshot, prior_decisions, self.settings.trigger_ttl_minutes
+        )
+        if block is None:
+            return RailVerdict(allowed=True)
+        if not self.settings.enforce_declared_trigger:
+            # measurement mode: the backtest prices what the lock would have
+            # cost without the lock changing the run it is measuring
+            return RailVerdict(allowed=True, warnings=[block])
+        return RailVerdict(allowed=False, blocks=[block])
 
 
 def _within(value: time, start: time, end: time) -> bool:

@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     last_entry_time_et: str = "15:15"
     max_data_age_sec: int = 120
 
+    # the declared-trigger lock (brain/commitments.py): once the brain names a
+    # numeric level it must wait for, that number binds the next entry in that
+    # direction until it expires or the brain names a new one. Off turns the
+    # check into a warning only, which is how the backtest prices its cost.
+    enforce_declared_trigger: bool = True
+    trigger_ttl_minutes: int = 30
+
     # attention engine (cost gate, NOT a decision gate)
     attention_threshold: float = 0.45
     attention_cooldown_sec: int = 180

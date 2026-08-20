@@ -247,14 +247,21 @@ class Backtester:
                 ),
             )
             result.brain_calls += 1
+            # judged against the decisions made before it, exactly as live
+            lock = rails.commitment_check(decision, snapshot, result.decisions)
             result.decisions.append(decision)
 
             contract = self.contracts.get(decision.occ_symbol or "")
             post = rails.post_check(decision, contract or self._synthetic_contract(decision, now, spot))
+            blocks = post.blocks + lock.blocks
 
             if self.journal:
                 self.journal.log_decision(
-                    decision, snapshot, post.blocks, pre.warnings + post.warnings, verdict.score
+                    decision,
+                    snapshot,
+                    blocks,
+                    pre.warnings + post.warnings + lock.warnings,
+                    verdict.score,
                 )
 
             if decision.action is not Action.ENTER:
@@ -263,8 +270,11 @@ class Backtester:
                 self._record_missed(result, session_bars, index, snapshot, [])
                 continue
 
-            if not post.allowed:
-                self._record_missed(result, session_bars, index, snapshot, post.blocks)
+            if blocks:
+                for block in lock.blocks:
+                    key = block.split(":")[0]
+                    result.rail_blocks[key] = result.rail_blocks.get(key, 0) + 1
+                self._record_missed(result, session_bars, index, snapshot, blocks)
                 continue
 
             fill = self._price(decision.occ_symbol or "", now, spot)

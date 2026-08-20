@@ -215,6 +215,25 @@ class Target(BaseModel):
     take_pct: int = Field(default=50, description="portion of position to close, %")
 
 
+class Trigger(BaseModel):
+    """A numeric entry condition the brain commits to, in writing, before acting.
+
+    Declared on a WAIT or a PASS — "I take the PUT when 713.33 breaks" — and
+    binding on the next ENTER in that direction until it expires or the brain
+    replaces it with a newer one. See ``brain/commitments.py`` for why.
+    """
+
+    direction: OptionType
+    level: float = Field(description="the UNDERLYING price that arms the entry")
+    side: Literal["above", "below"] = Field(
+        description="'below' arms when spot trades at or under level; 'above' at or over"
+    )
+    note: str = ""
+
+    def satisfied_by(self, price: float) -> bool:
+        return price <= self.level if self.side == "below" else price >= self.level
+
+
 class Decision(BaseModel):
     """The brain's verdict. Produced by the AI, never by a rule table."""
 
@@ -242,6 +261,11 @@ class Decision(BaseModel):
         "engine exits the moment spot crosses it",
     )
     expected_hold_minutes: int | None = None
+    triggers: list[Trigger] = Field(
+        default_factory=list,
+        description="numeric conditions declared on a WAIT/PASS that arm a future "
+        "entry; they bind the next ENTER in that direction",
+    )
     size_factor: float = Field(
         default=1.0,
         ge=0.0,

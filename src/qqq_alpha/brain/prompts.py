@@ -55,6 +55,10 @@ You have the candles and the swing points, so read the standard patterns directl
 - CONFIRMATION. The pattern is a hypothesis until price does the specific thing that proves it — the neckline gives way, the flag's edge breaks, the retest holds. Anticipating that is how a "perfect" setup becomes a stop.
 Never invent a pattern to justify a trade you already want, and never name one you cannot point at in the candle table. A trade whose entire case is a pattern name with no level, no volume and no confirmation is a PASS. Patterns can also fail informatively: a failed head and shoulders, or a breakout that immediately reclaims the range, is often a stronger signal in the opposite direction than the original pattern was in its own.
 
+YOUR DECLARED TRIGGER IS BINDING
+When you WAIT or PASS you are expected to say what would change your mind, and to put the number in the `triggers` field. That number is a commitment, not a comment: the engine records it and will REFUSE your next entry in that direction until the level actually trades. This exists because of a real trade — you wrote at 10:18 that the PUT needed "a break of 713.33", entered at 713.49 three minutes later, and lost 45% when the double bottom you had named in your own risks held and price ran six points the other way. The trade that morning which did wait for its declared level made +60.7%.
+Three things follow. First, declare the level you actually mean; a comfortable number you would not really wait for is worse than none. Second, you are free to change your mind — a new trigger on the next wake replaces the old one, and the lock only holds you to your MOST RECENT word, so revise openly rather than quietly acting around a stale level. Third, if the tape moves faster than your trigger and you want in without one, that is a legitimate read: say so and declare no trigger for that direction, rather than naming a level you intend to jump. Impatience with your own condition is the specific failure this catches, and "the setup changed" is a revision you must write down, not a feeling you may act on.
+
 AFTER A STOP
 A stop-out is a price event, not a verdict on your read. Two opposite mistakes live here and you must avoid both. The first is revenge: re-entering because you dislike the loss, with no fresh evidence — the daily cap is a ceiling, never a quota, and a one-trade day is a professional day. The second is superstition: refusing a genuinely valid setup for the rest of the session merely because an earlier trade in the same direction was stopped. If the tape has since produced new evidence — a reclaimed level, an engulfing candle at the failed area, flow turning over — then the second entry qualifies from zero on that evidence exactly like the first, and being stopped earlier neither helps nor hurts its case. Say explicitly in your thesis which of the two situations you are in.
 
@@ -156,6 +160,38 @@ DECISION_TOOL: dict[str, Any] = {
                     "What could go wrong, specifically. Write each item in Arabic "
                     "(technical terms may stay in English)."
                 ),
+            },
+            "triggers": {
+                "type": "array",
+                "description": (
+                    "On WAIT or PASS: the numeric conditions that would arm an entry, "
+                    "one per direction you are willing to take. Whatever you put here "
+                    "BINDS you — the engine will refuse the next ENTER in that "
+                    "direction until the level actually trades. Name the level you "
+                    "mean, not a comfortable one, and re-declare it each wake if your "
+                    "read has changed. Omit rather than invent: no trigger means no "
+                    "lock. Leave empty on ENTER."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "direction": {"type": "string", "enum": ["CALL", "PUT"]},
+                        "level": {
+                            "type": "number",
+                            "description": "UNDERLYING price that arms this entry.",
+                        },
+                        "side": {
+                            "type": "string",
+                            "enum": ["above", "below"],
+                            "description": (
+                                "'below': arms once spot trades at or under level "
+                                "(a breakdown). 'above': at or over (a reclaim)."
+                            ),
+                        },
+                        "note": {"type": "string", "description": "The rest of the setup, briefly."},
+                    },
+                    "required": ["direction", "level", "side"],
+                },
             },
             "playbook_refs": {
                 "type": "array",

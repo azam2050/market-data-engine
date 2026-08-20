@@ -812,3 +812,107 @@ async def test_a_refused_welcome_is_escalated_to_the_operator(settings, tmp_path
 
     assert engine.memory.subscriber("444") is not None  # sign-up still counted
     assert any("تعذر إرسال رسالة الترحيب" in note for note in engine.notifier.notes)
+
+
+class _PromiseThenEnterDecider:
+    """Replays 2026-08-19: declare a level on the first wake, then enter.
+
+    ``reachable`` decides which of that morning's two trades this is. False is
+    the -45% one — a level below everything on the tape, jumped three minutes
+    later. True is the +60.7% one, whose declared level had actually traded.
+    """
+
+    def __init__(self, reachable: bool) -> None:
+        self.reachable = reachable
+        self.declared = False
+        self.entries_requested = 0
+
+    async def decide(self, snapshot: MarketSnapshot, **kwargs) -> Decision:
+        from qqq_alpha.domain import OptionType, Target, Trigger
+
+        if not self.declared:
+            self.declared = True
+            level = (
+                snapshot.underlying.close + 0.50  # already "below" it: armed at once
+                if self.reachable
+                else min(b.low for b in snapshot.recent_bars_1m) - 0.50  # never trades
+            )
+            return Decision(
+                ts=snapshot.ts,
+                action=Action.WAIT,
+                confidence=5,
+                thesis="test: waiting for the level",
+                triggers=[Trigger(direction=OptionType.PUT, level=level, side="below")],
+            )
+
+        self.entries_requested += 1
+        strike = round(snapshot.underlying.close)
+        return Decision(
+            ts=snapshot.ts,
+            action=Action.ENTER,
+            direction=OptionType.PUT,
+            occ_symbol=f"O:QQQ260302P{int(strike * 1000):08d}",
+            targets=[Target(label="T1", price=0.0, return_pct=60.0, take_pct=50)],
+            stop_return_pct=-40.0,
+            confidence=6,
+            thesis="test: taking the entry",
+            invalidation_level=snapshot.underlying.close + 1,
+            expected_hold_minutes=20,
+        )
+
+
+class _NoteCapturingNotifier(NullNotifier):
+    """Keeps the operator notes the engine emits, including rail blocks."""
+
+    def __init__(self) -> None:
+        self.notes: list[str] = []
+
+    async def note(self, text: str) -> None:
+        self.notes.append(text)
+
+
+async def _run_with_declared_level(settings, tmp_path, *, reachable: bool):
+    fresh = settings.model_copy(update={"max_data_age_sec": 10**9})
+    decider = _PromiseThenEnterDecider(reachable=reachable)
+    notifier = _NoteCapturingNotifier()
+    engine = LiveEngine(
+        settings=fresh,
+        decider=decider,
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=notifier,
+    )
+    engine._current_day = DAY
+    for bar in synthetic_session("QQQ", DAY, seed=12, trend=0.03, volatility=0.002)[:200]:
+        await engine._on_bar(bar)
+    assert decider.entries_requested > 0, "the fake decider never got to ask for an entry"
+    return notifier.notes
+
+
+def _jumped(notes: list[str]) -> bool:
+    return any("declared_trigger_unmet" in note for note in notes)
+
+
+@pytest.mark.asyncio
+async def test_the_live_engine_refuses_an_entry_that_jumps_its_declared_level(
+    settings, tmp_path
+):
+    """The lock has to fire in the wired engine, not only in a unit test.
+
+    The last channel-diagnostic fix passed its unit test and was a no-op in
+    production because the engine wraps its collaborators differently, so this
+    drives a real LiveEngine and reads the block off the operator notes.
+    """
+    notes = await _run_with_declared_level(settings, tmp_path, reachable=False)
+    assert _jumped(notes), notes
+
+
+@pytest.mark.asyncio
+async def test_the_live_engine_lets_through_an_entry_that_honoured_its_level(
+    settings, tmp_path
+):
+    """The lock must not make the desk quieter. The +60.7% trade that morning
+    declared a level and waited for it, and has to sail straight through."""
+    notes = await _run_with_declared_level(settings, tmp_path, reachable=True)
+    assert not _jumped(notes), notes

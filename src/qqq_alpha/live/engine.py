@@ -569,6 +569,9 @@ class LiveEngine:
             calendar_events=todays_events(bar.ts),
         )
         self.status.brain_calls += 1
+        # the lock reads the decisions made BEFORE this one: an entry is judged
+        # against what the brain promised earlier, never against itself
+        lock = self.rails.commitment_check(decision, snapshot, self._today_decisions)
         # shown back to the brain on later wakes so an announced plan is
         # followed through (or explicitly revised), not silently re-derived
         self._today_decisions.append(decision)
@@ -581,17 +584,24 @@ class LiveEngine:
             else None
         )
         post = self.rails.post_check(decision, contract)
-        self.journal.log_decision(
-            decision, snapshot, post.blocks, pre.warnings + post.warnings, verdict.score
-        )
-        self.memory.remember_decision(decision, snapshot, verdict.score, post.blocks)
+        blocks = post.blocks + lock.blocks
+        warnings = pre.warnings + post.warnings + lock.warnings
+        self.journal.log_decision(decision, snapshot, blocks, warnings, verdict.score)
+        self.memory.remember_decision(decision, snapshot, verdict.score, blocks)
         await self._maybe_publish_watch(decision, snapshot)
 
-        if decision.action is not Action.ENTER or not post.allowed:
+        if decision.action is not Action.ENTER or blocks:
             if decision.action is Action.ENTER:
-                await self.notifier.note(f"entry blocked by rails: {post.blocks}")
+                await self.notifier.note(f"entry blocked by rails: {blocks}")
+                # the operator asked for this one by name, so it says in his
+                # language what was promised and what the tape actually did
+                if lock.blocks:
+                    await self.notifier.note(
+                        "🔒 مُنِع الدخول: البوت أعلن مستوى دخول ولم يتحقق بعد.\n"
+                        f"{lock.blocks[0]}"
+                    )
             self._queue_missed_check(
-                snapshot, post.blocks if decision.action is Action.ENTER else []
+                snapshot, blocks if decision.action is Action.ENTER else []
             )
             return
 

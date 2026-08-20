@@ -9,7 +9,7 @@ from qqq_alpha.config import MARKET_TZ, Settings
 from qqq_alpha.data.massive import parse_occ_symbol
 from qqq_alpha.data.pricing import black_scholes, implied_volatility
 from qqq_alpha.data.synthetic import synthetic_session
-from qqq_alpha.domain import Action, Decision, OptionContract, OptionType, Target
+from qqq_alpha.domain import Action, Decision, OptionContract, OptionType, Target, Trigger
 from qqq_alpha.features.snapshot import SnapshotBuilder
 
 
@@ -310,3 +310,212 @@ def test_infeasible_separates_impossibility_from_caution():
     assert not infeasible(["daily_trade_cap: 2/2"])
     assert not infeasible(["circuit_breaker: day at -40.0%"])
     assert not infeasible([])
+
+
+# ---------------------------------------------------------------- the declared-trigger lock
+def _at(snapshot, minutes: int) -> datetime:
+    return snapshot.ts - timedelta(minutes=minutes)
+
+
+def _wait(snapshot, minutes: int, triggers: list[Trigger]) -> Decision:
+    return Decision(
+        ts=_at(snapshot, minutes), action=Action.WAIT, thesis="waiting", triggers=triggers
+    )
+
+
+def _enter(snapshot, direction: OptionType) -> Decision:
+    return Decision(
+        ts=snapshot.ts,
+        action=Action.ENTER,
+        direction=direction,
+        occ_symbol="O:QQQ260819P00713000",
+        thesis="entering",
+    )
+
+
+def test_entry_before_its_declared_level_is_blocked(settings, snapshot):
+    """2026-08-19, the trade that cost -45%. At 10:18 the brain wrote that the
+    PUT needed "a break of 713.33"; at 10:21 it entered at 713.49, sixteen
+    cents above its own level, which never traded again."""
+    untouched = min(b.low for b in snapshot.recent_bars_1m) - 0.10
+    prior = [_wait(snapshot, 3, [Trigger(direction=OptionType.PUT, level=untouched, side="below")])]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, prior
+    )
+
+    assert not verdict.allowed
+    assert any(b.startswith("declared_trigger_unmet") for b in verdict.blocks)
+
+
+def test_entry_after_its_declared_level_is_allowed(settings, snapshot):
+    """The winning trade the same morning: the trigger (a break of pivot
+    718.56) was declared one wake earlier and price actually got there."""
+    spot = snapshot.underlying.close
+    prior = [_wait(snapshot, 3, [Trigger(direction=OptionType.PUT, level=spot + 0.50, side="below")])]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, prior
+    )
+
+    assert verdict.allowed, verdict.blocks
+
+
+def test_a_trigger_the_tape_touched_and_left_still_arms_the_entry(settings, snapshot):
+    """"Break 713.33" means the tape printed it. A break that snaps back is
+    still a break the brain is entitled to act on, so the lock reads the bars
+    since the commitment, not only the price at this instant."""
+    low = min(b.low for b in snapshot.recent_bars_1m[-5:])
+    assert low < snapshot.underlying.close  # traded, then left behind — not at spot
+    prior = [_wait(snapshot, 5, [Trigger(direction=OptionType.PUT, level=low, side="below")])]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, prior
+    )
+
+    assert verdict.allowed, verdict.blocks
+
+
+def test_a_trigger_for_the_other_direction_never_blocks(settings, snapshot):
+    spot = snapshot.underlying.close
+    prior = [_wait(snapshot, 3, [Trigger(direction=OptionType.CALL, level=spot + 5, side="above")])]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, prior
+    )
+
+    assert verdict.allowed, verdict.blocks
+
+
+def test_the_newest_declaration_replaces_the_older_one(settings, snapshot):
+    """The brain revises openly by naming a new level; a stale commitment must
+    not outlive the revision it was replaced by."""
+    spot = snapshot.underlying.close
+    prior = [
+        _wait(snapshot, 9, [Trigger(direction=OptionType.PUT, level=spot - 5, side="below")]),
+        _wait(snapshot, 2, [Trigger(direction=OptionType.PUT, level=spot + 1, side="below")]),
+    ]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, prior
+    )
+
+    assert verdict.allowed, verdict.blocks
+
+
+def test_an_expired_commitment_stops_binding(settings, snapshot):
+    """A level named half an hour ago describes a market that no longer exists."""
+    spot = snapshot.underlying.close
+    ttl = settings.trigger_ttl_minutes
+    prior = [_wait(snapshot, ttl + 5, [Trigger(direction=OptionType.PUT, level=spot - 1, side="below")])]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, prior
+    )
+
+    assert verdict.allowed, verdict.blocks
+
+
+def test_an_absurd_level_is_discarded_rather_than_enforced(settings, snapshot):
+    """A misplaced decimal must not freeze the desk for the rest of its life."""
+    prior = [_wait(snapshot, 2, [Trigger(direction=OptionType.PUT, level=1.0, side="below")])]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, prior
+    )
+
+    assert verdict.allowed, verdict.blocks
+
+
+def test_no_commitment_means_no_lock(settings, snapshot):
+    """The lock holds the brain to what it said — it does not require it to
+    pre-announce every trade, which would block the first entry of every day."""
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, []
+    )
+    assert verdict.allowed, verdict.blocks
+
+
+def test_an_entry_is_never_judged_against_its_own_bookkeeping(settings, snapshot):
+    """An ENTER acts, it does not promise. If a stray trigger rides along on an
+    entry it must not become the commitment that blocks the next one."""
+    spot = snapshot.underlying.close
+    stray = _enter(snapshot, OptionType.PUT)
+    stray.ts = _at(snapshot, 4)
+    stray.triggers = [Trigger(direction=OptionType.PUT, level=spot - 3, side="below")]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, [stray]
+    )
+
+    assert verdict.allowed, verdict.blocks
+
+
+def test_measurement_mode_warns_instead_of_blocking(settings, snapshot):
+    """So the backtest can price what the lock costs without the lock changing
+    the run it is measuring."""
+    settings.enforce_declared_trigger = False
+    untouched = min(b.low for b in snapshot.recent_bars_1m) - 0.10
+    prior = [_wait(snapshot, 3, [Trigger(direction=OptionType.PUT, level=untouched, side="below")])]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, prior
+    )
+
+    assert verdict.allowed
+    assert any(w.startswith("declared_trigger_unmet") for w in verdict.warnings)
+
+
+def test_a_wait_is_never_blocked_by_a_commitment(settings, snapshot):
+    spot = snapshot.underlying.close
+    prior = [_wait(snapshot, 3, [Trigger(direction=OptionType.PUT, level=spot - 5, side="below")])]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _wait(snapshot, 0, []), snapshot, prior
+    )
+
+    assert verdict.allowed, verdict.blocks
+
+
+# ---------------------------------------------------------------- parsing what the model sent
+def _payload(**extra):
+    return {"action": "WAIT", "confidence": 4, "thesis": "t", **extra}
+
+
+def test_declared_triggers_survive_the_round_trip(settings, snapshot):
+    from qqq_alpha.brain.decider import AIDecider
+
+    decision = AIDecider._to_decision(
+        _payload(
+            triggers=[
+                {"direction": "PUT", "level": 713.33, "side": "below", "note": "failed bounce"},
+                {"direction": "CALL", "level": 716.6, "side": "above"},
+            ]
+        ),
+        snapshot,
+    )
+
+    assert [t.level for t in decision.triggers] == [713.33, 716.6]
+    assert decision.triggers[0].direction is OptionType.PUT
+    assert decision.triggers[0].note == "failed bounce"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"direction": "SIDEWAYS", "level": 713.33, "side": "below"},
+        {"direction": "PUT", "level": "not a number", "side": "below"},
+        {"direction": "PUT", "level": 713.33, "side": "sideways"},
+        {"direction": "PUT", "side": "below"},
+        "not even an object",
+    ],
+)
+def test_a_malformed_trigger_is_dropped_not_raised(settings, snapshot, bad):
+    """An advisory field the model fumbled must never turn a sound decision
+    into a technical PASS."""
+    from qqq_alpha.brain.decider import AIDecider
+
+    decision = AIDecider._to_decision(_payload(triggers=[bad]), snapshot)
+
+    assert decision.action is Action.WAIT
+    assert decision.triggers == []

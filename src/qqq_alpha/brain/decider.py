@@ -27,6 +27,7 @@ from qqq_alpha.domain import (
     OptionType,
     Target,
     Trade,
+    Trigger,
 )
 
 log = logging.getLogger(__name__)
@@ -47,6 +48,35 @@ def next_expiry(as_of: date, dte: int) -> date:
     while target.weekday() >= 5:  # QQQ has weekday expiries
         target += timedelta(days=1)
     return target
+
+
+def _parse_triggers(raw: Any) -> list[Trigger]:
+    """Declared entry conditions, skipping any the model malformed.
+
+    A trigger that cannot be read is dropped rather than raised: a typo in an
+    advisory field must never turn a good decision into a technical PASS.
+    """
+    triggers: list[Trigger] = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        direction = str(item.get("direction") or "").upper()
+        side = str(item.get("side") or "").lower()
+        if direction not in ("CALL", "PUT") or side not in ("above", "below"):
+            continue
+        try:
+            level = float(item.get("level"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        triggers.append(
+            Trigger(
+                direction=OptionType(direction),
+                level=level,
+                side=side,  # type: ignore[arg-type]
+                note=str(item.get("note") or ""),
+            )
+        )
+    return triggers
 
 
 class Decider(Protocol):
@@ -229,6 +259,8 @@ class AIDecider:
                 decision.invalidation_level = float(level)
             except (TypeError, ValueError):
                 decision.invalidation_level = None
+
+        decision.triggers = _parse_triggers(payload.get("triggers"))
 
         if action is not Action.ENTER:
             return decision
