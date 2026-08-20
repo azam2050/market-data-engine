@@ -1212,6 +1212,13 @@ class LiveEngine:
                     log.exception("join request handling failed")
             self.commands.join_requests = []
 
+            for change in self.commands.membership_changes:
+                try:
+                    await self._handle_membership_change(change)
+                except Exception:  # noqa: BLE001
+                    log.exception("membership change handling failed")
+            self.commands.membership_changes = []
+
             for press in self.commands.button_presses:
                 try:
                     await self._handle_button_press(press)
@@ -1230,6 +1237,46 @@ class LiveEngine:
                     "TELEGRAM_PRIVATE_CHANNEL_ID في Railway ثم أعد التشغيل."
                 )
             self.commands.channel_promotions = []
+
+    async def _handle_membership_change(self, change) -> None:
+        """Put anyone who walks into the private channel onto the books.
+
+        The consent gate only ever sees people whose join needs approving. Our
+        own funnel hands out single-use invite links, and a link admits its
+        holder with no join request at all — so the one route the engine
+        invites people through was the one route it could not see. The result
+        on 2026-08-20: two friends inside the channel, receiving every signal,
+        and a roster showing one name that came from the old DM funnel.
+
+        Registering here is deliberately quiet. It records who is inside so
+        the roster is true; it does not send the welcome or the terms, because
+        this person did not just agree to anything.
+        """
+        private = self.settings.telegram_private_channel_id
+        if not private or str(change.chat_id) != str(private):
+            return
+        if self.settings.trial_days <= 0:
+            return
+
+        name = change.first_name or change.username or change.user_id
+        if not change.joined:
+            await self.notifier.note(f"👋 غادر القناة الخاصة: {name}")
+            return
+
+        now = datetime.now(UTC)
+        added = self.memory.add_subscriber(
+            chat_id=change.user_id,
+            username=change.username,
+            first_name=change.first_name,
+            joined_at=now,
+            expires_at=now + timedelta(days=self.settings.trial_days),
+        )
+        if added:
+            active = len(self.memory.active_subscriber_ids(now))
+            await self.notifier.note(
+                f"👤 انضم للقناة الخاصة: {name} — سُجّل تلقائيًا، "
+                f"النشطون الآن: {active}"
+            )
 
     async def _handle_join_request(self, request) -> None:
         """The private channel's front door — now a consent gate.
@@ -1669,6 +1716,31 @@ class LiveEngine:
             log.exception("preview card rendering failed")
         return samples
 
+    async def _channel_roster(self, chat_ids: list[str]) -> dict:
+        """What Telegram says about the private channel, for the roster page.
+
+        Telegram offers no way to LIST a channel's members — that endpoint has
+        never existed — so the honest best is a total and a per-person check.
+        The total is what exposes the gap: "3 in the channel, 1 on the books"
+        is a fact the operator can act on, where a bare "1" looked like a bug.
+        """
+        private = self.settings.telegram_private_channel_id
+        if self.commands is None or not private:
+            return {}
+        checks = await asyncio.gather(
+            self.commands.member_count(private),
+            *(self.commands.is_member(private, chat_id) for chat_id in chat_ids),
+            return_exceptions=True,
+        )
+        total, per_person = checks[0], checks[1:]
+        return {
+            "channel_total": total if isinstance(total, int) else None,
+            "inside": {
+                chat_id: (result if isinstance(result, bool) else None)
+                for chat_id, result in zip(chat_ids, per_person, strict=False)
+            },
+        }
+
     async def _on_subscriber_change(
         self, action: str, row: dict, days: int | None
     ) -> None:
@@ -1727,6 +1799,7 @@ class LiveEngine:
             status=self.status,
             on_lesson_applied=_apply_playbook,
             on_subscriber_change=self._on_subscriber_change,
+            channel_roster=self._channel_roster,
         )
         config = uvicorn.Config(
             app,

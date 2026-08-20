@@ -338,6 +338,23 @@ class JoinRequest:
 
 
 @dataclass
+class MembershipChange:
+    """Someone joined or left a chat the bot administrates.
+
+    Distinct from ``JoinRequest``, which only ever fires for channels set to
+    approve members manually. A single-use invite link admits people with no
+    join request at all, so without this event the engine is blind to exactly
+    the route its own funnel uses.
+    """
+
+    chat_id: str
+    user_id: str
+    joined: bool
+    username: str = ""
+    first_name: str = ""
+
+
+@dataclass
 class ButtonPress:
     """An inline-keyboard button was tapped (a callback_query)."""
 
@@ -371,6 +388,7 @@ class TelegramCommandListener:
         self.channel_promotions: list[tuple[str, str]] = []
         # pending join requests for the private subscribers channel
         self.join_requests: list[JoinRequest] = []
+        self.membership_changes: list[MembershipChange] = []
         # inline-keyboard taps awaiting routing (consent gate, previews)
         self.button_presses: list[ButtonPress] = []
 
@@ -409,11 +427,19 @@ class TelegramCommandListener:
                 params={
                     "offset": self._offset,
                     "timeout": timeout,
-                    # explicit, because the funnel depends on all three: DMs,
-                    # admin promotions (channel-id discovery), and the private
-                    # channel's join requests
+                    # explicit, because the funnel depends on all of them: DMs,
+                    # admin promotions (channel-id discovery), the private
+                    # channel's join requests, consent buttons, and chat_member
+                    # — the last one is how anyone who walked in on an invite
+                    # link (i.e. everyone the funnel actually invites) is seen
                     "allowed_updates": json.dumps(
-                        ["message", "my_chat_member", "chat_join_request", "callback_query"]
+                        [
+                            "message",
+                            "my_chat_member",
+                            "chat_member",
+                            "chat_join_request",
+                            "callback_query",
+                        ]
                     ),
                 },
             )
@@ -454,6 +480,22 @@ class TelegramCommandListener:
                         first_name=sender.get("first_name") or "",
                     )
                 )
+            change = update.get("chat_member") or {}
+            if change:
+                sender = (change.get("new_chat_member") or {}).get("user") or {}
+                was = (change.get("old_chat_member") or {}).get("status") or ""
+                now = (change.get("new_chat_member") or {}).get("status") or ""
+                inside = {"member", "administrator", "creator", "restricted"}
+                if (was in inside) != (now in inside):
+                    self.membership_changes.append(
+                        MembershipChange(
+                            chat_id=str((change.get("chat") or {}).get("id")),
+                            user_id=str(sender.get("id")),
+                            joined=now in inside,
+                            username=sender.get("username") or "",
+                            first_name=sender.get("first_name") or "",
+                        )
+                    )
             callback = update.get("callback_query") or {}
             if callback:
                 sender = callback.get("from") or {}
@@ -638,6 +680,47 @@ class TelegramCommandListener:
             )
         except (httpx.TransportError, httpx.TimeoutException) as exc:
             log.warning("invite link creation failed (%s)", exc)
+        return None
+
+    async def member_count(self, chat_id: str) -> int | None:
+        """How many people are actually in the channel right now.
+
+        The Bot API cannot enumerate a channel's members — no endpoint exists,
+        by design — so this count is the only way to see the gap between who
+        is inside and who the engine has on its books. None means the question
+        could not be answered, which must not be shown as zero.
+        """
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=20.0)
+        try:
+            response = await self._client.post(
+                f"{TELEGRAM_API}/bot{self.token}/getChatMemberCount",
+                json={"chat_id": chat_id},
+            )
+            if response.status_code == 200:
+                return int(response.json().get("result") or 0)
+            log.warning("member count failed (%s): %s", response.status_code, response.text[:200])
+        except (httpx.TransportError, httpx.TimeoutException, ValueError, TypeError) as exc:
+            log.warning("member count failed (%s)", exc)
+        return None
+
+    async def is_member(self, chat_id: str, user_id: str) -> bool | None:
+        """Is this specific person still inside? None when unanswerable."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=20.0)
+        try:
+            response = await self._client.post(
+                f"{TELEGRAM_API}/bot{self.token}/getChatMember",
+                json={"chat_id": chat_id, "user_id": user_id},
+            )
+            if response.status_code == 200:
+                status = ((response.json().get("result") or {}).get("status")) or ""
+                return status in {"member", "administrator", "creator", "restricted"}
+            if response.status_code == 400:
+                return False  # "user not found" — a definite answer, not a failure
+            log.warning("member check failed (%s): %s", response.status_code, response.text[:200])
+        except (httpx.TransportError, httpx.TimeoutException) as exc:
+            log.warning("member check failed (%s)", exc)
         return None
 
     async def kick(self, channel_id: str, user_id: str) -> bool:

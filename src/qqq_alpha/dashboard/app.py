@@ -40,6 +40,7 @@ def create_app(
     status: Any | None = None,
     on_lesson_applied: Callable[[Playbook], None] | None = None,
     on_subscriber_change: Callable[[str, dict, int | None], Awaitable[None]] | None = None,
+    channel_roster: Callable[[list[str]], Awaitable[dict]] | None = None,
 ) -> FastAPI:
     """Build the dashboard app.
 
@@ -164,11 +165,25 @@ def create_app(
         )
 
     @app.get("/subscribers")
-    def subscribers(request: Request, _: str = Depends(login)):
+    async def subscribers(request: Request, _: str = Depends(login)):
+        rows = data.subscribers(settings)
+        roster: dict = {}
+        if channel_roster is not None:
+            try:
+                roster = await channel_roster([row["chat_id"] for row in rows])
+            except Exception:  # noqa: BLE001 - a Telegram hiccup must not blank the page
+                log.exception("channel roster probe failed")
+        inside = roster.get("inside") or {}
+        for row in rows:
+            row["in_channel"] = inside.get(row["chat_id"])
         return templates.TemplateResponse(
             request,
             "subscribers.html",
-            _ctx(subscribers=data.subscribers(settings), connected=on_subscriber_change is not None),
+            _ctx(
+                subscribers=rows,
+                connected=on_subscriber_change is not None,
+                channel_total=roster.get("channel_total"),
+            ),
         )
 
     @app.post("/subscribers/{chat_id}/extend")

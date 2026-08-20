@@ -973,3 +973,171 @@ async def test_subscriber_edits_are_silent_when_telegram_is_not_wired(
     engine = _engine(settings, tmp_path)
     engine.commands = None
     await engine._on_subscriber_change("removed", {"chat_id": "777"}, None)  # no raise
+
+
+def _membership(user_id: str, joined: bool, chat_id: str = "-100999"):
+    from qqq_alpha.live.telegram import MembershipChange
+
+    return MembershipChange(
+        chat_id=chat_id, user_id=user_id, joined=joined, first_name=f"user{user_id}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_walking_into_the_private_channel_registers_you(settings, tmp_path):
+    """2026-08-20: two friends inside the private channel, one name on the
+    roster, and that name came from the old DM funnel. The consent gate only
+    ever fires for joins that need approving, while the funnel's own single-use
+    invite links admit people with no join request at all."""
+    scoped = settings.model_copy(
+        update={"telegram_private_channel_id": "-100999", "trial_days": 30}
+    )
+    engine = _engine(scoped, tmp_path)
+    engine.commands = _KickTrackingCommands()
+
+    await engine._handle_membership_change(_membership("555", joined=True))
+
+    row = engine.memory.subscriber("555")
+    assert row is not None
+    assert row["status"] == "trial"
+
+
+@pytest.mark.asyncio
+async def test_rejoining_does_not_restart_a_running_trial(settings, tmp_path):
+    scoped = settings.model_copy(
+        update={"telegram_private_channel_id": "-100999", "trial_days": 30}
+    )
+    engine = _engine(scoped, tmp_path)
+    engine.commands = _KickTrackingCommands()
+
+    await engine._handle_membership_change(_membership("555", joined=True))
+    first = engine.memory.subscriber("555")["expires_at"]
+    await engine._handle_membership_change(_membership("555", joined=True))
+
+    assert engine.memory.subscriber("555")["expires_at"] == first
+
+
+@pytest.mark.asyncio
+async def test_a_join_to_some_other_chat_is_not_ours_to_record(settings, tmp_path):
+    scoped = settings.model_copy(update={"telegram_private_channel_id": "-100999"})
+    engine = _engine(scoped, tmp_path)
+    engine.commands = _KickTrackingCommands()
+
+    await engine._handle_membership_change(
+        _membership("555", joined=True, chat_id="-100111")
+    )
+
+    assert engine.memory.subscriber("555") is None
+
+
+@pytest.mark.asyncio
+async def test_leaving_is_reported_without_deleting_the_record(settings, tmp_path):
+    """Someone who walks out may walk back in; the trial clock is theirs."""
+    scoped = settings.model_copy(
+        update={"telegram_private_channel_id": "-100999", "trial_days": 30}
+    )
+    engine = _engine(scoped, tmp_path)
+    engine.commands = _KickTrackingCommands()
+    await engine._handle_membership_change(_membership("555", joined=True))
+
+    await engine._handle_membership_change(_membership("555", joined=False))
+
+    assert engine.memory.subscriber("555") is not None
+
+
+class _CannedTelegram:
+    """Returns one prepared getUpdates payload instead of calling Telegram."""
+
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+        self.params: dict = {}
+
+    async def get(self, url, params=None):
+        self.params = params or {}
+
+        class _Response:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            @staticmethod
+            def json():
+                return {"result": [self_payload]}
+
+        self_payload = self.payload
+        return _Response()
+
+
+async def _poll_once(payload: dict):
+    from qqq_alpha.live.telegram import TelegramCommandListener
+
+    listener = TelegramCommandListener("token", "1")
+    listener._webhook_cleared = True  # skip the inbox claim; we are not on the wire
+    listener._client = _CannedTelegram(payload)
+    await listener.poll(timeout=0)
+    return listener
+
+
+@pytest.mark.asyncio
+async def test_the_bot_actually_asks_telegram_for_membership_updates():
+    """Telegram sends chat_member ONLY to bots that name it in allowed_updates,
+    so the parser is dead code unless the request asks for it."""
+    listener = await _poll_once({"update_id": 1})
+    assert "chat_member" in listener._client.params["allowed_updates"]
+
+
+@pytest.mark.asyncio
+async def test_a_real_join_frame_becomes_a_membership_change():
+    listener = await _poll_once(
+        {
+            "update_id": 2,
+            "chat_member": {
+                "chat": {"id": -100999},
+                "old_chat_member": {"status": "left", "user": {"id": 7}},
+                "new_chat_member": {
+                    "status": "member",
+                    "user": {"id": 7, "first_name": "Saud", "username": "saud"},
+                },
+            },
+        }
+    )
+
+    assert len(listener.membership_changes) == 1
+    change = listener.membership_changes[0]
+    assert (change.chat_id, change.user_id, change.joined) == ("-100999", "7", True)
+    assert change.first_name == "Saud"
+
+
+@pytest.mark.asyncio
+async def test_a_leave_frame_is_recorded_as_a_departure():
+    listener = await _poll_once(
+        {
+            "update_id": 3,
+            "chat_member": {
+                "chat": {"id": -100999},
+                "old_chat_member": {"status": "member", "user": {"id": 7}},
+                "new_chat_member": {"status": "left", "user": {"id": 7}},
+            },
+        }
+    )
+
+    assert listener.membership_changes[0].joined is False
+
+
+@pytest.mark.asyncio
+async def test_a_promotion_inside_the_channel_is_not_a_join():
+    """member -> administrator is the same person, still inside. Treating it as
+    an arrival would register the operator as their own subscriber."""
+    listener = await _poll_once(
+        {
+            "update_id": 4,
+            "chat_member": {
+                "chat": {"id": -100999},
+                "old_chat_member": {"status": "member", "user": {"id": 7}},
+                "new_chat_member": {"status": "administrator", "user": {"id": 7}},
+            },
+        }
+    )
+
+    assert listener.membership_changes == []
