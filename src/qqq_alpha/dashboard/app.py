@@ -9,10 +9,11 @@ reply. Nothing here can place, close, or alter a trade.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from datetime import date, timedelta
+from collections.abc import Awaitable, Callable
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import RedirectResponse
@@ -29,11 +30,16 @@ log = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
+# an upper bound on a single grant, so a slipped keystroke in the days box
+# cannot hand out a decade of free access
+MAX_TRIAL_EXTENSION_DAYS = 365
+
 
 def create_app(
     settings: Settings,
     status: Any | None = None,
     on_lesson_applied: Callable[[Playbook], None] | None = None,
+    on_subscriber_change: Callable[[str, dict, int | None], Awaitable[None]] | None = None,
 ) -> FastAPI:
     """Build the dashboard app.
 
@@ -42,6 +48,12 @@ def create_app(
     so the overview page always reflects the current run. ``on_lesson_applied``
     lets an embedded dashboard update the engine's *running* playbook the
     moment a lesson is approved here, not just the file on disk.
+
+    ``on_subscriber_change`` is how an operator action on the subscribers
+    page reaches Telegram — extending a trial should tell the subscriber,
+    and removing one must also remove them from the private channel. Left
+    unset (the standalone dashboard), those edits touch the database only,
+    and the page says so rather than implying a door was closed.
     """
     app = FastAPI(title="QQQ Alpha — لوحة التحكم", docs_url=None, redoc_url=None)
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -61,8 +73,6 @@ def create_app(
         data: just "this process is answering, and here is when it last saw a
         bar".
         """
-        from datetime import UTC, datetime
-
         last_bar = getattr(status, "last_bar_at", None) if status else None
         age = (datetime.now(UTC) - last_bar).total_seconds() if last_bar else None
         return {
@@ -152,6 +162,53 @@ def create_app(
         return templates.TemplateResponse(
             request, "shadow.html", _ctx(shadow=data.shadow_overview(settings))
         )
+
+    @app.get("/subscribers")
+    def subscribers(request: Request, _: str = Depends(login)):
+        return templates.TemplateResponse(
+            request,
+            "subscribers.html",
+            _ctx(subscribers=data.subscribers(settings), connected=on_subscriber_change is not None),
+        )
+
+    @app.post("/subscribers/{chat_id}/extend")
+    async def extend_subscriber(chat_id: str, request: Request, _: str = Depends(login)):
+        """Grant more free days, and tell the subscriber they were granted.
+
+        Async on purpose: the embedded dashboard shares the engine's event
+        loop, so the Telegram side-effect can simply be awaited here instead
+        of being handed across a thread boundary.
+
+        The form body is parsed with the stdlib rather than FastAPI's ``Form``,
+        which would pull in python-multipart. A urlencoded form needs three
+        lines to read, and a new runtime dependency is a rebuild this live
+        deployment does not need to risk for them.
+        """
+        raw = parse_qs((await request.body()).decode())
+        try:
+            days = int(raw.get("days", ["30"])[0])
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(days, MAX_TRIAL_EXTENSION_DAYS))
+        row = Memory(settings.data_dir / "memory.db").extend_subscriber(
+            chat_id, days, datetime.now(UTC)
+        )
+        if row is not None and on_subscriber_change is not None:
+            await on_subscriber_change("extended", row, days)
+        return RedirectResponse(url="/subscribers", status_code=303)
+
+    @app.post("/subscribers/{chat_id}/remove")
+    async def remove_subscriber(chat_id: str, _: str = Depends(login)):
+        """Delete the record AND close the door.
+
+        Removing the row on its own would leave the person inside the private
+        channel still receiving every signal, off the books — worse than not
+        removing them at all, because nothing would show they were still there.
+        """
+        row = Memory(settings.data_dir / "memory.db").remove_subscriber(chat_id)
+        if row is not None and on_subscriber_change is not None:
+            await on_subscriber_change("removed", row, None)
+        return RedirectResponse(url="/subscribers", status_code=303)
 
     @app.get("/reports")
     def reports(request: Request, day: str | None = None, _: str = Depends(login)):

@@ -1669,6 +1669,42 @@ class LiveEngine:
             log.exception("preview card rendering failed")
         return samples
 
+    async def _on_subscriber_change(
+        self, action: str, row: dict, days: int | None
+    ) -> None:
+        """Carry a dashboard edit through to Telegram.
+
+        The database row is only half of a subscription — the other half is
+        membership of the private channel. Extending without telling anyone is
+        a gift nobody notices; deleting without removing them from the channel
+        leaves someone reading every signal with no record that they are there.
+        """
+        if self.commands is None:
+            return
+        chat_id = str(row.get("chat_id") or "")
+        name = row.get("first_name") or row.get("username") or chat_id
+        private = self.settings.telegram_private_channel_id
+
+        if action == "extended":
+            expires = row.get("expires_at", "")[:10]
+            await self.commands.send(
+                chat_id,
+                f"🎁 تم تمديد اشتراكك المجاني {days} يومًا إضافية.\n"
+                f"ينتهي الآن في: {expires}\n"
+                "استمتع بالمحتوى التعليمي 🤍",
+            )
+            await self.notifier.note(f"🎁 مُدّد اشتراك {name} بـ {days} يومًا")
+            return
+
+        if action == "removed":
+            if private:
+                # the channel removal IS the cutoff; the DM only explains it
+                await self.commands.kick(private, chat_id)
+            await self.commands.send(
+                chat_id, "انتهى وصولك إلى القناة الخاصة. شكرًا لك 🤍"
+            )
+            await self.notifier.note(f"🗑️ حُذف المشترك {name} وأُخرج من القناة")
+
     async def _run_dashboard(self) -> None:
         """Serve the admin dashboard for the life of the session.
 
@@ -1686,7 +1722,12 @@ class LiveEngine:
                 # the learner reads the same playbook the live desk does
                 self.shadow.playbook = book
 
-        app = create_app(self.settings, status=self.status, on_lesson_applied=_apply_playbook)
+        app = create_app(
+            self.settings,
+            status=self.status,
+            on_lesson_applied=_apply_playbook,
+            on_subscriber_change=self._on_subscriber_change,
+        )
         config = uvicorn.Config(
             app,
             host="0.0.0.0",  # noqa: S104 - intentional: this is the container's only network interface

@@ -7,7 +7,7 @@ empty and populated data, and the one write path actually mutates the
 playbook and memory it claims to.
 """
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -251,3 +251,134 @@ def test_health_is_open_and_leaks_nothing(tmp_path):
     assert set(body) == {
         "ok", "started_at", "last_bar_at", "last_bar_age_sec", "trades_today", "reconnects"
     }
+
+
+# ---------------------------------------------------------------- subscribers
+def _with_subscribers(tmp_path):
+    """Two sign-ups: one live trial, one that lapsed a week ago."""
+    settings = _settings(tmp_path)
+    memory = Memory(settings.data_dir / "memory.db")
+    now = datetime.now(UTC)
+    memory.add_subscriber("111", "abu_layth", "Layth", now - timedelta(days=3), now + timedelta(days=27))
+    memory.add_subscriber("222", "saud", "Saud", now - timedelta(days=40), now - timedelta(days=7))
+    return settings, memory
+
+
+def test_subscribers_page_lists_lapsed_sign_ups_too(tmp_path):
+    """The operator counted two friends and the overview said one. The roster
+    has to show the second and say why it is not counted, or the number just
+    looks broken."""
+    settings, _ = _with_subscribers(tmp_path)
+    body = TestClient(create_app(settings)).get("/subscribers", auth=AUTH).text
+
+    assert "Layth" in body
+    assert "Saud" in body  # lapsed, but still on the roster
+    assert "منتهي" in body
+
+
+def test_subscribers_page_renders_when_nobody_has_signed_up(tmp_path):
+    body = TestClient(create_app(_settings(tmp_path))).get("/subscribers", auth=AUTH).text
+    assert "لا يوجد مشتركون" in body
+
+
+def test_extending_a_live_trial_adds_to_what_is_left(tmp_path):
+    settings, memory = _with_subscribers(tmp_path)
+    before = datetime.fromisoformat(memory.subscriber("111")["expires_at"])
+
+    client = TestClient(create_app(settings))
+    response = client.post("/subscribers/111/extend", data={"days": 10}, auth=AUTH)
+
+    assert response.status_code == 200  # followed the redirect
+    after = datetime.fromisoformat(memory.subscriber("111")["expires_at"])
+    assert (after - before).days == 10
+
+
+def test_extending_a_lapsed_trial_starts_a_fresh_window(tmp_path):
+    """Adding 10 days to an expiry a week in the past would grant three days."""
+    settings, memory = _with_subscribers(tmp_path)
+
+    TestClient(create_app(settings)).post(
+        "/subscribers/222/extend", data={"days": 10}, auth=AUTH
+    )
+
+    row = memory.subscriber("222")
+    left = (datetime.fromisoformat(row["expires_at"]) - datetime.now(UTC)).days
+    assert 9 <= left <= 10
+    assert row["status"] == "trial"  # revived, not left marked expired
+
+
+def test_a_slipped_keystroke_cannot_grant_a_decade(tmp_path):
+    """The cap bounds a single grant, not the running total — topping up a
+    live trial is meant to add to what is left."""
+    settings, memory = _with_subscribers(tmp_path)
+    before = datetime.fromisoformat(memory.subscriber("111")["expires_at"])
+
+    TestClient(create_app(settings)).post(
+        "/subscribers/111/extend", data={"days": 99999}, auth=AUTH
+    )
+
+    after = datetime.fromisoformat(memory.subscriber("111")["expires_at"])
+    assert (after - before).days == 365
+
+
+def test_a_nonsense_days_value_falls_back_instead_of_erroring(tmp_path):
+    settings, memory = _with_subscribers(tmp_path)
+    before = datetime.fromisoformat(memory.subscriber("111")["expires_at"])
+
+    for bad in ({"days": "abc"}, {"days": ""}, {"days": -5}, {}):
+        response = TestClient(create_app(settings)).post(
+            "/subscribers/111/extend", data=bad, auth=AUTH
+        )
+        assert response.status_code == 200  # no 422, no 500
+
+    # unreadable input falls back to 30 days; a negative one clamps to 1. The
+    # invariant that matters is that nothing here can ever SHORTEN a trial.
+    after = datetime.fromisoformat(memory.subscriber("111")["expires_at"])
+    assert (after - before).days == 30 + 30 + 1 + 30
+
+
+def test_removing_a_subscriber_deletes_the_row(tmp_path):
+    settings, memory = _with_subscribers(tmp_path)
+
+    TestClient(create_app(settings)).post("/subscribers/111/remove", auth=AUTH)
+
+    assert memory.subscriber("111") is None
+    assert memory.subscriber("222") is not None  # only the one named
+
+
+def test_removal_also_closes_the_channel_door(tmp_path):
+    """Deleting the row while leaving them in the private channel would be
+    worse than not deleting: they keep every signal, and nothing records it."""
+    settings, _ = _with_subscribers(tmp_path)
+    calls = []
+
+    async def _hook(action, row, days):
+        calls.append((action, row["chat_id"], days))
+
+    client = TestClient(create_app(settings, on_subscriber_change=_hook))
+    client.post("/subscribers/111/remove", auth=AUTH)
+    client.post("/subscribers/222/extend", data={"days": 5}, auth=AUTH)
+
+    assert calls == [("removed", "111", None), ("extended", "222", 5)]
+
+
+def test_subscriber_edits_require_authentication(tmp_path):
+    settings, memory = _with_subscribers(tmp_path)
+    client = TestClient(create_app(settings))
+
+    assert client.get("/subscribers").status_code == 401
+    assert client.post("/subscribers/111/remove").status_code == 401
+    assert memory.subscriber("111") is not None
+
+
+def test_editing_an_unknown_subscriber_is_a_no_op_not_a_crash(tmp_path):
+    settings, _ = _with_subscribers(tmp_path)
+    calls = []
+
+    async def _hook(action, row, days):
+        calls.append(action)
+
+    client = TestClient(create_app(settings, on_subscriber_change=_hook))
+    assert client.post("/subscribers/999/remove", auth=AUTH).status_code == 200
+    assert client.post("/subscribers/999/extend", data={"days": 5}, auth=AUTH).status_code == 200
+    assert calls == []  # nothing to announce about somebody who does not exist

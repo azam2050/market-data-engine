@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}المشتركون — QQQ Alpha{% endblock %}
+{% block content %}
+
+{% set active = subscribers | selectattr("active") | list %}
+{% set lapsed = subscribers | rejectattr("active") | list %}
+
+<div class="card">
+  <h2>المشتركون</h2>
+  <div class="grid">
+    <div class="stat"><div class="n">{{ subscribers|length }}</div><div class="l">إجمالي المسجّلين</div></div>
+    <div class="stat"><div class="n" style="color:var(--green)">{{ active|length }}</div><div class="l">اشتراك نشط</div></div>
+    <div class="stat"><div class="n" style="color:var(--muted)">{{ lapsed|length }}</div><div class="l">منتهي</div></div>
+  </div>
+  <p class="small muted" style="margin-top:12px">
+    هذي القائمة تعرض <strong>كل من سجّل</strong>، نشطًا كان أو منتهيًا. العدّاد في
+    الصفحة الرئيسية يحسب النشطين فقط — فإذا كنت تتوقع اسمًا ولا تجده هنا إطلاقًا،
+    فالسبب أنه لم يُكمل التسجيل: الانضمام للقناة وحده لا يسجّل أحدًا، لازم يضغط
+    <strong>«أوافق وأقر»</strong> على شاشة الشروط أو يرسل <code>/start</code> للبوت.
+  </p>
+  {% if not connected %}
+  <p class="small" style="color:var(--yellow)">
+    ⚠️ اللوحة تعمل منفصلة عن البوت الآن، فالتعديلات هنا تمسّ قاعدة البيانات فقط —
+    لن تصل رسالة للمشترك ولن يُحذف من القناة الخاصة.
+  </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>القائمة ({{ subscribers|length }})</h2>
+  {% if subscribers %}
+  <table>
+    <thead>
+      <tr>
+        <th>المشترك</th>
+        <th>المعرّف</th>
+        <th>نوع الاشتراك</th>
+        <th>تاريخ الدخول</th>
+        <th>مدة الاشتراك</th>
+        <th>ينتهي في</th>
+        <th>المتبقي</th>
+        <th>الحالة</th>
+        <th>الإجراءات</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in subscribers %}
+      <tr>
+        <td><strong>{{ row.name }}</strong>{% if row.username %}<br><span class="small muted">@{{ row.username }}</span>{% endif %}</td>
+        <td class="small muted">{{ row.chat_id }}</td>
+        <td class="small">{{ row.plan }}</td>
+        <td class="small">{{ row.joined_at.strftime("%Y-%m-%d") if row.joined_at else "—" }}</td>
+        <td class="small">{{ row.days_in }} يومًا</td>
+        <td class="small">{{ row.expires_at.strftime("%Y-%m-%d") if row.expires_at else "—" }}</td>
+        <td>
+          {% if row.active %}
+          <span style="color:var(--green)">{{ row.days_left }} يومًا</span>
+          {% else %}
+          <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.active %}
+          <span style="color:var(--green)">● {{ row.status_label }}</span>
+          {% else %}
+          <span class="muted">● {{ row.status_label }}</span>
+          {% endif %}
+        </td>
+        <td>
+          <form class="inline" method="post" action="/subscribers/{{ row.chat_id }}/extend">
+            <input type="number" name="days" value="30" min="1" max="365"
+                   style="width:64px;padding:6px;border-radius:6px;border:1px solid var(--border);background:var(--panel-2);color:var(--text)">
+            <button type="submit">🎁 تمديد</button>
+          </form>
+          <form class="inline" method="post" action="/subscribers/{{ row.chat_id }}/remove"
+                onsubmit="return confirm('حذف {{ row.name }} نهائيًا وإخراجه من القناة الخاصة؟');">
+            <button type="submit" class="reject">🗑️ حذف</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="small muted" style="margin-top:14px">
+    <strong>التمديد</strong> يضيف الأيام فوق المتبقي إن كان الاشتراك نشطًا، ويبدأ
+    مدة جديدة من اليوم إن كان منتهيًا — فلا تضيع الأيام في الماضي. ويصل المشترك
+    إشعار بالتمديد.<br>
+    <strong>الحذف</strong> يمسح السجل <em>ويخرجه من القناة الخاصة</em> في نفس
+    الخطوة، لأن حذف السجل وحده كان سيتركه يستقبل الإشارات بلا أثر يدلّ عليه.
+  </p>
+  {% else %}
+  <div class="empty">لا يوجد مشتركون مسجّلون بعد</div>
+  {% endif %}
+</div>
+
+{% endblock %}

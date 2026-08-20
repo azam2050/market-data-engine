@@ -8,7 +8,8 @@ cached separately from what the engine itself already persists.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+import math
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from qqq_alpha.config import MARKET_TZ, Settings
@@ -221,3 +222,61 @@ def weekly_report(settings: Settings, end_day: date) -> ReviewStats:
 
 def today_et() -> date:
     return datetime.now(MARKET_TZ).date()
+
+
+SUBSCRIBER_STATUS_AR = {
+    "trial": "تجريبي نشط",
+    "expired": "منتهي",
+}
+
+
+def subscribers(settings: Settings) -> list[dict]:
+    """The roster, ready to render: who, since when, and how long is left.
+
+    Shows expired rows too. The overview's headline counts only live trials,
+    so an operator who knows two friends signed up can be shown "1" with no
+    way to tell whether the second lapsed or never finished signing up. This
+    list is where that question gets answered.
+    """
+    memory = Memory(settings.data_dir / "memory.db")
+    now = datetime.now(UTC)
+    rows = []
+    for row in memory.all_subscribers():
+        expires = _as_utc(row.get("expires_at"))
+        joined = _as_utc(row.get("joined_at"))
+        # a row can still read 'trial' after its expiry: the sweep that flips
+        # it runs at session roll, so believe the clock rather than the column
+        lapsed = expires is not None and expires <= now
+        status = "expired" if lapsed else (row.get("status") or "trial")
+        rows.append(
+            {
+                "chat_id": row.get("chat_id"),
+                "name": row.get("first_name") or row.get("username") or row.get("chat_id"),
+                "username": row.get("username"),
+                "joined_at": joined,
+                "expires_at": expires,
+                "days_left": (
+                    max(0, math.ceil((expires - now).total_seconds() / 86400))
+                    if expires and not lapsed
+                    else 0
+                ),
+                "days_in": (
+                    max(0, (now - joined).days) if joined else None
+                ),
+                "status": status,
+                "status_label": SUBSCRIBER_STATUS_AR.get(status, status),
+                "plan": f"تجريبي مجاني — {settings.trial_days} يومًا",
+                "active": not lapsed,
+            }
+        )
+    return rows
+
+
+def _as_utc(stamp: str | None) -> datetime | None:
+    if not stamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)

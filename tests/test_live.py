@@ -916,3 +916,60 @@ async def test_the_live_engine_lets_through_an_entry_that_honoured_its_level(
     declared a level and waited for it, and has to sail straight through."""
     notes = await _run_with_declared_level(settings, tmp_path, reachable=True)
     assert not _jumped(notes), notes
+
+
+class _KickTrackingCommands(_FakeCommands):
+    """Also records channel removals, which is the half that actually matters."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.kicked: list[tuple[str, str]] = []
+
+    async def kick(self, channel_id: str, user_id: str) -> bool:
+        self.kicked.append((channel_id, user_id))
+        return True
+
+
+@pytest.mark.asyncio
+async def test_removing_a_subscriber_from_the_dashboard_also_kicks_them(
+    settings, tmp_path
+):
+    """Deleting the row alone would leave them inside the private channel,
+    still receiving every signal, and now with no record that they are there —
+    strictly worse than not deleting at all."""
+    scoped = settings.model_copy(update={"telegram_private_channel_id": "-100999"})
+    engine = _engine(scoped, tmp_path)
+    engine.commands = _KickTrackingCommands()
+
+    await engine._on_subscriber_change(
+        "removed", {"chat_id": "777", "first_name": "Saud"}, None
+    )
+
+    assert engine.commands.kicked == [("-100999", "777")]
+    assert any(chat == "777" for chat, _ in engine.commands.sent)
+
+
+@pytest.mark.asyncio
+async def test_extending_a_subscriber_tells_them_and_leaves_them_in(settings, tmp_path):
+    scoped = settings.model_copy(update={"telegram_private_channel_id": "-100999"})
+    engine = _engine(scoped, tmp_path)
+    engine.commands = _KickTrackingCommands()
+
+    await engine._on_subscriber_change(
+        "extended",
+        {"chat_id": "777", "first_name": "Saud", "expires_at": "2026-10-01T00:00:00+00:00"},
+        14,
+    )
+
+    assert engine.commands.kicked == []  # a gift is not an eviction
+    body = next(text for chat, text in engine.commands.sent if chat == "777")
+    assert "14" in body and "2026-10-01" in body
+
+
+@pytest.mark.asyncio
+async def test_subscriber_edits_are_silent_when_telegram_is_not_wired(
+    settings, tmp_path
+):
+    engine = _engine(settings, tmp_path)
+    engine.commands = None
+    await engine._on_subscriber_change("removed", {"chat_id": "777"}, None)  # no raise

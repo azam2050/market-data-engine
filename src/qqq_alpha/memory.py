@@ -23,7 +23,7 @@ import logging
 import sqlite3
 from contextlib import closing, suppress
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -222,6 +222,21 @@ def _fingerprint(snapshot: MarketSnapshot | None) -> dict[str, Any]:
             default=str,
         ),
     }
+
+
+def _as_aware(stamp: str | None) -> datetime | None:
+    """Parse a stored timestamp, assuming UTC when the row predates tz-awareness.
+
+    Comparing a naive datetime with an aware one raises, and a subscriber's
+    expiry is not the place to discover that.
+    """
+    if not stamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 class Memory:
@@ -688,6 +703,59 @@ class Memory:
                 )
                 conn.commit()
         return due
+
+    def all_subscribers(self) -> list[dict[str, Any]]:
+        """Every trial ever started, newest first — the operator's roster.
+
+        Deliberately unfiltered. The dashboard's headline count only shows
+        rows still marked ``trial``, which is why an operator who knows two
+        friends signed up can be shown "1": the other may have expired, or
+        may have joined the channel without ever clearing the consent gate.
+        A list that hides the difference cannot answer that question.
+        """
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT * FROM subscribers ORDER BY joined_at DESC"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def extend_subscriber(
+        self, chat_id: str, days: int, now: datetime
+    ) -> dict[str, Any] | None:
+        """Grant more free days. Returns the updated row, or None if unknown.
+
+        Extends from the later of the current expiry and now, so topping up a
+        live trial adds to what is left, while reviving a lapsed one starts a
+        fresh window instead of quietly spending the days in the past.
+        """
+        row = self.subscriber(chat_id)
+        if row is None or days <= 0:
+            return None
+        current = _as_aware(row["expires_at"])
+        base = max(current, now) if current else now
+        with closing(self._connect()) as conn:
+            conn.execute(
+                "UPDATE subscribers SET expires_at = ?, status = 'trial' WHERE chat_id = ?",
+                ((base + timedelta(days=days)).isoformat(), str(chat_id)),
+            )
+            conn.commit()
+        return self.subscriber(chat_id)
+
+    def remove_subscriber(self, chat_id: str) -> dict[str, Any] | None:
+        """Delete a subscriber outright. Returns the row that was removed.
+
+        The row is returned rather than a bool because the caller still needs
+        it: deleting the record does not remove anyone from the private
+        channel, and a subscriber dropped here but left in the channel would
+        go on receiving every signal.
+        """
+        row = self.subscriber(chat_id)
+        if row is None:
+            return None
+        with closing(self._connect()) as conn:
+            conn.execute("DELETE FROM subscribers WHERE chat_id = ?", (str(chat_id),))
+            conn.commit()
+        return row
 
     def subscriber_counts(self) -> dict[str, int]:
         with closing(self._connect()) as conn:
