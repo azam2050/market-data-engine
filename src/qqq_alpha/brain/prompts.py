@@ -164,13 +164,16 @@ DECISION_TOOL: dict[str, Any] = {
             "triggers": {
                 "type": "array",
                 "description": (
-                    "On WAIT or PASS: the numeric conditions that would arm an entry, "
-                    "one per direction you are willing to take. Whatever you put here "
-                    "BINDS you — the engine will refuse the next ENTER in that "
-                    "direction until the level actually trades. Name the level you "
-                    "mean, not a comfortable one, and re-declare it each wake if your "
-                    "read has changed. Omit rather than invent: no trigger means no "
-                    "lock. Leave empty on ENTER."
+                    "On WAIT or PASS: the numeric conditions that would arm an entry. "
+                    "Whatever you put here BINDS you — the engine will refuse the next "
+                    "ENTER in that direction until one of these levels actually "
+                    "trades. If a direction has two ways in ('a break of 718.79, OR a "
+                    "bounce into 720.6-721.1 that fails'), list BOTH — they are "
+                    "alternatives and any one of them arms the entry, so a setup with "
+                    "two roads must not be squeezed into one number. Name the levels "
+                    "you mean, not comfortable ones, and re-declare them each wake if "
+                    "your read has changed. Omit rather than invent: no trigger means "
+                    "no lock. Leave empty on ENTER."
                 ),
                 "items": {
                     "type": "object",

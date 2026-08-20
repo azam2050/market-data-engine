@@ -519,3 +519,71 @@ def test_a_malformed_trigger_is_dropped_not_raised(settings, snapshot, bad):
 
     assert decision.action is Action.WAIT
     assert decision.triggers == []
+
+
+def test_two_roads_into_one_direction_are_alternatives(settings, snapshot):
+    """2026-08-18, 09:48: "for the PUT — a break of 718.79 ... OR a weak bounce
+    into 720.6-721.1 that fails". The entry came down the second road. Reading
+    only the first number would have blocked a +32.95% trade."""
+    spot = snapshot.underlying.close
+    untouched = min(b.low for b in snapshot.recent_bars_1m) - 0.10
+    prior = [
+        _wait(
+            snapshot,
+            3,
+            [
+                Trigger(direction=OptionType.PUT, level=untouched, side="below"),
+                Trigger(direction=OptionType.PUT, level=spot + 0.50, side="below"),
+            ],
+        )
+    ]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, prior
+    )
+
+    assert verdict.allowed, verdict.blocks
+
+
+def test_every_road_unmet_still_blocks(settings, snapshot):
+    """Alternatives widen the gate; they do not remove it."""
+    floor = min(b.low for b in snapshot.recent_bars_1m)
+    prior = [
+        _wait(
+            snapshot,
+            3,
+            [
+                Trigger(direction=OptionType.PUT, level=floor - 0.10, side="below"),
+                Trigger(direction=OptionType.PUT, level=floor - 0.50, side="below"),
+            ],
+        )
+    ]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, prior
+    )
+
+    assert not verdict.allowed
+    assert "or" in verdict.blocks[0]  # the block names both roads it was owed
+
+
+def test_one_absurd_alternative_voids_the_whole_commitment(settings, snapshot):
+    """A fat-fingered level sitting beside a good one must not silently tighten
+    the lock down to the good one."""
+    floor = min(b.low for b in snapshot.recent_bars_1m)
+    prior = [
+        _wait(
+            snapshot,
+            3,
+            [
+                Trigger(direction=OptionType.PUT, level=floor - 0.10, side="below"),
+                Trigger(direction=OptionType.PUT, level=1.0, side="below"),
+            ],
+        )
+    ]
+
+    verdict = SafetyRails(settings).commitment_check(
+        _enter(snapshot, OptionType.PUT), snapshot, prior
+    )
+
+    assert verdict.allowed, verdict.blocks

@@ -58,12 +58,19 @@ def live_commitment(
     now: datetime,
     ttl_minutes: int,
     spot: float | None = None,
-) -> tuple[Trigger, datetime] | None:
-    """The newest un-expired, plausible trigger declared for ``direction``, and when.
+) -> tuple[list[Trigger], datetime] | None:
+    """The newest un-expired, plausible triggers declared for ``direction``, and when.
 
     Reads backwards and stops at the first decision that carries a trigger for
     this direction: an older commitment the brain has already superseded must
     not outlive the revision.
+
+    Several triggers for one direction are alternatives, and ANY of them arms
+    the entry. Real setups routinely have two roads in — 2026-08-18, 09:48:
+    "for the PUT: a break of 718.79 ... **or** a weak bounce into 720.6-721.1
+    that fails on an upper wick". Forcing that into one number would have
+    blocked the +32.95% trade it led to. The brain says what it means and is
+    held to all of it, not to whichever half a schema had room for.
     """
     horizon = now - timedelta(minutes=max(ttl_minutes, 0))
     for decision in reversed(decisions):
@@ -73,12 +80,15 @@ def live_commitment(
             continue
         if decision.ts < horizon:
             break
-        match = next((t for t in decision.triggers if t.direction is direction), None)
-        if match is None:
+        matches = [t for t in decision.triggers if t.direction is direction]
+        if not matches:
             continue
-        if not _plausible(match, spot):
+        usable = [t for t in matches if _plausible(t, spot)]
+        # a fat-fingered level among good ones must not silently tighten the
+        # lock, so a discarded alternative voids the whole commitment
+        if len(usable) != len(matches):
             return None
-        return match, decision.ts
+        return usable, decision.ts
     return None
 
 
@@ -121,14 +131,13 @@ def check(
     if found is None:
         return None
 
-    commitment, declared_at = found
-    if armed(commitment, snapshot, declared_at):
+    triggers, declared_at = found
+    if any(armed(t, snapshot, declared_at) for t in triggers):
         return None
 
-    word = "below" if commitment.side == "below" else "above"
+    named = " or ".join(f"{t.side} {t.level:.2f}" for t in triggers)
     return (
         f"declared_trigger_unmet: you said {decision.direction.value} arms at "
-        f"{word} {commitment.level:.2f} "
-        f"({declared_at.strftime('%H:%M')}); spot is {snapshot.underlying.close:.2f} "
-        "and the level has not traded since"
+        f"{named} ({declared_at.strftime('%H:%M')}); spot is "
+        f"{snapshot.underlying.close:.2f} and no such level has traded since"
     )
