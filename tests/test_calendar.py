@@ -67,3 +67,118 @@ def test_calendar_section_reaches_the_brains_prompt():
 
     quiet = build_user_prompt(snap, Playbook(), calendar_events=[])
     assert "ECONOMIC CALENDAR" not in quiet
+
+
+# ---------------------------------------------------------------- earnings
+def test_an_after_close_report_is_flagged_on_the_day_it_lands(tmp_path):
+    path = _write_calendar(
+        tmp_path,
+        "events:\n"
+        '  - {date: 2026-08-26, time_et: "16:20", label: "أرباح NVDA", '
+        "impact: high, after_close: true}\n",
+    )
+    now = datetime(2026, 8, 26, 14, 20, tzinfo=MARKET_TZ)
+
+    events = todays_events(now, path=path)
+    assert len(events) == 1
+    assert events[0]["minutes_from_now"] == 120  # two hours out, still to come
+
+
+def test_the_gap_morning_after_an_after_close_report_is_flagged_too(tmp_path):
+    """The violent session is the *next* open, not the afternoon before it."""
+    path = _write_calendar(
+        tmp_path,
+        "events:\n"
+        '  - {date: 2026-08-26, time_et: "16:20", label: "أرباح NVDA", '
+        "impact: high, after_close: true}\n",
+    )
+    now = datetime(2026, 8, 27, 9, 40, tzinfo=MARKET_TZ)
+
+    events = todays_events(now, path=path)
+    assert len(events) == 1
+    assert "صدرت بعد إغلاق أمس" in events[0]["label"]
+    assert events[0]["impact"] == "high"
+
+
+def test_monday_looks_back_to_fridays_close(tmp_path):
+    path = _write_calendar(
+        tmp_path,
+        "events:\n"
+        '  - {date: 2026-08-28, time_et: "16:05", label: "أرباح X", '
+        "impact: high, after_close: true}\n",
+    )
+    # 2026-08-28 is a Friday; 2026-08-31 the Monday that opens on its gap
+    monday = datetime(2026, 8, 31, 9, 40, tzinfo=MARKET_TZ)
+
+    assert any("صدرت بعد إغلاق أمس" in e["label"] for e in todays_events(monday, path=path))
+
+
+def test_a_daytime_release_does_not_leak_into_the_next_session(tmp_path):
+    """CPI lands at 08:30 and is finished. Only after_close events carry over."""
+    path = _write_calendar(
+        tmp_path,
+        'events:\n  - {date: 2026-08-12, time_et: "08:30", label: "CPI", impact: high}\n',
+    )
+    next_day = datetime(2026, 8, 13, 9, 40, tzinfo=MARKET_TZ)
+
+    assert todays_events(next_day, path=path) == []
+
+
+def test_last_nights_report_is_listed_before_todays_schedule(tmp_path):
+    path = _write_calendar(
+        tmp_path,
+        "events:\n"
+        '  - {date: 2026-08-26, time_et: "16:20", label: "أرباح NVDA", '
+        "impact: high, after_close: true}\n"
+        '  - {date: 2026-08-27, time_et: "08:30", label: "CPI", impact: high}\n',
+    )
+    now = datetime(2026, 8, 27, 9, 40, tzinfo=MARKET_TZ)
+
+    events = todays_events(now, path=path)
+    assert [e["impact"] for e in events] == ["high", "high"]
+    assert "NVDA" in events[0]["label"] and events[1]["label"] == "CPI"
+
+
+def test_the_shipped_calendar_carries_the_index_heavyweights(tmp_path):
+    """QQQ is a handful of companies wearing an index costume."""
+    import yaml
+
+    from qqq_alpha.data.calendar import CALENDAR_PATH
+
+    labels = " ".join(
+        str(row.get("label", ""))
+        for row in yaml.safe_load(CALENDAR_PATH.read_text(encoding="utf-8"))["events"]
+    )
+    for ticker in ("NVDA", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA"):
+        assert ticker in labels, ticker
+
+
+def test_an_earnings_day_reaches_the_brains_prompt(tmp_path):
+    """Deliberately reads a fixture, not the shipped file.
+
+    The operator is told to correct these dates against each company's investor
+    relations page; a test pinned to a shipped date would turn doing that into
+    a broken build.
+    """
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.brain.prompts import build_user_prompt
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    path = _write_calendar(
+        tmp_path,
+        "events:\n"
+        '  - {date: 2026-08-26, time_et: "16:20", label: "أرباح NVDA", '
+        "impact: high, after_close: true}\n",
+    )
+    bars = synthetic_session("QQQ", datetime(2026, 8, 27).date(), seed=3)
+    snap = SnapshotBuilder("QQQ").build(bars[:60])
+
+    prompt = build_user_prompt(
+        snap,
+        Playbook(),
+        calendar_events=todays_events(
+            datetime(2026, 8, 27, 9, 40, tzinfo=MARKET_TZ), path=path
+        ),
+    )
+    assert "NVDA" in prompt and "صدرت بعد إغلاق أمس" in prompt

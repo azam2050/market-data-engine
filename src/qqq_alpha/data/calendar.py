@@ -7,6 +7,18 @@ operator maintains (FOMC and CPI dates are published far in advance), plus the
 one release that never needs a file — nonfarm payrolls, first Friday of the
 month. The brain gets today's events with their distance from now and draws its
 own conclusions.
+
+Earnings are the same kind of fact and were the gap in it. QQQ is a handful of
+companies wearing an index costume: when NVDA or AAPL reports, the whole index
+moves, and the engine was walking into those sessions unaware. They are listed
+here as dates, exactly like CPI — no headline, no estimate, no opinion about
+what the number will be.
+
+Earnings differ from a macro release in one way that matters, though. CPI lands
+at 08:30 on the day it is dated; earnings land *after the close*, so the violent
+session is the **next** morning's gap. An after-close event is therefore
+surfaced twice: on its own day, as something approaching, and again on the
+following session, as something that already happened.
 """
 
 from __future__ import annotations
@@ -23,10 +35,37 @@ log = logging.getLogger(__name__)
 
 CALENDAR_PATH = Path(__file__).with_name("economic_calendar.yaml")
 
+# the slot an after-close release occupies on the following session: no clock
+# time fits it, because it landed while the market was shut
+BEFORE_OPEN = "قبل الافتتاح"
+
 
 def _first_friday(year: int, month: int) -> date:
     day = date(year, month, 1)
     return day + timedelta(days=(4 - day.weekday()) % 7)
+
+
+def _previous_session(day: date) -> date:
+    """The weekday before ``day`` — Monday looks back to Friday.
+
+    Calendar-only, like ``_is_last_session_of_month``: a market holiday would
+    make this a day early, which costs a stale line in the prompt. Getting it
+    wrong the other way would hide the gap that actually moved the open.
+    """
+    probe = day - timedelta(days=1)
+    while probe.weekday() >= 5:
+        probe -= timedelta(days=1)
+    return probe
+
+
+def _row_date(row: dict) -> date | None:
+    value = row.get("date")
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return value if isinstance(value, date) else None
 
 
 def _load_events(path: Path) -> list[dict]:
@@ -41,28 +80,37 @@ def _load_events(path: Path) -> list[dict]:
 
 
 def todays_events(now: datetime, path: Path | None = None) -> list[dict]:
-    """Today's scheduled releases, each stamped with distance from ``now``.
+    """Today's scheduled releases, each stamped with distance from ``now``,
+    plus anything that landed after the previous session's close.
 
     Returns an empty list on a no-event day — the prompt section simply
     disappears rather than announcing an absence.
     """
     local = now.astimezone(MARKET_TZ)
     today = local.date()
+    yesterday = _previous_session(today)
 
     events: list[dict] = []
     for row in _load_events(path or CALENDAR_PATH):
-        row_date = row.get("date")
-        if isinstance(row_date, str):
-            try:
-                row_date = date.fromisoformat(row_date)
-            except ValueError:
-                continue
+        row_date = _row_date(row)
+        after_close = bool(row.get("after_close"))
         if row_date == today:
             events.append(
                 {
                     "time_et": str(row.get("time_et", "?")),
                     "label": str(row.get("label", "?")),
                     "impact": str(row.get("impact", "medium")),
+                }
+            )
+        elif row_date == yesterday and after_close:
+            # the report itself was last night; this session opens on its gap,
+            # which is the half of an earnings event that actually trades
+            events.append(
+                {
+                    "time_et": BEFORE_OPEN,
+                    "label": f"{row.get('label', '?')} — صدرت بعد إغلاق أمس",
+                    "impact": str(row.get("impact", "medium")),
+                    "minutes_from_now": None,
                 }
             )
 
@@ -81,5 +129,7 @@ def todays_events(now: datetime, path: Path | None = None) -> list[dict]:
         except (ValueError, KeyError):
             event["minutes_from_now"] = None
 
-    events.sort(key=lambda e: e.get("time_et") or "")
+    # last night's release belongs at the top: it is the only one that already
+    # moved the price the brain is looking at
+    events.sort(key=lambda e: (0 if e["time_et"] == BEFORE_OPEN else 1, e["time_et"]))
     return events

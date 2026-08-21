@@ -22,3 +22,26 @@ events:
   - {date: 2026-10-13, time_et: "08:30", label: "CPI تقرير التضخم", impact: high}
   - {date: 2026-11-10, time_et: "08:30", label: "CPI تقرير التضخم", impact: high}
   - {date: 2026-12-10, time_et: "08:30", label: "CPI تقرير التضخم", impact: high}
+
+  # ------------------------------------------------------------------
+  # أرباح الشركات الكبرى — QQQ عمليًا سبع شركات ترتدي زيّ مؤشر.
+  #
+  # ⚠️ هذي المواعيد **تقديرية** مبنية على نمط كل شركة التاريخي، وليست مؤكّدة
+  #    من الشركات. راجعها في صفحة علاقات المستثمرين لكل شركة وصحّحها — يوم
+  #    خاطئ هنا أسوأ من لا شيء، لأنه يجعل العقل يحتاط في اليوم الغلط.
+  #
+  # after_close: true تعني أن الإعلان يصدر بعد إغلاق السوق، فالجلسة العنيفة
+  # هي صباح **اليوم التالي** (الفجوة). المحرك يعرض الحدث مرتين: يوم صدوره
+  # كشيء قادم، وصباح اليوم التالي كشيء وقع فعلًا.
+  # ------------------------------------------------------------------
+  - {date: 2026-08-26, time_et: "16:20", label: "أرباح NVDA", impact: high, after_close: true}
+
+  - {date: 2026-10-21, time_et: "16:05", label: "أرباح TSLA", impact: high, after_close: true}
+  - {date: 2026-10-27, time_et: "16:05", label: "أرباح GOOGL", impact: high, after_close: true}
+  - {date: 2026-10-28, time_et: "16:05", label: "أرباح META", impact: high, after_close: true}
+  - {date: 2026-10-29, time_et: "16:05", label: "أرباح MSFT", impact: high, after_close: true}
+  - {date: 2026-10-29, time_et: "16:30", label: "أرباح AAPL", impact: high, after_close: true}
+  - {date: 2026-10-29, time_et: "16:00", label: "أرباح AMZN", impact: high, after_close: true}
+
+  - {date: 2026-11-18, time_et: "16:20", label: "أرباح NVDA", impact: high, after_close: true}
+  - {date: 2026-12-10, time_et: "16:05", label: "أرباح AVGO", impact: high, after_close: true}
