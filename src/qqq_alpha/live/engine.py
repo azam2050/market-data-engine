@@ -40,6 +40,7 @@ from qqq_alpha.domain import (
     Trade,
     TradeStatus,
 )
+from qqq_alpha.execution import ExecutionRouter, OrderRequest, Side, build_broker
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
 from qqq_alpha.learning import analyse, propose, with_applied_lessons
@@ -178,6 +179,16 @@ class LiveEngine:
         self._command_task: asyncio.Task | None = None
         self._dashboard_task: asyncio.Task | None = None
         self._watchdog_task: asyncio.Task | None = None
+        # the door to a real broker. Disarmed unless EXECUTION_ENABLED is on
+        # *and* a broker is configured, and it journals every intent either
+        # way — so the order file fills with what would have been sent long
+        # before anything is, and the first live day is a file you recognise.
+        self.execution = ExecutionRouter(
+            self.settings,
+            broker=build_broker(self.settings),
+            journal=self.journal,
+            on_alert=self.notifier.note,
+        )
         # "price of the day": where options money is concentrating, for QQQ and
         # the leaders — context even when the tape itself is quiet
         self.pulse = PulseTracker(self.settings)
@@ -329,6 +340,10 @@ class LiveEngine:
         self._watchdog_task = asyncio.create_task(self._watch_the_tape())
 
         await self._restore()
+        # after _restore, because reconciliation compares the broker's holdings
+        # against the book we just recovered from disk
+        await self._announce_execution_mode()
+        await self._reconcile_positions()
         await self._expire_subscribers()
         self._refresh_recent()
         await self._warm_start()
@@ -522,6 +537,7 @@ class LiveEngine:
                 self.memory.remember_trade(trade)
                 self._recall_after_close(trade)
                 self._persist()
+                await self._execute_exit(trade)
 
         self.status.open_positions = len(self.manager.open_trades)
         self.status.realized_pct = self.manager.realized_return_pct
@@ -650,6 +666,10 @@ class LiveEngine:
         # persist before publishing: a crash between the two must leave the
         # position recoverable, never announced-but-forgotten
         self._persist()
+        # the order goes out after the position is durably recorded: a crash
+        # between the two must leave a trade we can find, never a fill we
+        # cannot explain
+        await self._execute_entry(trade)
         await self.notifier.signal(trade, self._delayed)
         if trade.shared_to_channel and self.channel is not None:
             await self.channel.post_trade_entry(trade, self._delayed)
@@ -1002,6 +1022,7 @@ class LiveEngine:
             self.memory.remember_trade(trade)
             self._recall_after_close(trade)
             self._persist()
+            await self._execute_exit(trade)
         await self._publish_channel_daily(bar.ts.astimezone(MARKET_TZ).date())
 
     @property
@@ -1903,6 +1924,98 @@ class LiveEngine:
     def _refresh_recent(self) -> None:
         """Reload recent history from disk rather than trusting process memory."""
         self.recent_trades = self.memory.recent_trades(limit=15)
+
+    async def _announce_execution_mode(self) -> None:
+        """Say, at every boot, whether real money is on the line.
+
+        The one fact an operator must never have to guess or infer from a
+        dashboard, and the one that silence answers wrongly in both
+        directions.
+        """
+        if self.execution.armed:
+            await self.notifier.note(
+                "💰 **التنفيذ الحقيقي مُفعَّل** — البوت يرسل أوامر فعلية عبر "
+                f"«{getattr(self.execution.broker, 'name', '?')}»، "
+                f"بحدّ أقصى {self.settings.execution_max_contracts} عقدًا للأمر.\n"
+                "للإيقاف فورًا: اجعل EXECUTION_ENABLED=false في Railway."
+            )
+            return
+        await self.notifier.note(
+            "🧾 التنفيذ مُطفأ — البوت يقرّر ويسجّل ولا يرسل أي أمر لأي وسيط. "
+            "كل أمر كان سيُرسَل يُكتب في سجل الأوامر حتى تقرأه قبل التفعيل."
+        )
+
+    # ------------------------------------------------------------------
+    def _order_quantity(self, trade: Trade) -> int:
+        """How many contracts an order carries.
+
+        The engine sizes in a *fraction of normal* (``size_factor``), which has
+        no meaning to a broker — a broker counts contracts. The cap is what
+        "normal" means, and the floor is one, because a trade the brain
+        committed to should not become an order for nothing.
+        """
+        scaled = self.settings.execution_max_contracts * trade.decision.size_factor
+        return max(1, int(round(scaled)))
+
+    async def _execute_entry(self, trade: Trade) -> None:
+        """Buy what the engine just opened on paper.
+
+        Priced at the entry the engine recorded, which is already the ask: the
+        live order therefore asks for the same price the paper record assumed,
+        and any divergence between the two is real slippage rather than an
+        artefact of pricing them differently.
+        """
+        await self.execution.submit(
+            OrderRequest(
+                client_order_id=f"{trade.trade_id}-entry",
+                occ_symbol=trade.occ_symbol,
+                side=Side.BUY,
+                quantity=self._order_quantity(trade),
+                limit_price=trade.entry_price,
+                trade_id=trade.trade_id,
+                reason="entry",
+            )
+        )
+
+    async def _execute_exit(self, trade: Trade) -> None:
+        """Sell out of a position the engine has finished with.
+
+        Only whole exits. The exit engine banks half a position at +35%, and
+        half of one contract does not exist — so while the cap is one contract
+        a scale-out has nothing to send, and sending the *whole* position on a
+        partial exit would close a trade the engine still considers open. That
+        gap is left visible rather than papered over: it closes by trading two
+        contracts or more, not by rounding.
+        """
+        if trade.is_open or trade.exit_price is None or trade.exit_price <= 0:
+            return
+        await self.execution.submit(
+            OrderRequest(
+                client_order_id=f"{trade.trade_id}-exit",
+                occ_symbol=trade.occ_symbol,
+                side=Side.SELL,
+                quantity=self._order_quantity(trade),
+                limit_price=trade.exit_price,
+                trade_id=trade.trade_id,
+                reason=trade.exit_reason or "exit",
+            )
+        )
+
+    async def _reconcile_positions(self) -> None:
+        """Ask the broker what we actually own, and say so if it disagrees.
+
+        Run at boot, which is the moment after every disconnect: whatever
+        happened while the process was dead happened without us, and the
+        broker is the only witness.
+        """
+        if not self.execution.armed:
+            return
+        expected: dict[str, int] = {}
+        for trade in self.manager.open_trades:
+            expected[trade.occ_symbol] = expected.get(trade.occ_symbol, 0) + (
+                self._order_quantity(trade)
+            )
+        await self.execution.reconcile(expected)
 
     def _recall_after_close(self, trade: Trade) -> None:
         """Let the brain see a trade it already closed today.

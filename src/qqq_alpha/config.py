@@ -85,6 +85,20 @@ class Settings(BaseSettings):
     # after this landed — it changes no rule, only what the brain is told.
     recall_todays_trades: bool = True
 
+    # ------------------------------------------------------------------
+    # Real order execution (qqq_alpha/execution). OFF, and staying off until
+    # a broker has confirmed API access and the wiring has been proven against
+    # their sandbox. Two separate switches on purpose: naming a broker must
+    # not be enough to start trading, so credentials and going live are two
+    # decisions made on two different days.
+    #
+    # execution_max_contracts is a refusal, not a trim — an order above it is
+    # dropped and announced rather than quietly resized, because a sizing bug
+    # wearing a safe number is worse than a missed trade.
+    execution_enabled: bool = False
+    execution_broker: str = "none"
+    execution_max_contracts: int = 1
+
     # attention engine (cost gate, NOT a decision gate)
     attention_threshold: float = 0.45
     attention_cooldown_sec: int = 180

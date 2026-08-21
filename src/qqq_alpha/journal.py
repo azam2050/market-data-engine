@@ -31,6 +31,7 @@ class Journal:
         self.trades_path = directory / f"trades-{tag}.jsonl"
         self.attention_path = directory / f"attention-{tag}.jsonl"
         self.missed_path = directory / f"missed-{tag}.jsonl"
+        self.orders_path = directory / f"orders-{tag}.jsonl"
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -91,6 +92,15 @@ class Journal:
 
     def log_missed(self, missed: MissedOpportunity) -> None:
         self._append(self.missed_path, missed.model_dump(mode="json"))
+
+    def log_order(self, record: dict[str, Any]) -> None:
+        """Every order intent, sent or withheld.
+
+        Written before the broker is called and again after it answers, so an
+        order whose fate is unknown — the process died between the two — leaves
+        a record saying exactly that instead of leaving no record at all.
+        """
+        self._append(self.orders_path, record)
 
     # ------------------------------------------------------------------
     def read(self, path: Path) -> Iterator[dict[str, Any]]:
