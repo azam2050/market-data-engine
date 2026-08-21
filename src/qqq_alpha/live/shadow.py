@@ -5,10 +5,21 @@ the same system it runs on QQQ. Jumping straight to live signals would throw
 away the one thing that makes this project trustworthy: an evidence trail.
 So the expansion starts here — the same brain, the same playbook, the same
 exit engine and the same sizing arithmetic, run per symbol on the leader bars
-the engine already streams. Every trade is simulated, every option price is a
-labelled Black-Scholes approximation of the WEEKLY contract, and nothing is
-ever sent to a subscriber. The record accumulates on the admin dashboard;
-a symbol graduates to the live desk only when its shadow record earns it.
+the engine already streams. Every trade is simulated and nothing is ever sent
+to a subscriber. The record accumulates on the admin dashboard; a symbol
+graduates to the live desk only when its shadow record earns it.
+
+Each book now carries its **own live option chain**, not a modelled one. The
+difference is the whole point of the record: a Black-Scholes price has no
+spread to pay, no liquidity to check and no contract that can fail to exist,
+so the execution rails were inert here — a model always answers, and nothing
+could ever be rejected. Every simulated fill was therefore optimistic by
+construction, and a record that flatters itself cannot decide anything.
+
+Single names carry Friday weeklies rather than QQQ's daily expiries, so on a
+Friday this chain **is** the 0DTE chain: the same instrument the live desk
+trades, on the same day, priced from the same quotes. The modelled pricer
+stays underneath as a labelled fallback for the minutes a fetch fails.
 """
 
 from __future__ import annotations
@@ -23,6 +34,7 @@ from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.brain.rails import DayState, SafetyRails
 from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, Settings
 from qqq_alpha.data.calendar import todays_events
+from qqq_alpha.data.chain import LiveChainPricer
 from qqq_alpha.data.massive import parse_occ_symbol
 from qqq_alpha.data.pricing import BlackScholesPricer
 from qqq_alpha.data.pulse import nearest_weekly_expiry
@@ -38,11 +50,16 @@ SHADOW_WARMUP_BARS = 30
 SHADOW_MAX_TRADES_PER_DAY = 2
 SHADOW_MAX_OPEN = 1
 
-# single names are not the index: pricing NVDA weekly premium off QQQ's 22%
-# implied vol would flatter every simulated fill. These are coarse resting
-# levels per name — the record they produce is labelled an approximation
-# everywhere it is shown, and calibration against real chains happens before
-# any symbol goes live.
+# each leader's chain is a request, so these refresh on a slower clock than
+# QQQ's 30s. A shadow book only needs a fresh quote while it holds something
+# or is about to decide, and the chain is only fetched in those two moments.
+SHADOW_CHAIN_TTL_SEC = 60
+
+# Fallback volatilities, used only for the minutes a chain fetch fails. Single
+# names are not the index: pricing NVDA weekly premium off QQQ's implied vol
+# would flatter those fills badly. Since the chain landed these are a stopgap
+# rather than the record's basis, but a wrong stopgap is still a wrong number,
+# so they stay per name.
 SHADOW_VOLATILITY = {
     "AAPL": 0.28,
     "MSFT": 0.25,
@@ -66,7 +83,7 @@ class ShadowBook:
     builder: SnapshotBuilder
     attention: AttentionEngine
     manager: TradeManager
-    pricer: BlackScholesPricer
+    pricer: LiveChainPricer | BlackScholesPricer
     bars: list[Bar] = field(default_factory=list)
     brain_calls_today: int = 0
     trades_today: int = 0
@@ -118,6 +135,9 @@ class ShadowStockDesk:
                     symbol,
                 )
                 continue
+            model = BlackScholesPricer(
+                volatility=SHADOW_VOLATILITY.get(symbol, DEFAULT_SHADOW_VOLATILITY)
+            )
             self.books[symbol] = ShadowBook(
                 symbol=symbol,
                 builder=SnapshotBuilder(symbol),
@@ -125,8 +145,14 @@ class ShadowStockDesk:
                     settings.attention_threshold, settings.attention_cooldown_sec
                 ),
                 manager=TradeManager(),
-                pricer=BlackScholesPricer(
-                    volatility=SHADOW_VOLATILITY.get(symbol, DEFAULT_SHADOW_VOLATILITY)
+                # the same real chain QQQ gets, per leader. The modelled pricer
+                # stays underneath as a labelled fallback for the minutes a
+                # fetch fails, exactly as it does on the live desk.
+                pricer=LiveChainPricer(
+                    settings,
+                    fallback=model,
+                    ttl_sec=SHADOW_CHAIN_TTL_SEC,
+                    symbol=symbol,
                 ),
             )
 
@@ -157,6 +183,10 @@ class ShadowStockDesk:
         if len(book.bars) < SHADOW_WARMUP_BARS:
             return
 
+        # a held position must be marked against a real bid, not a modelled
+        # one — so the chain is pulled whenever there is something to mark
+        if book.manager.open_trades:
+            await self._refresh_chain(book, local_day)
         self._mark_positions(book, bar)
         if bar.ts.astimezone(MARKET_TZ).time() >= REGULAR_CLOSE:
             # mirror the live desk: intraday record, nothing held past the bell
@@ -168,6 +198,18 @@ class ShadowStockDesk:
                 self.journal.log_trade(trade)
             return
         await self._maybe_decide(book, bar)
+
+    # ------------------------------------------------------------------
+    async def _refresh_chain(self, book: ShadowBook, day: date) -> bool:
+        """Pull this leader's Friday chain. Cheap when the cache is warm.
+
+        Single names carry Friday weeklies rather than QQQ's daily expiries,
+        so on a Friday this chain IS the 0DTE chain — the same instrument the
+        live desk trades, on the same day, with the same quotes.
+        """
+        if not isinstance(book.pricer, LiveChainPricer):
+            return False
+        return await book.pricer.refresh(nearest_weekly_expiry(day))
 
     # ------------------------------------------------------------------
     def _mark_positions(self, book: ShadowBook, bar: Bar) -> None:
@@ -213,6 +255,16 @@ class ShadowStockDesk:
         if len(book.manager.open_trades) >= SHADOW_MAX_OPEN:
             return
 
+        # the chain, before the brain is asked — so it picks a strike that
+        # exists and can be filled, the same way it does on QQQ, instead of
+        # naming a number the model happens to be able to price
+        await self._refresh_chain(book, bar.ts.astimezone(MARKET_TZ).date())
+        chain = (
+            book.pricer.chain_context(bar.close)
+            if isinstance(book.pricer, LiveChainPricer)
+            else None
+        )
+
         decision = await self.decider.decide(
             snapshot=snapshot,
             playbook=self.playbook,
@@ -222,6 +274,7 @@ class ShadowStockDesk:
             attention_note=f"SHADOW {book.symbol} (weekly options): {verdict.summary}",
             recent_decisions=book.decisions_today[-4:],
             calendar_events=todays_events(bar.ts),
+            chain=chain,
         )
         self.brain_calls += 1
         book.brain_calls_today += 1
@@ -232,6 +285,21 @@ class ShadowStockDesk:
         self.journal.log_decision(decision, snapshot, [], pre.warnings, verdict.score)
 
         if decision.action is not Action.ENTER or not decision.occ_symbol:
+            return
+
+        # now that the contract is real, it can be checked like a real one:
+        # does it exist, is the spread payable, is there anyone on the other
+        # side. These rails were inert here while every price was modelled —
+        # a model always answers, so nothing could ever be rejected.
+        contract = (
+            book.pricer.contract(decision.occ_symbol)
+            if isinstance(book.pricer, LiveChainPricer)
+            else None
+        )
+        post = self.rails.post_check(decision, contract)
+        if not post.allowed:
+            self.journal.log_decision(decision, snapshot, post.blocks, post.warnings, verdict.score)
+            log.info("shadow %s: rails refused %s", book.symbol, post.blocks)
             return
 
         fill = book.pricer.price_at(decision.occ_symbol, bar.ts, bar.close, side="entry")

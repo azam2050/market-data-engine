@@ -61,8 +61,14 @@ class LiveChainPricer:
         settings: Settings,
         fallback: Any | None = None,
         ttl_sec: int = DEFAULT_TTL_SEC,
+        symbol: str | None = None,
     ):
         self.settings = settings
+        # which underlying's chain this instance serves. Defaults to the
+        # primary symbol, which is every existing call site; the shadow desk
+        # passes a leader so its single names get the same real quotes QQQ has
+        # instead of a modelled approximation of them.
+        self.symbol = (symbol or settings.primary_symbol).upper()
         self.ttl = timedelta(seconds=ttl_sec)
         self.fallback = fallback
         self.snapshot: ChainSnapshot | None = None
@@ -101,15 +107,15 @@ class LiveChainPricer:
 
         try:
             async with MassiveClient(self.settings) as client:
-                contracts = await client.option_chain(self.settings.primary_symbol, expiry)
+                contracts = await client.option_chain(self.symbol, expiry)
         except Exception as exc:  # noqa: BLE001 - a failed refresh must not stop trading
             self.last_error = str(exc)
-            log.warning("chain refresh failed for %s: %s", expiry, exc)
+            log.warning("chain refresh failed for %s %s: %s", self.symbol, expiry, exc)
             return False
 
         if not contracts:
-            self.last_error = f"empty chain for {expiry}"
-            log.warning("chain for %s came back empty", expiry)
+            self.last_error = f"empty chain for {self.symbol} {expiry}"
+            log.warning("chain for %s %s came back empty", self.symbol, expiry)
             return False
 
         self.snapshot = ChainSnapshot(
