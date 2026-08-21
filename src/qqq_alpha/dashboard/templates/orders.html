@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}التنفيذ الحقيقي — QQQ Alpha{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>التنفيذ الحقيقي — محفظتك أنت</h2>
+
+  {% if orders.sent == 0 %}
+  <p class="small" style="color:var(--yellow)">
+    🔒 <strong>التنفيذ مُطفأ.</strong> البوت لم يرسل أي أمر لأي وسيط.
+    كل سطر بالأسفل هو أمر <strong>كان</strong> سيُرسل لو كان مفعّلًا —
+    اقرأها كما تقرأ كشف حساب، حتى يكون أول يوم حقيقي ملفًا تعرفه.
+  </p>
+  {% else %}
+  <p class="small" style="color:var(--green)">
+    💰 <strong>التنفيذ مفعّل.</strong> الأوامر أدناه ذهبت لوسيط حقيقي.
+  </p>
+  {% endif %}
+
+  <div class="grid" style="margin-top:14px">
+    <div class="stat"><div class="n">{{ orders.total }}</div><div class="l">إجمالي الأوامر</div></div>
+    <div class="stat"><div class="n" style="color:var(--green)">{{ orders.sent }}</div><div class="l">أُرسلت فعلًا</div></div>
+    <div class="stat"><div class="n" style="color:var(--muted)">{{ orders.withheld }}</div><div class="l">محجوزة (مطفأ)</div></div>
+    <div class="stat">
+      <div class="n" style="color:{{ 'var(--red)' if orders.avg_slippage_pct and orders.avg_slippage_pct > 0 else 'var(--text)' }}">
+        {% if orders.avg_slippage_pct is not none %}{{ "%+.2f"|format(orders.avg_slippage_pct) }}%{% else %}—{% endif %}
+      </div>
+      <div class="l">متوسط الانزلاق ({{ orders.measured }} أمر)</div>
+    </div>
+  </div>
+
+  <p class="small muted" style="margin-top:12px">
+    <strong>الانزلاق</strong> هو الفرق بين السعر الذي طلبه البوت والسعر الذي
+    نُفِّذ به فعلًا. الرقم الموجب يعني أنه كلّفك — اشتريت أغلى أو بعت أرخص.
+    وهذي هي التكلفة الوحيدة التي <em>لا يستطيع</em> السجل الورقي إظهارها،
+    ولهذا يُكتب الاثنان: لتُقاس بالرقم بدل أن تُخمَّن.
+  </p>
+</div>
+
+<div class="card">
+  <h2>الأوامر</h2>
+  {% if orders.rows %}
+  <table>
+    <tr>
+      <th>الوقت</th><th>العقد</th><th>النوع</th><th>العقود</th>
+      <th>المبلغ</th><th>السعر المطلوب</th><th>سعر التنفيذ</th>
+      <th>الانزلاق</th><th>نتيجة الورقي</th><th>الحالة</th>
+    </tr>
+    {% for row in orders.rows %}
+    <tr>
+      <td class="small muted">{{ row.ts }}</td>
+      <td class="small">{{ row.occ_symbol }}</td>
+      <td class="small">
+        {% if row.side == "BUY" %}<span style="color:var(--green)">شراء</span>
+        {% else %}<span style="color:var(--yellow)">بيع</span>{% endif %}
+        <br><span class="small muted">{{ row.reason }}</span>
+      </td>
+      <td>{{ row.quantity }}</td>
+      <td class="small">${{ "{:,.0f}".format(row.notional) }}</td>
+      <td class="small">{{ "%.2f"|format(row.limit_price) }}</td>
+      <td class="small">{% if row.fill_price %}{{ "%.2f"|format(row.fill_price) }}{% else %}—{% endif %}</td>
+      <td>
+        {% if row.slippage_pct is not none %}
+        <span class="{{ 'neg' if row.slippage_pct > 0 else 'pos' }}">{{ "%+.2f"|format(row.slippage_pct) }}%</span>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td>
+        {% if row.paper_return_pct is not none %}
+        <span class="{{ 'pos' if row.paper_return_pct >= 0 else 'neg' }}">{{ "%+.1f"|format(row.paper_return_pct) }}%</span>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td class="small">
+        {% if row.outcome == "execution_disabled" %}<span class="muted">🔒 محجوز</span>
+        {% elif row.outcome == "submitted" %}<span style="color:var(--green)">✅ أُرسل</span>
+        {% elif row.outcome == "submitting" %}<span style="color:var(--yellow)">⏳ مصيره مجهول</span>
+        {% else %}<span style="color:var(--red)">{{ row.outcome }}</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="small muted" style="margin-top:14px">
+    <strong>«مصيره مجهول»</strong> يعني أن البوت أرسل الأمر ومات قبل أن يصله
+    الرد. هذا ليس خطأ في الصفحة — هو الحقيقة، وراجع حسابك عند الوسيط بنفسك.
+  </p>
+  {% else %}
+  <div class="empty">لا توجد أوامر مسجّلة بعد</div>
+  {% endif %}
+</div>
+
+{% endblock %}

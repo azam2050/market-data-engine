@@ -63,7 +63,10 @@ def test_dashboard_accepts_correct_credentials(tmp_path):
 # ---------------------------------------------------------------- pages, empty state
 def test_every_page_renders_with_no_data_on_record(tmp_path):
     client = TestClient(create_app(_settings(tmp_path)))
-    for path in ("/", "/trades", "/decisions", "/missed", "/lessons", "/reports", "/report-card"):
+    for path in (
+        "/", "/trades", "/orders", "/decisions", "/missed",
+        "/lessons", "/reports", "/report-card",
+    ):
         response = client.get(path, auth=AUTH)
         assert response.status_code == 200, (path, response.text[:500])
 
@@ -543,3 +546,96 @@ def test_a_genuine_list_of_risks_is_left_alone(tmp_path):
     body = TestClient(create_app(settings)).get("/decisions", auth=AUTH).text
 
     assert "السيولة ضعيفة · خبر بعد ساعة" in body
+
+
+# ---------------------------------------------------------------- execution page
+def _seed_orders(settings: Settings, rows: list[dict]) -> None:
+    journal = Journal(settings.journal_dir, session_tag="test")
+    for row in rows:
+        journal.log_order(row)
+
+
+def _order(**extra) -> dict:
+    row = {
+        "ts": "2026-03-02T14:31:00+00:00",
+        "outcome": "execution_disabled",
+        "armed": False,
+        "broker": "paper",
+        "client_order_id": "t1-entry",
+        "occ_symbol": "O:QQQ260302C00485000",
+        "side": "BUY",
+        "quantity": 8,
+        "limit_price": 1.25,
+        "trade_id": "t1",
+        "reason": "entry",
+    }
+    row.update(extra)
+    return row
+
+
+def test_the_execution_page_says_plainly_when_nothing_was_sent(tmp_path):
+    """The one fact an operator must never have to infer."""
+    settings = _settings(tmp_path)
+    _seed_orders(settings, [_order()])
+
+    body = TestClient(create_app(settings)).get("/orders", auth=AUTH).text
+
+    assert "التنفيذ مُطفأ" in body
+    assert "🔒 محجوز" in body
+    assert "$1,000" in body  # 8 contracts × $1.25 × 100
+
+
+def test_the_execution_page_measures_slippage_against_the_asked_price(tmp_path):
+    """A buy filling above the limit is a cost; the sign has to say so."""
+    settings = _settings(tmp_path)
+    _seed_orders(
+        settings,
+        [
+            _order(
+                outcome="submitted",
+                armed=True,
+                order={"average_fill_price": 1.29, "state": "FILLED", "filled_quantity": 8},
+            )
+        ],
+    )
+
+    body = TestClient(create_app(settings)).get("/orders", auth=AUTH).text
+
+    assert "التنفيذ مفعّل" in body
+    assert "+3.20%" in body  # 1.29 vs 1.25
+
+
+def test_a_sell_filling_below_the_ask_also_reads_as_a_cost(tmp_path):
+    settings = _settings(tmp_path)
+    _seed_orders(
+        settings,
+        [
+            _order(
+                side="SELL",
+                reason="trail_stop",
+                limit_price=2.00,
+                outcome="submitted",
+                armed=True,
+                order={"average_fill_price": 1.94, "state": "FILLED", "filled_quantity": 8},
+            )
+        ],
+    )
+
+    body = TestClient(create_app(settings)).get("/orders", auth=AUTH).text
+
+    assert "+3.00%" in body, "selling below the asked price is a cost, not a gain"
+
+
+def test_an_order_of_unknown_fate_is_shown_as_unknown(tmp_path):
+    """The process died between asking and being answered."""
+    settings = _settings(tmp_path)
+    _seed_orders(settings, [_order(outcome="submitting", armed=True)])
+
+    body = TestClient(create_app(settings)).get("/orders", auth=AUTH).text
+
+    assert "مصيره مجهول" in body
+
+
+def test_the_execution_page_is_behind_the_login(tmp_path):
+    """Slippage on the operator's own wallet is nobody else's business."""
+    assert TestClient(create_app(_settings(tmp_path))).get("/orders").status_code == 401

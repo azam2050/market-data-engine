@@ -111,6 +111,18 @@ def create_app(
             request, "decisions.html", _ctx(decisions=data.recent_decisions(settings))
         )
 
+    @app.get("/orders")
+    def orders(request: Request, _: str = Depends(login)):
+        """Operator-only: what the wallet did, next to what the paper said.
+
+        Deliberately not part of anything a subscriber sees. The channel gets
+        the analysis; the slippage between that analysis and a real fill is
+        the operator's business alone.
+        """
+        return templates.TemplateResponse(
+            request, "orders.html", _ctx(orders=data.execution_orders(settings))
+        )
+
     @app.get("/missed")
     def missed(request: Request, _: str = Depends(login)):
         return templates.TemplateResponse(

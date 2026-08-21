@@ -439,5 +439,189 @@ async def test_a_whole_live_session_sends_nothing_with_the_switch_off(tmp_path):
     rows = list(engine.journal.read(engine.journal.orders_path))
     assert rows, "the execution path was never exercised"
     assert {r["outcome"] for r in rows} == {"execution_disabled"}
-    assert all(r["quantity"] == 1 for r in rows)
     assert engine.execution.withheld_count == len(rows)
+
+    # every intent is sized in dollars, and the entry lands inside the band
+    entries = [r for r in rows if r["reason"] == "entry"]
+    assert entries
+    for row in entries:
+        notional = row["quantity"] * row["limit_price"] * 100
+        assert 850 <= notional <= 1150, notional
+
+    # a sell never asks for more than the entry bought
+    bought = {r["trade_id"]: r["quantity"] for r in entries}
+    sold: dict[str, int] = {}
+    for row in rows:
+        if row["reason"] != "entry":
+            sold[row["trade_id"]] = sold.get(row["trade_id"], 0) + row["quantity"]
+    for trade_id, total in sold.items():
+        assert total <= bought[trade_id], f"{trade_id} sold more than it holds"
+
+
+# ---------------------------------------------------------------- sizing + scale-out
+def _live_engine(tmp_path, decider, **extra):
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.data.pricing import BlackScholesPricer
+    from qqq_alpha.live.engine import LiveEngine
+    from qqq_alpha.live.notifier import NullNotifier
+
+    settings = Settings(
+        massive_api_key="k",
+        journal_dir=tmp_path / "journal",
+        data_dir=tmp_path / "data",
+        max_data_age_sec=10**9,
+        attention_threshold=0.0,
+        attention_cooldown_sec=0,
+        shadow_symbols_csv="",
+        execution_broker="paper",
+        **extra,
+    )
+    settings.ensure_dirs()
+    return LiveEngine(
+        settings=settings,
+        decider=decider,
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=NullNotifier(),
+    )
+
+
+def _sample_trade(entry: float = 1.25):
+    from datetime import UTC, datetime
+    from datetime import date as _date
+
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.domain import Action, Decision, OptionType, Target
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+    from qqq_alpha.trades import TradeManager
+
+    bars = synthetic_session("QQQ", _date(2026, 3, 2), seed=15)
+    snap = SnapshotBuilder("QQQ").build(bars[:80])
+    decision = Decision(
+        ts=snap.ts,
+        action=Action.ENTER,
+        direction=OptionType.CALL,
+        occ_symbol="O:QQQ260302C00485000",
+        targets=[Target(label="T1", price=0.0, return_pct=50, take_pct=50)],
+        stop_return_pct=-40,
+        confidence=6,
+        thesis="t",
+    )
+    trade = TradeManager().open_trade(decision, entry, snap)
+    assert datetime.now(UTC)  # keep the import honest
+    return trade
+
+
+@pytest.mark.asyncio
+async def test_the_entry_is_sized_in_dollars_not_contracts(tmp_path):
+    """$1,000 against a $1.25 contract is eight, not one."""
+    engine = _live_engine(tmp_path, decider=None, execution_enabled=True)
+    trade = _sample_trade(entry=1.25)
+
+    await engine._execute_entry(trade)
+
+    assert engine.execution.broker.submitted[0].quantity == 8
+    assert engine._executed[trade.trade_id] == 8
+
+
+@pytest.mark.asyncio
+async def test_conviction_sizing_does_not_shrink_the_order(tmp_path):
+    """Every decision on record is confidence 6, so applying the factor would
+    halve every trade uniformly rather than tell any two apart."""
+    engine = _live_engine(tmp_path, decider=None, execution_enabled=True)
+    trade = _sample_trade(entry=1.25)
+    trade.decision.size_factor = 0.25
+
+    await engine._execute_entry(trade)
+
+    assert engine.execution.broker.submitted[0].quantity == 8
+
+
+@pytest.mark.asyncio
+async def test_banking_half_sells_half_the_contracts(tmp_path):
+    from qqq_alpha.domain import TradeUpdate
+
+    engine = _live_engine(tmp_path, decider=None, execution_enabled=True)
+    trade = _sample_trade(entry=1.25)
+    await engine._execute_entry(trade)
+
+    trade.updates.append(
+        TradeUpdate(ts=trade.opened_at, price=1.70, return_pct=36.0, note="scale_out: +36%")
+    )
+    await engine._execute_scale_out(trade)
+
+    scale = engine.execution.broker.submitted[-1]
+    assert scale.side is Side.SELL and scale.quantity == 4
+    assert engine._executed[trade.trade_id] == 4, "the runner is what is left"
+
+
+@pytest.mark.asyncio
+async def test_the_final_exit_sells_the_remainder_not_the_original_size(tmp_path):
+    """The bug this guards: asking to sell eight after banking four leaves a
+    short leg behind."""
+    from qqq_alpha.domain import TradeStatus, TradeUpdate
+
+    engine = _live_engine(tmp_path, decider=None, execution_enabled=True)
+    trade = _sample_trade(entry=1.25)
+    await engine._execute_entry(trade)
+
+    trade.updates.append(
+        TradeUpdate(ts=trade.opened_at, price=1.70, return_pct=36.0, note="scale_out: +36%")
+    )
+    await engine._execute_scale_out(trade)
+
+    trade.status = TradeStatus.CLOSED_WIN
+    trade.exit_price, trade.exit_reason = 1.55, "trail_stop"
+    await engine._execute_exit(trade)
+
+    sells = [r for r in engine.execution.broker.submitted if r.side is Side.SELL]
+    assert [r.quantity for r in sells] == [4, 4]
+    assert sum(r.quantity for r in sells) == 8, "never more than was bought"
+
+
+@pytest.mark.asyncio
+async def test_a_trade_with_no_live_position_sends_no_exit(tmp_path):
+    """Nothing was bought, so there is nothing to sell — and a sell here would
+    open a short."""
+    from qqq_alpha.domain import TradeStatus
+
+    engine = _live_engine(tmp_path, decider=None, execution_enabled=True)
+    trade = _sample_trade(entry=1.25)
+    trade.status = TradeStatus.CLOSED_LOSS
+    trade.exit_price, trade.exit_reason = 0.80, "stop_hit"
+
+    await engine._execute_exit(trade)
+
+    assert engine.execution.broker.submitted == []
+
+
+@pytest.mark.asyncio
+async def test_an_unsizeable_contract_is_skipped_and_announced(tmp_path):
+    """A $6.00 contract is $600 for one and $1,200 for two — the band holds
+    neither, so the paper trade stands and the wallet stays out."""
+    notes: list[str] = []
+
+    engine = _live_engine(tmp_path, decider=None, execution_enabled=True)
+    engine.notifier.note = lambda m: _collect(notes, m)  # type: ignore[method-assign]
+
+    trade = _sample_trade(entry=6.00)
+    await engine._execute_entry(trade)
+
+    assert engine.execution.broker.submitted == []
+    assert engine._executed[trade.trade_id] == 0
+    assert notes and "لم يُرسَل أمر حقيقي" in notes[0]
+
+
+@pytest.mark.asyncio
+async def test_a_forgotten_position_reconciles_as_a_mismatch_not_a_guess(tmp_path):
+    """A restart loses the contract counts. Guessing them back from a budget
+    and a price that has since moved would be worse than saying so."""
+    engine = _live_engine(tmp_path, decider=None, execution_enabled=True)
+    trade = _sample_trade(entry=1.25)
+    engine.manager.open_trades.append(trade)
+    engine.execution.broker._holdings[trade.occ_symbol] = [(8, 1.25)]
+
+    result = await engine.execution.reconcile({})
+
+    assert result.unknown_to_engine == {trade.occ_symbol: 8}

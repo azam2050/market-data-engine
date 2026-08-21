@@ -41,6 +41,7 @@ from qqq_alpha.domain import (
     TradeStatus,
 )
 from qqq_alpha.execution import ExecutionRouter, OrderRequest, Side, build_broker
+from qqq_alpha.execution.sizing import size_order, split_for_scale_out
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
 from qqq_alpha.learning import analyse, propose, with_applied_lessons
@@ -189,6 +190,11 @@ class LiveEngine:
             journal=self.journal,
             on_alert=self.notifier.note,
         )
+        # contracts actually held per trade, decremented as the exit engine
+        # banks part of a position. In memory only: a restart makes the engine
+        # forget the size, which reconciliation then reports rather than
+        # guesses — see _reconcile_positions.
+        self._executed: dict[str, int] = {}
         # "price of the day": where options money is concentrating, for QQQ and
         # the leaders — context even when the tape itself is quiet
         self.pulse = PulseTracker(self.settings)
@@ -537,7 +543,13 @@ class LiveEngine:
                 self.memory.remember_trade(trade)
                 self._recall_after_close(trade)
                 self._persist()
-                await self._execute_exit(trade)
+                # a scale-out banks half WITHOUT closing the trade, so it needs
+                # its own branch: the exit path below only ever fires on a
+                # position the engine has finished with
+                if update.note.startswith("scale_out"):
+                    await self._execute_scale_out(trade)
+                else:
+                    await self._execute_exit(trade)
 
         self.status.open_positions = len(self.manager.open_trades)
         self.status.realized_pct = self.manager.realized_return_pct
@@ -1946,55 +1958,103 @@ class LiveEngine:
         )
 
     # ------------------------------------------------------------------
-    def _order_quantity(self, trade: Trade) -> int:
-        """How many contracts an order carries.
-
-        The engine sizes in a *fraction of normal* (``size_factor``), which has
-        no meaning to a broker — a broker counts contracts. The cap is what
-        "normal" means, and the floor is one, because a trade the brain
-        committed to should not become an order for nothing.
-        """
-        scaled = self.settings.execution_max_contracts * trade.decision.size_factor
-        return max(1, int(round(scaled)))
-
     async def _execute_entry(self, trade: Trade) -> None:
         """Buy what the engine just opened on paper.
 
         Priced at the entry the engine recorded, which is already the ask: the
-        live order therefore asks for the same price the paper record assumed,
-        and any divergence between the two is real slippage rather than an
-        artefact of pricing them differently.
+        live order asks for the same price the paper record assumed, so any
+        divergence between the two is real slippage rather than an artefact of
+        pricing them differently.
+
+        The size is a dollar budget turned into whole contracts. Conviction
+        sizing is deliberately not applied: every decision on record has come
+        in at confidence 6, so it would shrink every trade by the same factor
+        rather than tell any two apart — and only a record where each trade
+        risks the same amount can later prove whether confidence means
+        anything.
         """
-        await self.execution.submit(
+        sizing = size_order(
+            trade.entry_price,
+            self.settings.execution_dollars_per_trade,
+            self.settings.execution_size_tolerance_pct,
+            self.settings.execution_max_contracts,
+        )
+        if not sizing.ok:
+            self._executed[trade.trade_id] = 0
+            await self.notifier.note(
+                f"⚠️ لم يُرسَل أمر حقيقي لـ {human_contract(trade.occ_symbol, trade.opened_at)}\n"
+                f"{sizing.reason}\n"
+                "الصفقة مسجّلة ورقيًا كالمعتاد — محفظتك فقط لم تدخلها."
+            )
+            return
+
+        order = await self.execution.submit(
             OrderRequest(
                 client_order_id=f"{trade.trade_id}-entry",
                 occ_symbol=trade.occ_symbol,
                 side=Side.BUY,
-                quantity=self._order_quantity(trade),
+                quantity=sizing.contracts,
                 limit_price=trade.entry_price,
                 trade_id=trade.trade_id,
                 reason="entry",
             )
         )
+        # what we actually hold, which is what every later sell is measured
+        # against. A partial fill means the position is smaller than intended,
+        # and selling the intended size would leave a short leg behind.
+        held = sizing.contracts if order is None else (order.filled_quantity or 0)
+        self._executed[trade.trade_id] = held if self.execution.armed else sizing.contracts
+
+    async def _execute_scale_out(self, trade: Trade) -> None:
+        """Bank part of a position the exit engine just took half off.
+
+        The paper record banks exactly half; contracts are whole, so an odd
+        position is split unevenly and the split rounds toward banking more —
+        the purpose of the scale-out is to take the cost off the table, and
+        under-banking fails at that while over-banking merely leaves a smaller
+        runner.
+        """
+        held = self._executed.get(trade.trade_id, 0)
+        # read from the exit policy rather than restated here, so the paper
+        # split and the live one cannot drift apart
+        sell = split_for_scale_out(held, self.manager.policy.scale_out_fraction)
+        if sell <= 0:
+            return
+        last = trade.updates[-1] if trade.updates else None
+        price = last.price if last is not None else None
+        if price is None or price <= 0:
+            return
+        await self.execution.submit(
+            OrderRequest(
+                client_order_id=f"{trade.trade_id}-scale",
+                occ_symbol=trade.occ_symbol,
+                side=Side.SELL,
+                quantity=sell,
+                limit_price=price,
+                trade_id=trade.trade_id,
+                reason="scale_out",
+            )
+        )
+        self._executed[trade.trade_id] = held - sell
 
     async def _execute_exit(self, trade: Trade) -> None:
-        """Sell out of a position the engine has finished with.
+        """Sell whatever is left of a position the engine has finished with.
 
-        Only whole exits. The exit engine banks half a position at +35%, and
-        half of one contract does not exist — so while the cap is one contract
-        a scale-out has nothing to send, and sending the *whole* position on a
-        partial exit would close a trade the engine still considers open. That
-        gap is left visible rather than papered over: it closes by trading two
-        contracts or more, not by rounding.
+        The remainder, not the original size: a trade that banked half earlier
+        holds fewer contracts now, and asking to sell the opening quantity
+        would leave a short leg behind.
         """
         if trade.is_open or trade.exit_price is None or trade.exit_price <= 0:
+            return
+        remaining = self._executed.pop(trade.trade_id, 0)
+        if remaining <= 0:
             return
         await self.execution.submit(
             OrderRequest(
                 client_order_id=f"{trade.trade_id}-exit",
                 occ_symbol=trade.occ_symbol,
                 side=Side.SELL,
-                quantity=self._order_quantity(trade),
+                quantity=remaining,
                 limit_price=trade.exit_price,
                 trade_id=trade.trade_id,
                 reason=trade.exit_reason or "exit",
@@ -2007,14 +2067,21 @@ class LiveEngine:
         Run at boot, which is the moment after every disconnect: whatever
         happened while the process was dead happened without us, and the
         broker is the only witness.
+
+        A restart loses the per-trade contract counts, which live in memory
+        only. Rather than guess them back from a dollar budget and a price
+        that has since moved, an open trade with no remembered size is
+        reported as a mismatch — which is exactly what it is: the engine holds
+        something and does not know how much.
         """
         if not self.execution.armed:
             return
         expected: dict[str, int] = {}
         for trade in self.manager.open_trades:
-            expected[trade.occ_symbol] = expected.get(trade.occ_symbol, 0) + (
-                self._order_quantity(trade)
-            )
+            held = self._executed.get(trade.trade_id, 0)
+            if held <= 0:
+                continue
+            expected[trade.occ_symbol] = expected.get(trade.occ_symbol, 0) + held
         await self.execution.reconcile(expected)
 
     def _recall_after_close(self, trade: Trade) -> None:

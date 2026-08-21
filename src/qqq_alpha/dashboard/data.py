@@ -141,6 +141,54 @@ def recent_missed(settings: Settings, limit: int = 100) -> list[dict[str, Any]]:
     return rows
 
 
+def execution_orders(settings: Settings, limit: int = 200) -> dict[str, Any]:
+    """What the wallet did, next to what the paper record said.
+
+    The paper trade is the intent and the order journal is what happened to
+    it, so the interesting number is neither on its own — it is the gap. That
+    gap is slippage, and it is the one cost a paper record structurally cannot
+    show. Measuring it is the whole reason both are written down.
+
+    Works with execution switched off, where every row is a withheld intent:
+    the file fills with what would have been sent long before anything is,
+    and the page is legible on the first live day rather than new.
+    """
+    rows = read_jsonl(sorted(settings.journal_dir.glob("orders-*.jsonl")))
+    rows.sort(key=lambda r: r.get("ts") or "", reverse=True)
+    rows = rows[:limit]
+
+    priced = {t.get("trade_id"): t for t in _latest_trades(settings)}
+    sent = 0
+    slippage: list[float] = []
+    for row in rows:
+        order = row.get("order") or {}
+        fill = order.get("average_fill_price")
+        row["fill_price"] = fill
+        row["notional"] = round((row.get("quantity") or 0) * (row.get("limit_price") or 0) * 100, 2)
+        row["armed"] = bool(row.get("armed"))
+        if row["armed"] and row.get("outcome") == "submitted":
+            sent += 1
+        # the asked price versus the paid one, signed so a buy filling above
+        # and a sell filling below both read as a cost
+        if fill and row.get("limit_price"):
+            raw = (fill - row["limit_price"]) / row["limit_price"] * 100.0
+            row["slippage_pct"] = round(raw if row.get("side") == "BUY" else -raw, 2)
+            slippage.append(row["slippage_pct"])
+        else:
+            row["slippage_pct"] = None
+        trade = priced.get(row.get("trade_id"))
+        row["paper_return_pct"] = trade.get("return_pct") if trade else None
+
+    return {
+        "rows": rows,
+        "total": len(rows),
+        "sent": sent,
+        "withheld": len(rows) - sent,
+        "avg_slippage_pct": round(sum(slippage) / len(slippage), 2) if slippage else None,
+        "measured": len(slippage),
+    }
+
+
 def pending_lessons(settings: Settings) -> list[dict[str, Any]]:
     return Memory(settings.data_dir / "memory.db").pending_lessons()
 

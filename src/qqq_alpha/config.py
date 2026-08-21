@@ -97,7 +97,22 @@ class Settings(BaseSettings):
     # wearing a safe number is worse than a missed trade.
     execution_enabled: bool = False
     execution_broker: str = "none"
-    execution_max_contracts: int = 1
+
+    # Sizing is in dollars, because that is what the operator decides and what
+    # a broker actually spends. Every trade aims at the same figure: the
+    # engine's own conviction sizing is deliberately NOT applied here, because
+    # every decision on record has come in at confidence 6, so applying it
+    # would halve every trade uniformly rather than distinguish between them —
+    # and a record where each trade risks the same amount is the only one that
+    # can later prove whether confidence means anything at all.
+    execution_dollars_per_trade: float = 1000.0
+    execution_size_tolerance_pct: float = 15.0
+
+    # NOT a sizing preference — a backstop against a bad quote. A stale price
+    # of $0.05 makes the budget arithmetic ask for hundreds of contracts, and
+    # no budget check catches it because the arithmetic is right and the input
+    # is wrong.
+    execution_max_contracts: int = 40
 
     # attention engine (cost gate, NOT a decision gate)
     attention_threshold: float = 0.45
