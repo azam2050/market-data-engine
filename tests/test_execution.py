@@ -625,3 +625,67 @@ async def test_a_forgotten_position_reconciles_as_a_mismatch_not_a_guess(tmp_pat
     result = await engine.execution.reconcile({})
 
     assert result.unknown_to_engine == {trade.occ_symbol: 8}
+
+
+# ---------------------------------------------------------------- surviving a restart
+@pytest.mark.asyncio
+async def test_the_held_size_survives_a_restart(tmp_path):
+    """The engine has crash-safe state; this number belongs in it.
+
+    A recovered position whose contract count was forgotten cannot be sold:
+    the engine would either dump more than it holds or leave a leg behind.
+    """
+    from qqq_alpha.live.state import StateStore
+
+    engine = _live_engine(tmp_path, decider=None, execution_enabled=True)
+    trade = _sample_trade(entry=1.25)
+    engine.manager.open_trades.append(trade)
+    engine._current_day = trade.opened_at.date()
+    await engine._execute_entry(trade)
+    assert engine._executed[trade.trade_id] == 8
+
+    # a fresh process reading the same file
+    state = StateStore(engine.store.path).load()
+    assert state is not None
+    assert state.executed == {trade.trade_id: 8}
+
+
+@pytest.mark.asyncio
+async def test_a_restart_after_banking_half_remembers_the_runner(tmp_path):
+    """Eight bought, four banked — a restart must resume holding four, not
+    eight, or the final exit opens a short."""
+    from qqq_alpha.domain import TradeUpdate
+    from qqq_alpha.live.state import StateStore
+
+    engine = _live_engine(tmp_path, decider=None, execution_enabled=True)
+    trade = _sample_trade(entry=1.25)
+    engine.manager.open_trades.append(trade)
+    engine._current_day = trade.opened_at.date()
+    await engine._execute_entry(trade)
+
+    trade.updates.append(
+        TradeUpdate(ts=trade.opened_at, price=1.70, return_pct=36.0, note="scale_out: +36%")
+    )
+    await engine._execute_scale_out(trade)
+
+    state = StateStore(engine.store.path).load()
+    assert state is not None and state.executed == {trade.trade_id: 4}
+
+
+@pytest.mark.asyncio
+async def test_a_closed_trade_leaves_no_size_behind(tmp_path):
+    from qqq_alpha.domain import TradeStatus
+    from qqq_alpha.live.state import StateStore
+
+    engine = _live_engine(tmp_path, decider=None, execution_enabled=True)
+    trade = _sample_trade(entry=1.25)
+    engine.manager.open_trades.append(trade)
+    engine._current_day = trade.opened_at.date()
+    await engine._execute_entry(trade)
+
+    trade.status = TradeStatus.CLOSED_WIN
+    trade.exit_price, trade.exit_reason = 1.55, "trail_stop"
+    await engine._execute_exit(trade)
+
+    state = StateStore(engine.store.path).load()
+    assert state is not None and state.executed == {}

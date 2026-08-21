@@ -37,6 +37,11 @@ class SessionState(BaseModel):
     brain_calls: int = 0
     open_trades: list[Trade] = Field(default_factory=list)
     closed_trades: list[Trade] = Field(default_factory=list)
+    # contracts actually held per trade id, as the broker filled them and as
+    # the scale-out decremented them. Restored with the positions themselves,
+    # because a recovered trade whose size is unknown cannot be sold: the
+    # engine would either dump more than it holds or leave a leg behind.
+    executed: dict[str, int] = Field(default_factory=dict)
 
     def belongs_to(self, day: date) -> bool:
         return self.session_day == day

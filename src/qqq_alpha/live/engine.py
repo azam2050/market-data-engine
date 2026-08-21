@@ -191,9 +191,9 @@ class LiveEngine:
             on_alert=self.notifier.note,
         )
         # contracts actually held per trade, decremented as the exit engine
-        # banks part of a position. In memory only: a restart makes the engine
-        # forget the size, which reconciliation then reports rather than
-        # guesses — see _reconcile_positions.
+        # banks part of a position. Persisted with the session, because a
+        # recovered position whose size was forgotten cannot be sold: the
+        # engine would either dump more than it holds or leave a leg behind.
         self._executed: dict[str, int] = {}
         # "price of the day": where options money is concentrating, for QQQ and
         # the leaders — context even when the tape itself is quiet
@@ -261,6 +261,7 @@ class LiveEngine:
                 brain_calls=self.status.brain_calls,
                 open_trades=list(self.manager.open_trades),
                 closed_trades=list(self.manager.closed_trades),
+                executed=dict(self._executed),
             )
         )
 
@@ -278,6 +279,11 @@ class LiveEngine:
         self.status.brain_calls = state.brain_calls
         self.status.open_positions = len(state.open_trades)
         self._current_day = state.session_day
+        # the sizes come back with the positions: a recovered trade whose
+        # contract count was lost cannot be sold correctly, and reconstructing
+        # it from a budget and a price that has since moved would be a guess
+        # wearing the shape of a fact
+        self._executed = dict(state.executed)
 
         if state.open_trades:
             symbols = ", ".join(t.occ_symbol for t in state.open_trades)
@@ -1198,6 +1204,8 @@ class LiveEngine:
         self.status.realized_pct = 0.0
         self.status.open_positions = 0
         self._watch_shared_today = 0
+        # the day flattened everything, so nothing is held into the new one
+        self._executed = {}
         self._current_day = new_day
         self._tape_alerted = False
         # yesterday changed at midnight: today's session must be measured
@@ -1981,6 +1989,7 @@ class LiveEngine:
         )
         if not sizing.ok:
             self._executed[trade.trade_id] = 0
+            self._persist()
             await self.notifier.note(
                 f"⚠️ لم يُرسَل أمر حقيقي لـ {human_contract(trade.occ_symbol, trade.opened_at)}\n"
                 f"{sizing.reason}\n"
@@ -2004,6 +2013,10 @@ class LiveEngine:
         # and selling the intended size would leave a short leg behind.
         held = sizing.contracts if order is None else (order.filled_quantity or 0)
         self._executed[trade.trade_id] = held if self.execution.armed else sizing.contracts
+        # written straight after, not on the next event: a restart between the
+        # fill and the next persist would leave a position on the books with
+        # no size beside it
+        self._persist()
 
     async def _execute_scale_out(self, trade: Trade) -> None:
         """Bank part of a position the exit engine just took half off.
@@ -2036,6 +2049,7 @@ class LiveEngine:
             )
         )
         self._executed[trade.trade_id] = held - sell
+        self._persist()
 
     async def _execute_exit(self, trade: Trade) -> None:
         """Sell whatever is left of a position the engine has finished with.
@@ -2047,6 +2061,7 @@ class LiveEngine:
         if trade.is_open or trade.exit_price is None or trade.exit_price <= 0:
             return
         remaining = self._executed.pop(trade.trade_id, 0)
+        self._persist()
         if remaining <= 0:
             return
         await self.execution.submit(
@@ -2068,11 +2083,12 @@ class LiveEngine:
         happened while the process was dead happened without us, and the
         broker is the only witness.
 
-        A restart loses the per-trade contract counts, which live in memory
-        only. Rather than guess them back from a dollar budget and a price
-        that has since moved, an open trade with no remembered size is
-        reported as a mismatch — which is exactly what it is: the engine holds
-        something and does not know how much.
+        Sizes are restored with the positions, so a normal restart knows what
+        it holds. A trade that still has no remembered size — state discarded
+        as stale, a fill that landed while the process was dying — is left out
+        of the expected book rather than guessed back from a dollar budget and
+        a price that has since moved, so the broker's copy shows up as
+        unknown-to-engine and says so out loud.
         """
         if not self.execution.armed:
             return
