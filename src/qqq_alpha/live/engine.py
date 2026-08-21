@@ -24,8 +24,10 @@ from qqq_alpha.brain.decider import Decider, next_expiry, occ_symbol
 from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.brain.rails import DayState, SafetyRails, infeasible
 from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, REGULAR_OPEN, Settings
+from qqq_alpha.data.backfill import GapRepairer
 from qqq_alpha.data.calendar import todays_events
 from qqq_alpha.data.chain import LiveChainPricer
+from qqq_alpha.data.health import assess
 from qqq_alpha.data.massive import MassiveClient
 from qqq_alpha.data.pricing import BlackScholesPricer, OptionPricer
 from qqq_alpha.data.pulse import PulseTracker, chain_pulse
@@ -195,6 +197,9 @@ class LiveEngine:
         # recovered position whose size was forgotten cannot be sold: the
         # engine would either dump more than it holds or leave a leg behind.
         self._executed: dict[str, int] = {}
+        # asks the provider for minutes the websocket dropped. The stream is
+        # fast and lossy; this is the slow, reliable path back to the same bars
+        self.repairer = GapRepairer(self.settings)
         # "price of the day": where options money is concentrating, for QQQ and
         # the leaders — context even when the tape itself is quiet
         self.pulse = PulseTracker(self.settings)
@@ -522,6 +527,13 @@ class LiveEngine:
         self.session_bars.append(bar)
         if len(self.session_bars) < WARMUP_BARS:
             return
+
+        # close any hole the stream left before anything reads the series:
+        # marking a position or building a snapshot on a gapped history is
+        # exactly the mistake this repairs
+        self.session_bars = await self.repairer.repair(
+            self.settings.primary_symbol, self.session_bars, now=bar.ts
+        )
 
         await self._refresh_chain(bar)
         await self._mark_open_positions(bar)
@@ -1180,6 +1192,7 @@ class LiveEngine:
             f"session {self._current_day} closed | trades={self.status.trades_today} "
             f"| realized={self.manager.realized_return_pct:+.1f}%"
         )
+        await self._report_data_health()
 
         # score whatever declined setups are still awaiting judgement on
         # whatever window they got, rather than losing them at the boundary
@@ -1201,6 +1214,7 @@ class LiveEngine:
         self._today_decisions = []
         self.leader_bars = {}
         self.status.trades_today = 0
+        self.repairer.reset()
         self.status.realized_pct = 0.0
         self.status.open_positions = 0
         self._watch_shared_today = 0
@@ -1944,6 +1958,24 @@ class LiveEngine:
     def _refresh_recent(self) -> None:
         """Reload recent history from disk rather than trusting process memory."""
         self.recent_trades = self.memory.recent_trades(limit=15)
+
+    async def _report_data_health(self) -> None:
+        """The day's verdict on its own data, with the cause named.
+
+        The engine always knew the data was incomplete — it said so inside
+        almost every decision and lowered its confidence for it. What it never
+        said was *why*, which left the operator choosing between guesses whose
+        fixes differ and one of which is expensive. The three witnesses exist
+        already; this is the first place they are put side by side.
+        """
+        if not self.session_bars:
+            return
+        health = assess(
+            inspect_session(self.session_bars),
+            self.status.reconnects,
+            self.repairer.log,
+        )
+        await self.notifier.note(health.message())
 
     async def _announce_execution_mode(self) -> None:
         """Say, at every boot, whether real money is on the line.
