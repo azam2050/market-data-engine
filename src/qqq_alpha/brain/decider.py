@@ -50,6 +50,25 @@ def next_expiry(as_of: date, dte: int) -> date:
     return target
 
 
+def _as_list(raw: Any) -> list[str]:
+    """Coerce a field the schema declares as a list of strings.
+
+    The model occasionally answers a list field with one prose string. Wrapping
+    it in ``list()`` then explodes it into individual characters, which is how
+    the dashboard came to render a risk note as ``ا · ل · س · ...`` — the text
+    survived, but unreadably, and every downstream count of "how many risks did
+    it name" was wrong by the length of the sentence.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        text = raw.strip()
+        return [text] if text else []
+    if isinstance(raw, list | tuple):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    return [str(raw)]
+
+
 def _parse_triggers(raw: Any) -> list[Trigger]:
     """Declared entry conditions, skipping any the model malformed.
 
@@ -246,9 +265,9 @@ class AIDecider:
             action=action,
             confidence=int(payload.get("confidence") or 0),
             thesis=str(payload.get("thesis") or ""),
-            risks=list(payload.get("risks") or []),
-            playbook_refs=list(payload.get("playbook_refs") or []),
-            overrides=list(payload.get("overrides") or []),
+            risks=_as_list(payload.get("risks")),
+            playbook_refs=_as_list(payload.get("playbook_refs")),
+            overrides=_as_list(payload.get("overrides")),
             invalidation=str(payload.get("invalidation") or ""),
             expected_hold_minutes=payload.get("expected_hold_minutes"),
             raw=payload,

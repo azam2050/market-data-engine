@@ -423,3 +423,131 @@ def test_education_card_parses_title_body_and_rule():
         assert png.startswith(b"\x89PNG")
         # each card sizes itself to its own text rather than clipping it
         assert Image.open(BytesIO(png)).height > 600
+
+
+# ---------------------------------------------------------------- reports reach both rooms
+def _chat_recorder():
+    """Records which chat_id each post was addressed to."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.content
+        if request.url.path.endswith("sendPhoto"):
+            # multipart: the chat id is in the form body as plain bytes
+            for candidate in (b"@public", b"-1009999"):
+                if candidate in body:
+                    seen.append(candidate.decode())
+        else:
+            seen.append(str(json.loads(body).get("chat_id", "")))
+        return httpx.Response(200, json={"ok": True})
+
+    return seen, httpx.MockTransport(handler)
+
+
+def _reporting_engine(tmp_path, private: str = "-1009999"):
+    from qqq_alpha.live.engine import LiveEngine
+
+    settings = Settings(
+        massive_api_key="k",
+        journal_dir=tmp_path / "journal",
+        data_dir=tmp_path / "data",
+        telegram_bot_token="token",
+        telegram_channel_id="@public",
+        telegram_private_channel_id=private,
+        shadow_symbols_csv="",
+    )
+    return LiveEngine(
+        settings=settings,
+        decider=_EnterOnceDecider(),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=NullNotifier(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_daily_report_reaches_the_private_channel_too(tmp_path):
+    """Subscribers were getting the live cards but not the scoreboard.
+
+    The daily and weekly reports are the two posts that show the record
+    honestly, losses included — the paying room was seeing less accounting
+    than the free one.
+    """
+    engine = _reporting_engine(tmp_path)
+    assert engine.private_channel is not None
+
+    seen, transport = _chat_recorder()
+    for channel in engine._report_channels:
+        channel._notifier._client = httpx.AsyncClient(transport=transport)
+
+    await engine._publish_channel_daily(DAY)
+
+    assert "@public" in seen
+    assert "-1009999" in seen
+    for channel in engine._report_channels:
+        await channel._notifier._client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_the_weekly_scoreboard_reaches_both_rooms_on_friday(tmp_path):
+    friday = date(2026, 3, 6)
+    engine = _reporting_engine(tmp_path)
+    stats_calls: list[str] = []
+
+    for channel in engine._report_channels:
+        chat = channel.channel_id
+
+        async def _daily(day, closed, _chat=chat):
+            return None
+
+        async def _weekly(stats, rows, _chat=chat):
+            stats_calls.append(_chat)
+
+        channel.post_daily_report = _daily  # type: ignore[method-assign]
+        channel.post_weekly_report = _weekly  # type: ignore[method-assign]
+
+    await engine._publish_channel_daily(friday)
+
+    assert sorted(stats_calls) == ["-1009999", "@public"]
+
+
+@pytest.mark.asyncio
+async def test_the_education_series_stays_public_only(tmp_path):
+    """It is written to attract readers, not to inform paying ones."""
+    tuesday = date(2026, 3, 3)
+    engine = _reporting_engine(tmp_path)
+    taught: list[str] = []
+
+    for channel in engine._report_channels:
+        chat = channel.channel_id
+
+        async def _daily(day, closed, _chat=chat):
+            return None
+
+        async def _education(day, _chat=chat):
+            taught.append(_chat)
+
+        channel.post_daily_report = _daily  # type: ignore[method-assign]
+        channel.post_education = _education  # type: ignore[method-assign]
+
+    await engine._publish_channel_daily(tuesday)
+
+    assert taught == ["@public"]
+
+
+@pytest.mark.asyncio
+async def test_reports_still_publish_with_no_private_channel_configured(tmp_path):
+    engine = _reporting_engine(tmp_path, private="")
+    assert engine.private_channel is None
+    assert [c.channel_id for c in engine._report_channels] == ["@public"]
+
+    posted: list[str] = []
+
+    async def _daily(day, closed):
+        posted.append("public")
+
+    engine.channel.post_daily_report = _daily  # type: ignore[method-assign]
+    await engine._publish_channel_daily(DAY)
+
+    assert posted == ["public"]

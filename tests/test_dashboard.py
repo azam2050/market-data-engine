@@ -429,3 +429,117 @@ def test_a_telegram_hiccup_does_not_blank_the_roster(tmp_path):
 
     assert response.status_code == 200
     assert "Layth" in response.text
+
+
+# ---------------------------------------------------------------- missed: name the rail
+def _seed_missed(settings: Settings, blocked_by: list[str], peak: float = 120.0) -> None:
+    journal = Journal(settings.journal_dir, session_tag="test")
+    journal.log_missed(
+        MissedOpportunity(
+            ts=_snapshot().ts,
+            reason="blocked before the brain could act",
+            would_be_direction=OptionType.PUT,
+            occ_symbol="O:QQQ260302P00711000",
+            hypothetical_entry=1.0,
+            best_price_after=2.2,
+            peak_return_pct=peak,
+            blocked_by=blocked_by,
+            regime="VOLATILE_CHOP",
+            session_minute=200,
+        )
+    )
+
+
+def test_missed_page_names_the_rail_that_refused(tmp_path):
+    """"رفضته الحواجز" told the operator only what he already knew.
+
+    Which rail refused is the whole measurement: it separates "the lock is
+    protecting me" from "the lock is strangling me".
+    """
+    settings = _settings(tmp_path)
+    _seed_missed(settings, ["position_cap: 1/1 open"])
+
+    body = TestClient(create_app(settings)).get("/missed", auth=AUTH).text
+
+    assert "صفقة أخرى كانت مفتوحة" in body
+    assert "رفضته الحواجز" not in body
+    # the raw code stays reachable as a tooltip, numbers included
+    assert "position_cap: 1/1 open" in body
+
+
+def test_missed_page_separates_the_declared_trigger_lock_from_the_caps(tmp_path):
+    settings = _settings(tmp_path)
+    _seed_missed(settings, ["declared_trigger_unmet: you said PUT arms at below 713.01"])
+    _seed_missed(settings, ["daily_trade_cap: 3/3"], peak=90.0)
+
+    body = TestClient(create_app(settings)).get("/missed", auth=AUTH).text
+
+    assert "المستوى الذي أعلنه لم يتحقق بعد" in body
+    assert "بلغ سقف الصفقات اليومي" in body
+
+
+def test_missed_page_still_marks_the_brains_own_declines(tmp_path):
+    settings = _settings(tmp_path)
+    _seed_missed(settings, [])
+
+    body = TestClient(create_app(settings)).get("/missed", auth=AUTH).text
+
+    assert "رفضه الذكاء بنفسه" in body
+
+
+def test_an_unknown_rail_code_is_shown_rather_than_swallowed(tmp_path):
+    """A rail added later must not vanish from the page until someone
+    remembers to translate it."""
+    settings = _settings(tmp_path)
+    _seed_missed(settings, ["some_future_rail: 3"])
+
+    body = TestClient(create_app(settings)).get("/missed", auth=AUTH).text
+
+    # more than once: the label itself, not merely the raw-code tooltip
+    assert body.count("some_future_rail") >= 2
+
+
+# ---------------------------------------------------------------- risks, letter by letter
+def test_a_risk_note_stored_letter_by_letter_reads_as_a_sentence(tmp_path):
+    """History written by the old parser is repaired on the way out.
+
+    The model answered a list field with prose, ``list()`` split it into
+    characters, and the page rendered ``ا · ل · س · ...``.
+    """
+    settings = _settings(tmp_path)
+    snap = _snapshot()
+    exploded = list("السيولة ضعيفة")
+    Journal(settings.journal_dir, session_tag="test").log_decision(
+        Decision(ts=snap.ts, action=Action.PASS, confidence=3, thesis="انتظار", risks=exploded),
+        snap,
+        [],
+        [],
+        0.3,
+    )
+
+    body = TestClient(create_app(settings)).get("/decisions", auth=AUTH).text
+
+    assert "السيولة ضعيفة" in body
+    assert "ا · ل · س" not in body
+
+
+def test_a_genuine_list_of_risks_is_left_alone(tmp_path):
+    settings = _settings(tmp_path)
+    snap = _snapshot()
+    Journal(settings.journal_dir, session_tag="test").log_decision(
+        Decision(
+            ts=snap.ts,
+            action=Action.PASS,
+            confidence=3,
+            thesis="انتظار",
+            risks=["السيولة ضعيفة", "خبر بعد ساعة"],
+        ),
+        snap,
+        [],
+        [],
+        0.3,
+    )
+
+    body = TestClient(create_app(settings)).get("/decisions", auth=AUTH).text
+
+    assert "السيولة ضعيفة · خبر بعد ساعة" in body

@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     enforce_declared_trigger: bool = True
     trigger_ttl_minutes: int = 30
 
+    # the brain's "recent trades" list used to be read from memory only at boot
+    # and at the session roll, so a trade opened and closed inside one session
+    # stayed invisible to it until the next morning. Off restores that older
+    # behaviour, which is the switch to flip if a session ever looks wrong
+    # after this landed — it changes no rule, only what the brain is told.
+    recall_todays_trades: bool = True
+
     # attention engine (cost gate, NOT a decision gate)
     attention_threshold: float = 0.45
     attention_cooldown_sec: int = 180

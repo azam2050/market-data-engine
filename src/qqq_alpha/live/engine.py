@@ -38,6 +38,7 @@ from qqq_alpha.domain import (
     MissedOpportunity,
     OptionType,
     Trade,
+    TradeStatus,
 )
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
@@ -203,6 +204,21 @@ class LiveEngine:
             if self.settings.telegram_bot_token and self.settings.telegram_channel_id
             else None
         )
+        # the same after-the-bell reports, aimed at the private channel. The
+        # subscribers were getting the live cards but not the daily or weekly
+        # scoreboard — the two posts that show the record honestly, losses
+        # included — so the paying room saw less accounting than the free one.
+        # Only the report methods are ever called on this publisher: the live
+        # shares and the education series stay a public-channel affair.
+        self.private_channel = (
+            ChannelPublisher(
+                self.settings.telegram_bot_token,
+                self.settings.telegram_private_channel_id,
+            )
+            if self.settings.telegram_bot_token
+            and self.settings.telegram_private_channel_id
+            else None
+        )
         self._channel_daily_posted: date | None = None
         # blue under-watch cards published today — capped so a choppy session
         # cannot turn the watch card into noise
@@ -304,8 +320,9 @@ class LiveEngine:
         if self.settings.telegram_private_channel_id:
             await self.notifier.note(
                 "🔒 قناة المشتركين الخاصة مفعّلة — الطروحات تُنشر فيها منشورًا "
-                "واحدًا، والانضمام بطلب يوافق عليه البوت آليًا، والمنتهون "
-                "يُخرَجون تلقائيًا"
+                "واحدًا، والتقرير اليومي والأسبوعي والشهري يصل إليها كما يصل "
+                "للقناة العامة، والانضمام بطلب يوافق عليه البوت آليًا، "
+                "والمنتهون يُخرَجون تلقائيًا"
             )
         await self._report_channel_health()
         # from here on, a market-data outage is announced instead of silent
@@ -503,6 +520,7 @@ class LiveEngine:
                     await self.channel.post_trade_update(trade, update, self._delayed)
                 self.journal.log_trade(trade)
                 self.memory.remember_trade(trade)
+                self._recall_after_close(trade)
                 self._persist()
 
         self.status.open_positions = len(self.manager.open_trades)
@@ -982,19 +1000,38 @@ class LiveEngine:
                 await self.channel.post_trade_update(trade, update, self._delayed)
             self.journal.log_trade(trade)
             self.memory.remember_trade(trade)
+            self._recall_after_close(trade)
             self._persist()
         await self._publish_channel_daily(bar.ts.astimezone(MARKET_TZ).date())
 
+    @property
+    def _report_channels(self) -> list[ChannelPublisher]:
+        """Everywhere the daily/weekly/monthly scoreboard belongs.
+
+        Both rooms, public and private. Each publisher swallows its own
+        failures, so a private channel the bot was removed from cannot stop the
+        public post, and vice versa.
+        """
+        return [c for c in (self.channel, self.private_channel) if c is not None]
+
     async def _publish_channel_daily(self, day: date) -> None:
-        """The channel's after-the-bell package: the daily report, the weekly
-        report on Fridays, and the education series on its two slots. Guarded
-        so it runs once per session no matter how many post-close bars arrive."""
-        if self.channel is None or self._channel_daily_posted == day:
+        """The after-the-bell package: the daily report, the weekly report on
+        Fridays, and the education series on its two slots. Guarded so it runs
+        once per session no matter how many post-close bars arrive.
+
+        The reports go to both channels; the education series stays public,
+        because it is written to attract readers rather than to inform paying
+        ones.
+        """
+        targets = self._report_channels
+        if not targets or self._channel_daily_posted == day:
             return
         self._channel_daily_posted = day
         try:
-            await self.channel.post_daily_report(day, list(self.manager.closed_trades))
-            if day.weekday() in (1, 3):  # Tuesday, Thursday
+            closed = list(self.manager.closed_trades)
+            for channel in targets:
+                await channel.post_daily_report(day, closed)
+            if self.channel is not None and day.weekday() in (1, 3):  # Tue, Thu
                 await self.channel.post_education(day)
             if day.weekday() == 4:  # Friday: the weekly scoreboard
                 period = load_period(
@@ -1016,7 +1053,8 @@ class LiveEngine:
                             "return_pct": row.get("return_pct"),
                         }
                     )
-                await self.channel.post_weekly_report(stats, channel_rows)
+                for channel in targets:
+                    await channel.post_weekly_report(stats, channel_rows)
             if self._is_last_session_of_month(day):
                 await self._publish_channel_monthly(day)
         except Exception:  # noqa: BLE001 - the shop window must never stop the desk
@@ -1043,8 +1081,12 @@ class LiveEngine:
     async def _publish_channel_monthly(self, day: date) -> None:
         """The month's statement. Its daily series and its trade statistics are
         read from the same journal rows, so the curve's final value and the net
-        in the totals panel can never disagree."""
-        if self.channel is None:
+        in the totals panel can never disagree.
+
+        Goes to both rooms, like the daily and weekly reports it belongs with.
+        """
+        targets = self._report_channels
+        if not targets:
             return
         month_start = day.replace(day=1)
         period = load_period(self.settings.journal_dir, since=month_start, until=day)
@@ -1068,9 +1110,10 @@ class LiveEngine:
                 )
 
         daily_returns = sorted(by_day.items())
-        await self.channel.post_monthly_report(
-            month_start, stats, daily_returns, channel_rows
-        )
+        for channel in targets:
+            await channel.post_monthly_report(
+                month_start, stats, daily_returns, channel_rows
+            )
 
     async def _roll_session(self, new_day: date) -> None:
         """New session: flatten, archive, reset counters."""
@@ -1860,6 +1903,29 @@ class LiveEngine:
     def _refresh_recent(self) -> None:
         """Reload recent history from disk rather than trusting process memory."""
         self.recent_trades = self.memory.recent_trades(limit=15)
+
+    def _recall_after_close(self, trade: Trade) -> None:
+        """Let the brain see a trade it already closed today.
+
+        This list was read at boot and at the session roll and nowhere else, so
+        a trade opened and closed inside one session did not join it until the
+        next morning — and an open trade drops out of CURRENTLY OPEN the moment
+        it closes. Between those two facts the brain had no way to know what it
+        had already done today.
+
+        It showed on 2026-08-20: the day's second entry reasoned "I have not
+        entered a trade today" while the first was banked at +31.6%. That day
+        it cost nothing because the first trade won. The day the first one
+        loses, the brain would size and argue the second as if the loss never
+        happened — and it now has three chances a day, not one.
+
+        The rails always knew the count (``DayState.trades_taken``); only the
+        judgment forming the decision did not. Nothing here changes a rule: the
+        same list, in the same shape, simply arrives on time.
+        """
+        if not self.settings.recall_todays_trades or trade.status is TradeStatus.OPEN:
+            return
+        self._refresh_recent()
 
     @property
     def _delayed(self) -> bool:

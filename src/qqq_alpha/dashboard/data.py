@@ -58,17 +58,87 @@ def open_trades(settings: Settings) -> list[dict[str, Any]]:
     return [t for t in _latest_trades(settings) if not t.get("closed_at")]
 
 
+def _readable_list(value: object) -> list[str]:
+    """Repair a list field the journal stored letter-by-letter.
+
+    When the model answered a list field with one prose string, the old parser
+    wrapped it in ``list()`` and split it into characters, so the page showed
+    ``ا · ل · س · ...``. The parser no longer does that, but the history on disk
+    is already written and this page reads history. A list whose every entry is
+    a single character can only be that accident — real risk notes are phrases —
+    so it is glued back into the sentence it started as.
+    """
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if not isinstance(value, list):
+        return []
+    items = [str(item) for item in value]
+    if len(items) > 5 and all(len(item) <= 1 for item in items):
+        joined = "".join(items).strip()
+        return [joined] if joined else []
+    return [item for item in items if item.strip()]
+
+
 def recent_decisions(settings: Settings, limit: int = 150) -> list[dict[str, Any]]:
     """Every decision the brain made, including a plain PASS — the full reasoning."""
     rows = read_jsonl(sorted(settings.journal_dir.glob("decisions-*.jsonl")))
     rows.sort(key=lambda r: r.get("ts") or "", reverse=True)
-    return rows[:limit]
+    rows = rows[:limit]
+    for row in rows:
+        row["risks"] = _readable_list(row.get("risks"))
+    return rows
+
+
+# Which rail turned a setup away, in the operator's language. The journal has
+# always carried the raw code in ``blocked_by``; the page only ever said "the
+# rails refused it", which is the one thing you already knew. Naming the rail
+# is what turns the cost of a guard into something measurable: a column full of
+# ``position_cap`` means the single-open-trade rule is what you are paying for,
+# and a column full of ``declared_trigger`` means the lock is.
+RAIL_LABELS: dict[str, str] = {
+    "daily_trade_cap": "بلغ سقف الصفقات اليومي",
+    "position_cap": "صفقة أخرى كانت مفتوحة",
+    "circuit_breaker": "قاطع الخسارة اليومي",
+    "declared_trigger_unmet": "المستوى الذي أعلنه لم يتحقق بعد",
+    "spread_too_wide": "الفرق بين العرض والطلب واسع",
+    "thin_contract": "سيولة العقد ضعيفة",
+    "contract_not_found": "العقد غير موجود للتسعير",
+    "contract_untradeable": "لا يوجد سعر صالح للعقد",
+    "no_targets": "دخول بلا هدف محدّد",
+    "no_stop": "دخول بلا مستوى إبطال",
+    "invalid_stop": "مستوى الوقف غير صالح",
+    "below_target_bar": "العائد المتوقع تحت الحد الأدنى",
+    "stale_data": "البيانات متأخرة",
+    "unusable_data": "بيانات غير صالحة",
+    "outside_session": "خارج جلسة التداول",
+}
+
+
+def rail_label(blocked_by: object) -> str:
+    """Turn the raw rail codes on a missed row into one readable Arabic reason."""
+    if not isinstance(blocked_by, list) or not blocked_by:
+        return "رفضه الذكاء بنفسه"
+    seen: list[str] = []
+    for entry in blocked_by:
+        if not isinstance(entry, str):
+            continue
+        code = entry.split(":", 1)[0].strip()
+        label = RAIL_LABELS.get(code, code)
+        if label not in seen:
+            seen.append(label)
+    return " + ".join(seen) if seen else "رفضته الحواجز"
 
 
 def recent_missed(settings: Settings, limit: int = 100) -> list[dict[str, Any]]:
     rows = read_jsonl(sorted(settings.journal_dir.glob("missed-*.jsonl")))
     rows.sort(key=lambda r: r.get("ts") or "", reverse=True)
-    return rows[:limit]
+    rows = rows[:limit]
+    for row in rows:
+        row["rail_label"] = rail_label(row.get("blocked_by"))
+        row["rail_detail"] = " | ".join(
+            e for e in (row.get("blocked_by") or []) if isinstance(e, str)
+        )
+    return rows
 
 
 def pending_lessons(settings: Settings) -> list[dict[str, Any]]:

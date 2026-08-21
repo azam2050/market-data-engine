@@ -1,23 +1,52 @@
 {% extends "base.html" %}
 {% block title %}الفرص الفائتة — QQQ Alpha{% endblock %}
 {% block content %}
+
+{% set by_rail = missed | groupby("rail_label") %}
+
 <div class="card">
   <h2>فرص فائتة سُعّرت رجعيًا ({{ missed|length }})</h2>
   <p class="small muted">إعدادات تعليمية عن ثمن الحذر — هل رفض الذكاء فرصة كانت ستربح؟ لا تُدخَل تلقائيًا، بس تُقاس.</p>
+
+  {% if by_rail %}
+  <div class="grid" style="margin-top:14px">
+    {% for label, rows in by_rail %}
+    <div class="stat">
+      <div class="n">{{ rows|length }}</div>
+      <div class="l">{{ label }}</div>
+      <div class="l" style="color:var(--yellow)">
+        أعلى عائد فائت: +{{ "%.0f"|format(rows|map(attribute="peak_return_pct")|max) }}%
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="small muted" style="margin-top:12px">
+    كل بطاقة تقول أي حاجز رفض، وكم مرة، وأكبر عائد ضاع بسببه. هذي هي
+    <strong>كلفة الحماية</strong> — تُقاس ولا تُخمَّن. حاجز يظهر كثيرًا بعوائد
+    كبيرة يستحق مراجعة؛ وحاجز يظهر بعوائد صغيرة يؤدّي شغله بهدوء.
+  </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>التفاصيل</h2>
   {% if missed %}
   <table>
-    <tr><th>الوقت</th><th>الاتجاه المفترض</th><th>العقد</th><th>السبب</th><th>أقصى ربح لو دخلنا</th><th>النظام السائد</th></tr>
+    <tr><th>الوقت</th><th>الاتجاه المفترض</th><th>العقد</th><th>سبب الرفض</th><th>أقصى ربح لو دخلنا</th><th>النظام السائد</th></tr>
     {% for m in missed %}
     <tr>
       <td class="small muted">{{ m.ts }}</td>
       <td>{{ "CALL 📈" if m.would_be_direction == "CALL" else "PUT 📉" }}</td>
       <td class="small">{{ m.occ_symbol }}</td>
-      <td class="small">{{ "رفضته الحواجز" if m.blocked_by else "رفضه الذكاء بنفسه" }}</td>
+      <td class="small"{% if m.rail_detail %} title="{{ m.rail_detail }}"{% endif %}>{{ m.rail_label }}</td>
       <td class="pos">+{{ "%.0f"|format(m.peak_return_pct) }}%</td>
       <td class="small muted">{{ m.regime or "—" }}</td>
     </tr>
     {% endfor %}
   </table>
+  <p class="small muted" style="margin-top:14px">
+    مرّر على خانة السبب لترى نص الحاجز الأصلي بالأرقام (مثلاً <code>position_cap: 1/1 open</code>).
+  </p>
   {% else %}
   <div class="empty">لا توجد فرص فائتة مسجّلة بعد</div>
   {% endif %}

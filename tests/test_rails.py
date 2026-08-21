@@ -619,3 +619,42 @@ def test_one_absurd_alternative_voids_the_whole_commitment(settings, snapshot):
     )
 
     assert verdict.allowed, verdict.blocks
+
+
+# ---------------------------------------------------------------- list fields
+def test_a_prose_answer_to_a_list_field_stays_one_sentence():
+    """``list("نص")`` splits a sentence into characters.
+
+    The dashboard rendered a risk note as ``ا · ل · س · ...`` because of it,
+    and every count of "how many risks did it name" was wrong by the length of
+    the sentence.
+    """
+    from qqq_alpha.brain.decider import _as_list
+
+    assert _as_list("السيولة ضعيفة") == ["السيولة ضعيفة"]
+
+
+def test_a_real_list_of_notes_survives_untouched():
+    from qqq_alpha.brain.decider import _as_list
+
+    assert _as_list(["أ", "ب"]) == ["أ", "ب"]
+
+
+def test_empty_and_missing_list_fields_are_empty():
+    from qqq_alpha.brain.decider import _as_list
+
+    assert _as_list(None) == []
+    assert _as_list("") == []
+    assert _as_list("   ") == []
+    assert _as_list(["", "  ", "حقيقي"]) == ["حقيقي"]
+
+
+def test_a_decision_payload_with_prose_risks_parses_cleanly(snapshot):
+    from qqq_alpha.brain.decider import AIDecider
+
+    decision = AIDecider._to_decision(
+        {"action": "PASS", "confidence": 3, "thesis": "t", "risks": "السيولة ضعيفة"},
+        snapshot,
+    )
+
+    assert decision.risks == ["السيولة ضعيفة"]

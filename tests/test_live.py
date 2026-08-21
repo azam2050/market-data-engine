@@ -1141,3 +1141,99 @@ async def test_a_promotion_inside_the_channel_is_not_a_join():
     )
 
     assert listener.membership_changes == []
+
+
+# ---------------------------------------------------------------- today's own trades
+def _closed_trade(result_pct: float = 31.6):
+    trade = _sample_trade()
+    trade.closed_at = trade.opened_at + timedelta(minutes=7)
+    trade.exit_price, trade.return_pct = 1.31, result_pct
+    trade.exit_reason = "trail_stop"
+    from qqq_alpha.domain import TradeStatus
+
+    trade.status = TradeStatus.CLOSED_WIN
+    return trade
+
+
+def test_a_trade_closed_today_becomes_visible_to_the_brain(settings, tmp_path):
+    """The list was read at boot and at the session roll and nowhere else.
+
+    On 2026-08-20 the day's second entry reasoned "I have not entered a trade
+    today" while the first was already banked: the rails knew the count, the
+    judgment forming the decision did not.
+    """
+    engine = _engine(settings, tmp_path)
+    engine._refresh_recent()
+    assert engine.recent_trades == []
+
+    trade = _closed_trade()
+    engine.memory.remember_trade(trade)
+    engine._recall_after_close(trade)
+
+    assert [t.trade_id for t in engine.recent_trades] == [trade.trade_id]
+    # and it arrives in the shape the prompt renders, result included
+    assert engine.recent_trades[0].as_prompt_row()["result_pct"] == 31.6
+
+
+def test_an_open_trade_does_not_enter_the_track_record(settings, tmp_path):
+    """It is still live, and CURRENTLY OPEN already shows it."""
+    engine = _engine(settings, tmp_path)
+    engine._refresh_recent()
+
+    still_open = _sample_trade()
+    engine.memory.remember_trade(still_open)
+    engine._recall_after_close(still_open)
+
+    assert engine.recent_trades == []
+
+
+def test_the_switch_restores_the_old_once_a_day_behaviour(settings, tmp_path):
+    """The operator's escape hatch, flippable from Railway without a rebuild."""
+    settings.recall_todays_trades = False
+    engine = _engine(settings, tmp_path)
+    engine._refresh_recent()
+
+    trade = _closed_trade()
+    engine.memory.remember_trade(trade)
+    engine._recall_after_close(trade)
+
+    assert engine.recent_trades == []
+
+
+@pytest.mark.asyncio
+async def test_the_brain_is_told_about_the_trade_it_already_closed(settings, tmp_path):
+    """End to end: what the decider is actually handed on a later wake."""
+    seen: list[int] = []
+
+    class _Recorder:
+        async def decide(self, snapshot, **kwargs):
+            seen.append(len(kwargs.get("recent_trades") or []))
+            return Decision(ts=snapshot.ts, action=Action.PASS, confidence=3, thesis="t")
+
+    settings.attention_threshold = 0.0
+    settings.attention_cooldown_sec = 0
+    settings.max_data_age_sec = 10**9
+    engine = LiveEngine(
+        settings=settings,
+        decider=_Recorder(),
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=NullNotifier(),
+    )
+    engine._current_day = DAY
+    engine._refresh_recent()
+
+    bars = synthetic_session("QQQ", DAY, seed=15, trend=0.02, volatility=0.002)
+    for bar in bars[:90]:
+        await engine._on_bar(bar)
+    assert seen and seen[-1] == 0, "nothing on the record yet"
+
+    trade = _closed_trade()
+    engine.memory.remember_trade(trade)
+    engine._recall_after_close(trade)
+
+    for bar in bars[90:120]:
+        await engine._on_bar(bar)
+
+    assert seen[-1] == 1, "the brain should now see the trade it closed today"
