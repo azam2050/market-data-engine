@@ -141,6 +141,128 @@ def recent_missed(settings: Settings, limit: int = 100) -> list[dict[str, Any]]:
     return rows
 
 
+BIAS_THRESHOLD = 0.2  # the same line the missed-opportunity ledger draws
+
+
+def bias_study(settings: Settings) -> dict[str, Any]:
+    """Is the engine long-blind, or did the market simply never offer longs?
+
+    Every trade in the record is a PUT, which permits two very different
+    explanations: a genuine bearish stretch honestly traded, or a machine
+    whose bar for CALLs sits higher than its bar for PUTs. Opinions cannot
+    separate those; three ledgers it already keeps can.
+
+    **Decisions** carry the snapshot's net bias, so bullish moments and
+    bearish moments can be counted, and the entry rate compared per side —
+    the cleanest test, because it asks the same question of both directions.
+
+    **Missed opportunities** carry a direction and a peak, so the CALLs it
+    refused that then paid can be counted and priced. Peaks are ceilings the
+    tape touched, not realistic exits — the page says so rather than letting
+    a flattering number stand.
+
+    **Trades** show what was actually taken.
+
+    The verdict is deliberately conservative: a small bullish sample returns
+    "unproven", not "innocent" — absence of evidence, stated as such.
+    """
+    # -- what was actually traded
+    closed = [
+        t
+        for t in _latest_trades(settings)
+        if t.get("closed_at") and t.get("return_pct") is not None
+    ]
+    trades: dict[str, dict[str, Any]] = {}
+    for row in closed:
+        direction = (row.get("decision") or {}).get("direction") or "?"
+        bucket = trades.setdefault(
+            direction, {"count": 0, "wins": 0, "net_pct": 0.0, "best": None}
+        )
+        result = float(row["return_pct"])
+        bucket["count"] += 1
+        bucket["wins"] += int(result > 0)
+        bucket["net_pct"] = round(bucket["net_pct"] + result, 1)
+        bucket["best"] = result if bucket["best"] is None else max(bucket["best"], result)
+
+    # -- how the brain behaved when the tape leaned each way
+    behaviour = {
+        side: {"moments": 0, "entered": 0, "waited": 0, "passed": 0}
+        for side in ("bullish", "bearish")
+    }
+    for row in read_jsonl(sorted(settings.journal_dir.glob("decisions-*.jsonl"))):
+        bias = (row.get("snapshot") or {}).get("net_bias")
+        if bias is None or abs(bias) < BIAS_THRESHOLD:
+            continue
+        side = behaviour["bullish" if bias > 0 else "bearish"]
+        side["moments"] += 1
+        action = row.get("action")
+        if action == "ENTER":
+            side["entered"] += 1
+        elif action == "WAIT":
+            side["waited"] += 1
+        else:
+            side["passed"] += 1
+    for side in behaviour.values():
+        side["enter_rate"] = (
+            round(side["entered"] / side["moments"] * 100, 1) if side["moments"] else None
+        )
+
+    # -- the opportunities it turned away, priced at their (ceiling) peaks
+    missed: dict[str, dict[str, Any]] = {
+        "CALL": {"count": 0, "declined_by_brain": 0, "sum_peak": 0.0, "max_peak": None},
+        "PUT": {"count": 0, "declined_by_brain": 0, "sum_peak": 0.0, "max_peak": None},
+    }
+    for row in read_jsonl(sorted(settings.journal_dir.glob("missed-*.jsonl"))):
+        bucket = missed.get(row.get("would_be_direction") or "")
+        if bucket is None:
+            continue
+        peak = float(row.get("peak_return_pct") or 0.0)
+        bucket["count"] += 1
+        if not row.get("blocked_by"):
+            bucket["declined_by_brain"] += 1
+        bucket["sum_peak"] = round(bucket["sum_peak"] + peak, 1)
+        bucket["max_peak"] = peak if bucket["max_peak"] is None else max(bucket["max_peak"], peak)
+
+    # -- the verdict, stated no stronger than the sample allows
+    bull, bear = behaviour["bullish"], behaviour["bearish"]
+    call_declined = missed["CALL"]["declined_by_brain"]
+    if bull["moments"] < 10:
+        verdict = (
+            f"العيّنة الصاعدة غير كافية للحكم: {bull['moments']} لحظة صاعدة فقط في "
+            f"السجل مقابل {bear['moments']} هابطة. السوق لم يعرض ما يُدان به المحرك "
+            "أو يُبرَّأ — الامتحان الحقيقي هو أول أسبوع صاعد."
+        )
+        status = "unproven"
+    elif (
+        call_declined >= 3
+        and bear["enter_rate"] is not None
+        and bull["enter_rate"] is not None
+        and bear["enter_rate"] >= 2 * max(bull["enter_rate"], 0.1)
+    ):
+        verdict = (
+            f"الانحياز مثبت بالأرقام: في اللحظات الهابطة دخل بمعدل {bear['enter_rate']}% "
+            f"مقابل {bull['enter_rate']}% في الصاعدة، ورفض {call_declined} فرصة كول "
+            f"بلغت قممها {missed['CALL']['sum_peak']:+.0f}% مجتمعة. الحاجز أعلى على "
+            "جهة الشراء فعلًا."
+        )
+        status = "biased"
+    else:
+        verdict = (
+            f"لا دليل كافيًا على انحياز: اللحظات الصاعدة {bull['moments']} والدخول فيها "
+            f"{bull['enter_rate']}% مقابل {bear['enter_rate']}% في الهابطة، وفرص الكول "
+            f"المرفوضة {call_declined}. الفارق داخل حدود ما يفسّره اتجاه السوق نفسه."
+        )
+        status = "clear"
+
+    return {
+        "trades": trades,
+        "behaviour": behaviour,
+        "missed": missed,
+        "verdict": verdict,
+        "status": status,
+    }
+
+
 def execution_orders(settings: Settings, limit: int = 200) -> dict[str, Any]:
     """What the wallet did, next to what the paper record said.
 

@@ -111,6 +111,18 @@ def create_app(
             request, "decisions.html", _ctx(decisions=data.recent_decisions(settings))
         )
 
+    @app.get("/bias")
+    def bias(request: Request, _: str = Depends(login)):
+        """Measurement only: is the engine long-blind, or was the market short?
+
+        Renders the three-ledger study — behaviour per bias side, refused
+        opportunities priced at their ceilings, and what was actually traded —
+        with a verdict that refuses to outrun its sample size.
+        """
+        return templates.TemplateResponse(
+            request, "bias.html", _ctx(study=data.bias_study(settings))
+        )
+
     @app.get("/orders")
     def orders(request: Request, _: str = Depends(login)):
         """Operator-only: what the wallet did, next to what the paper said.

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}دراسة الانحياز — QQQ Alpha{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>دراسة الانحياز الاتجاهي — هل المحرك أعمى عن الشراء؟</h2>
+  <p class="small muted">
+    كل صفقات السجل بيع. لهذا تفسيران مختلفان تمامًا: سوق هابط تُدووِل بأمانة،
+    أو آلة حاجزها على الشراء أعلى من حاجزها على البيع. الآراء لا تفصل بينهما —
+    هذي الصفحة تفصل بثلاثة دفاتر يكتبها المحرك أصلًا.
+  </p>
+
+  <div style="margin-top:14px;padding:14px;border-radius:10px;border:1px solid
+    {% if study.status == 'biased' %}var(--red)
+    {% elif study.status == 'clear' %}var(--green)
+    {% else %}var(--yellow){% endif %};background:var(--panel-2)">
+    <strong>
+      {% if study.status == 'biased' %}🔴 الحكم: انحياز مثبت
+      {% elif study.status == 'clear' %}🟢 الحكم: لا دليل على انحياز
+      {% else %}🟡 الحكم: غير محسوم — العيّنة لا تكفي{% endif %}
+    </strong>
+    <p class="small" style="margin:8px 0 0">{{ study.verdict }}</p>
+  </div>
+</div>
+
+<div class="card">
+  <h2>١ — سلوكه لحظة بلحظة: نفس السؤال للاتجاهين</h2>
+  <p class="small muted">
+    كل قرار مسجّل بميل السوق وقتها. المقارنة العادلة الوحيدة: كم مرة دخل حين
+    مال السوق صعودًا، مقابل كم مرة دخل حين مال هبوطًا.
+  </p>
+  <table>
+    <tr><th>الميل</th><th>اللحظات</th><th>دخل</th><th>انتظر</th><th>امتنع</th><th>معدل الدخول</th></tr>
+    <tr>
+      <td>📈 صاعد</td>
+      <td>{{ study.behaviour.bullish.moments }}</td>
+      <td>{{ study.behaviour.bullish.entered }}</td>
+      <td>{{ study.behaviour.bullish.waited }}</td>
+      <td>{{ study.behaviour.bullish.passed }}</td>
+      <td>{% if study.behaviour.bullish.enter_rate is not none %}{{ study.behaviour.bullish.enter_rate }}%{% else %}—{% endif %}</td>
+    </tr>
+    <tr>
+      <td>📉 هابط</td>
+      <td>{{ study.behaviour.bearish.moments }}</td>
+      <td>{{ study.behaviour.bearish.entered }}</td>
+      <td>{{ study.behaviour.bearish.waited }}</td>
+      <td>{{ study.behaviour.bearish.passed }}</td>
+      <td>{% if study.behaviour.bearish.enter_rate is not none %}{{ study.behaviour.bearish.enter_rate }}%{% else %}—{% endif %}</td>
+    </tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>٢ — الفرص التي رفضها، مسعّرة</h2>
+  <p class="small muted">
+    ⚠️ الأرقام هنا <strong>قمم</strong> لامسها السعر — سقف نظري لا خروج واقعي.
+    تصلح للمقارنة بين الاتجاهين، لا كوعد ربح. لا شيء هنا يحقق 100%.
+  </p>
+  <table>
+    <tr><th>الاتجاه</th><th>فرص فائتة</th><th>رفضها الذكاء بنفسه</th><th>مجموع القمم</th><th>أعلى قمة</th></tr>
+    {% for direction, label in [("CALL", "📈 كول"), ("PUT", "📉 بوت")] %}
+    <tr>
+      <td>{{ label }}</td>
+      <td>{{ study.missed[direction].count }}</td>
+      <td><strong>{{ study.missed[direction].declined_by_brain }}</strong></td>
+      <td class="pos">{% if study.missed[direction].sum_peak %}+{{ "%.0f"|format(study.missed[direction].sum_peak) }}%{% else %}—{% endif %}</td>
+      <td>{% if study.missed[direction].max_peak %}+{{ "%.0f"|format(study.missed[direction].max_peak) }}%{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="small muted" style="margin-top:10px">
+    «رفضها الذكاء بنفسه» هي العمود الحاسم: فرصة تأهلت وبلغ عائدها النظري حد
+    الاستهداف، والحواجز لم تمنعها — العقل هو من قال لا.
+  </p>
+</div>
+
+<div class="card">
+  <h2>٣ — ما دخله فعلًا</h2>
+  {% if study.trades %}
+  <table>
+    <tr><th>الاتجاه</th><th>الصفقات</th><th>الرابحة</th><th>الصافي</th><th>الأفضل</th></tr>
+    {% for direction, row in study.trades.items() %}
+    <tr>
+      <td>{{ "📈 كول" if direction == "CALL" else "📉 بوت" }}</td>
+      <td>{{ row.count }}</td>
+      <td>{{ row.wins }}</td>
+      <td class="{{ 'pos' if row.net_pct >= 0 else 'neg' }}">{{ "%+.1f"|format(row.net_pct) }}%</td>
+      <td>{% if row.best is not none %}{{ "%+.1f"|format(row.best) }}%{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">لا صفقات مغلقة بعد</div>
+  {% endif %}
+  <p class="small muted" style="margin-top:10px">
+    هذي الصفحة قياس فقط — لا تغيّر شيئًا في سلوك المحرك. إن أثبتت الأرقام
+    الانحياز، فالعلاج قرار منفصل يُتخذ على ضوئها.
+  </p>
+</div>
+
+{% endblock %}

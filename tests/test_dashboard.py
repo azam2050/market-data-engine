@@ -639,3 +639,154 @@ def test_an_order_of_unknown_fate_is_shown_as_unknown(tmp_path):
 def test_the_execution_page_is_behind_the_login(tmp_path):
     """Slippage on the operator's own wallet is nobody else's business."""
     assert TestClient(create_app(_settings(tmp_path))).get("/orders").status_code == 401
+
+
+# ---------------------------------------------------------------- bias study
+def _write_jsonl(settings: Settings, name: str, rows: list[dict]) -> None:
+    import json
+
+    path = settings.journal_dir / name
+    with path.open("a", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+
+
+def _decision_row(action: str, bias: float, direction: str | None = None) -> dict:
+    return {
+        "ts": "2026-08-21T14:00:00+00:00",
+        "action": action,
+        "direction": direction,
+        "snapshot": {"net_bias": bias},
+    }
+
+
+def _missed_row(direction: str, peak: float, blocked_by: list | None = None) -> dict:
+    return {
+        "ts": "2026-08-21T15:00:00+00:00",
+        "would_be_direction": direction,
+        "peak_return_pct": peak,
+        "blocked_by": blocked_by or [],
+    }
+
+
+def test_bias_study_counts_each_side_with_the_same_yardstick(tmp_path):
+    """The only fair comparison: entry rate when the tape leaned up versus
+    entry rate when it leaned down."""
+    from qqq_alpha.dashboard.data import bias_study
+
+    settings = _settings(tmp_path)
+    _write_jsonl(
+        settings,
+        "decisions-a.jsonl",
+        [
+            _decision_row("WAIT", 0.5),
+            _decision_row("WAIT", 0.4),
+            _decision_row("ENTER", 0.6, "CALL"),
+            _decision_row("ENTER", -0.5, "PUT"),
+            _decision_row("ENTER", -0.4, "PUT"),
+            _decision_row("WAIT", -0.3),
+            _decision_row("PASS", 0.05),  # neutral — must not count anywhere
+        ],
+    )
+
+    study = bias_study(settings)
+
+    assert study["behaviour"]["bullish"]["moments"] == 3
+    assert study["behaviour"]["bullish"]["entered"] == 1
+    assert study["behaviour"]["bearish"]["moments"] == 3
+    assert study["behaviour"]["bearish"]["entered"] == 2
+
+
+def test_bias_study_prices_the_refused_calls(tmp_path):
+    from qqq_alpha.dashboard.data import bias_study
+
+    settings = _settings(tmp_path)
+    _write_jsonl(
+        settings,
+        "missed-a.jsonl",
+        [
+            _missed_row("CALL", 80.0),
+            _missed_row("CALL", 120.0),
+            _missed_row("CALL", 60.0, blocked_by=["position_cap: 1/1"]),
+            _missed_row("PUT", 90.0),
+        ],
+    )
+
+    study = bias_study(settings)
+
+    call = study["missed"]["CALL"]
+    assert call["count"] == 3
+    assert call["declined_by_brain"] == 2, "the rails-blocked one is not the brain's fault"
+    assert call["sum_peak"] == 260.0
+    assert call["max_peak"] == 120.0
+
+
+def test_a_small_bullish_sample_returns_unproven_not_innocent(tmp_path):
+    """Absence of evidence, stated as such — the market never sat the exam."""
+    from qqq_alpha.dashboard.data import bias_study
+
+    settings = _settings(tmp_path)
+    _write_jsonl(
+        settings,
+        "decisions-a.jsonl",
+        [_decision_row("ENTER", -0.5, "PUT")] * 12 + [_decision_row("WAIT", 0.4)] * 3,
+    )
+
+    study = bias_study(settings)
+
+    assert study["status"] == "unproven"
+    assert "غير كافية" in study["verdict"]
+
+
+def test_a_lopsided_record_with_refused_calls_is_called_biased(tmp_path):
+    from qqq_alpha.dashboard.data import bias_study
+
+    settings = _settings(tmp_path)
+    _write_jsonl(
+        settings,
+        "decisions-a.jsonl",
+        [_decision_row("WAIT", 0.5)] * 11
+        + [_decision_row("ENTER", 0.5, "CALL")]
+        + [_decision_row("ENTER", -0.5, "PUT")] * 5
+        + [_decision_row("WAIT", -0.5)] * 7,
+    )
+    _write_jsonl(
+        settings,
+        "missed-a.jsonl",
+        [_missed_row("CALL", 70.0), _missed_row("CALL", 55.0), _missed_row("CALL", 90.0)],
+    )
+
+    study = bias_study(settings)
+
+    assert study["status"] == "biased"
+    assert "مثبت" in study["verdict"]
+
+
+def test_balanced_behaviour_is_cleared(tmp_path):
+    from qqq_alpha.dashboard.data import bias_study
+
+    settings = _settings(tmp_path)
+    _write_jsonl(
+        settings,
+        "decisions-a.jsonl",
+        [_decision_row("ENTER", 0.5, "CALL")] * 3
+        + [_decision_row("WAIT", 0.5)] * 9
+        + [_decision_row("ENTER", -0.5, "PUT")] * 3
+        + [_decision_row("WAIT", -0.5)] * 9,
+    )
+
+    study = bias_study(settings)
+
+    assert study["status"] == "clear"
+
+
+def test_the_bias_page_renders_with_data_and_without(tmp_path):
+    settings = _settings(tmp_path)
+    client = TestClient(create_app(settings))
+    assert client.get("/bias", auth=AUTH).status_code == 200
+
+    _seed(settings)
+    body = client.get("/bias", auth=AUTH).text
+    assert "دراسة الانحياز" in body
+    assert "قمم" in body  # the ceiling disclaimer is part of the page's honesty
+    assert client.get("/bias").status_code == 401

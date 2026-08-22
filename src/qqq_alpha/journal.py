@@ -61,6 +61,12 @@ class Journal:
                 "overrides": decision.overrides,
                 "invalidation": decision.invalidation,
                 "targets": [t.model_dump(mode="json") for t in decision.targets],
+                # the levels the brain committed to on a WAIT. Everything else
+                # about a declared trigger was recorded except the trigger
+                # itself, which made "how many CALL triggers were declared and
+                # never taken" unanswerable from the record — the exact
+                # question the bias study needs next.
+                "triggers": [t.model_dump(mode="json") for t in decision.triggers],
                 "stop_return_pct": decision.stop_return_pct,
                 "rail_blocks": rail_blocks or [],
                 "rail_warnings": rail_warnings or [],
