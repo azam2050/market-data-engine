@@ -242,6 +242,8 @@ class LiveEngine:
             else None
         )
         self._channel_daily_posted: date | None = None
+        # which session's data-health verdict has already been sent
+        self._health_reported: date | None = None
         # blue under-watch cards published today — capped so a choppy session
         # cannot turn the watch card into noise
         self._watch_shared_today = 0
@@ -1054,6 +1056,11 @@ class LiveEngine:
             self._persist()
             await self._execute_exit(trade)
         await self._publish_channel_daily(bar.ts.astimezone(MARKET_TZ).date())
+        # the operator reads the day's verdict at the bell, not tomorrow: the
+        # first placement of this call was at the session roll, which fires on
+        # the NEXT day's first bar — so Friday's report would have arrived
+        # Monday. It belongs here, with the rest of the after-the-bell package.
+        await self._report_data_health(bar.ts.astimezone(MARKET_TZ).date())
 
     @property
     def _report_channels(self) -> list[ChannelPublisher]:
@@ -1192,7 +1199,10 @@ class LiveEngine:
             f"session {self._current_day} closed | trades={self.status.trades_today} "
             f"| realized={self.manager.realized_return_pct:+.1f}%"
         )
-        await self._report_data_health()
+        # normally already sent at the bell; this is the fallback for a session
+        # that ended without a post-close bar (crash, feed loss at 15:59)
+        if self._current_day is not None:
+            await self._report_data_health(self._current_day)
 
         # score whatever declined setups are still awaiting judgement on
         # whatever window they got, rather than losing them at the boundary
@@ -1959,7 +1969,7 @@ class LiveEngine:
         """Reload recent history from disk rather than trusting process memory."""
         self.recent_trades = self.memory.recent_trades(limit=15)
 
-    async def _report_data_health(self) -> None:
+    async def _report_data_health(self, day: date) -> None:
         """The day's verdict on its own data, with the cause named.
 
         The engine always knew the data was incomplete — it said so inside
@@ -1967,9 +1977,13 @@ class LiveEngine:
         said was *why*, which left the operator choosing between guesses whose
         fixes differ and one of which is expensive. The three witnesses exist
         already; this is the first place they are put side by side.
+
+        Guarded per day: after-hours bars keep arriving until 20:00 ET, and
+        each of them passes through the same post-close path that sends this.
         """
-        if not self.session_bars:
+        if self._health_reported == day or not self.session_bars:
             return
+        self._health_reported = day
         health = assess(
             inspect_session(self.session_bars),
             self.status.reconnects,

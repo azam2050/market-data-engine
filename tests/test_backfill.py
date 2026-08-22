@@ -371,7 +371,59 @@ async def test_the_engine_reports_data_health_after_the_bell(tmp_path):
     engine.session_bars = [b for i, b in enumerate(bars[:100]) if i != 50]
     engine.status.reconnects = 2
 
-    await engine._report_data_health()
+    await engine._report_data_health(day)
 
     assert notes and "صحة البيانات اليوم" in notes[0]
     assert "البثّ انقطع" in notes[0], "two reconnects point at the connection"
+
+
+@pytest.mark.asyncio
+async def test_the_health_report_goes_out_at_the_bell_and_only_once(tmp_path):
+    """First placed at the session roll, which fires on the NEXT day's first
+    bar — so Friday's report would have arrived Monday. It belongs at the
+    bell, and the guard matters because after-hours bars keep flowing through
+    the same post-close path until 20:00 ET."""
+    from datetime import date, datetime, time
+
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.config import MARKET_TZ
+    from qqq_alpha.data.pricing import BlackScholesPricer
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.journal import Journal
+    from qqq_alpha.live.engine import LiveEngine
+    from qqq_alpha.live.notifier import NullNotifier
+
+    notes: list[str] = []
+
+    class _Capture(NullNotifier):
+        async def note(self, message: str) -> None:
+            notes.append(message)
+
+    day = date(2026, 3, 2)
+    settings = Settings(
+        massive_api_key="k",
+        journal_dir=tmp_path / "journal",
+        data_dir=tmp_path / "data",
+        shadow_symbols_csv="",
+    )
+    settings.ensure_dirs()
+    engine = LiveEngine(
+        settings=settings,
+        decider=None,
+        pricer=BlackScholesPricer(),
+        playbook=Playbook(),
+        journal=Journal(tmp_path / "journal", session_tag="test"),
+        notifier=_Capture(),
+    )
+    engine._current_day = day
+    engine.session_bars = list(synthetic_session("QQQ", day, seed=8)[:100])
+
+    template = engine.session_bars[-1]
+    for minute in (0, 5, 30):  # the closing bar, then two after-hours bars
+        closing = template.model_copy(
+            update={"ts": datetime.combine(day, time(16, minute), tzinfo=MARKET_TZ)}
+        )
+        await engine._close_if_session_over(closing)
+
+    health = [n for n in notes if "صحة البيانات اليوم" in n]
+    assert len(health) == 1, "once at the bell — not on every after-hours bar"
