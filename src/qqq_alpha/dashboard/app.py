@@ -207,6 +207,7 @@ def create_app(
                 subscribers=rows,
                 connected=on_subscriber_change is not None,
                 channel_total=roster.get("channel_total"),
+                start_languages=data.start_languages(settings),
             ),
         )
 

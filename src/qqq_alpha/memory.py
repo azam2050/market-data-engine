@@ -115,6 +115,16 @@ CREATE TABLE IF NOT EXISTS subscribers (
     status      TEXT NOT NULL DEFAULT 'trial'
 );
 
+-- every /start ever pressed, with the presser's Telegram app language.
+-- Top-of-funnel demand measurement: "how many English-app users do our
+-- campaigns actually reach?" answered with a count, not a feeling. One row
+-- per chat forever — consenting or vanishing afterwards doesn't erase it.
+CREATE TABLE IF NOT EXISTS start_pings (
+    chat_id     TEXT PRIMARY KEY,
+    language    TEXT,
+    first_seen  TEXT NOT NULL
+);
+
 -- setups the engine declined (rail-blocked or the AI's own PASS), priced
 -- forward after the fact. Without this table the engine can only grade its
 -- winners and losers, never its caution.
@@ -644,6 +654,29 @@ class Memory:
                 (when.isoformat(), str(chat_id)),
             )
             conn.commit()
+
+    def record_start_language(self, chat_id: str, language: str, when: datetime) -> None:
+        """Remember the app language of everyone who ever pressed /start.
+
+        First press wins: re-/starting later (possibly after switching app
+        language) must not rewrite what the campaign originally reached.
+        """
+        with closing(self._connect()) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO start_pings (chat_id, language, first_seen)"
+                " VALUES (?,?,?)",
+                (str(chat_id), (language or "").lower(), when.isoformat()),
+            )
+            conn.commit()
+
+    def start_language_counts(self) -> dict[str, int]:
+        """/start presses grouped by app language, biggest group first."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT COALESCE(NULLIF(language, ''), '؟') AS lang, COUNT(*)"
+                " FROM start_pings GROUP BY lang ORDER BY COUNT(*) DESC"
+            ).fetchall()
+        return {row[0]: row[1] for row in rows}
 
     def add_subscriber(
         self,

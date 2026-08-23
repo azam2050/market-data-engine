@@ -164,7 +164,7 @@ async def test_education_series_cycles_without_repeating_adjacent_slots():
 
     titles = [
         next(
-            (line for line in body.splitlines() if "سلسلة حماية رأس المال" in line),
+            (line for line in body.splitlines() if "منهج إدارة المخاطر ورأس المال" in line),
             "",
         )
         for body in captions
@@ -305,8 +305,8 @@ async def test_qualified_waits_publish_at_most_two_watch_cards(tmp_path):
 
     # plenty of qualified WAIT wakes, but the card kept its promise: max 2/day
     assert len(notifier.watches) == 2
-    assert "تحت المراقبة" in notifier.watches[0]
-    assert "ليس طرحًا بعد" in notifier.watches[0]
+    assert "حالة قيد التكوّن" in notifier.watches[0]
+    assert "لم تصدر دراستها بعد" in notifier.watches[0]
 
 
 # ---------------------------------------------------------------- monthly
@@ -407,7 +407,7 @@ async def test_education_falls_back_to_the_full_text_when_the_photo_fails():
         publisher = ChannelPublisher("token", "@chan", client=client)
         await publisher.post_education(date(2026, 3, 3))
 
-    assert "سلسلة حماية رأس المال" in posts["texts"][0]
+    assert "منهج إدارة المخاطر ورأس المال" in posts["texts"][0]
     assert "القاعدة" in posts["texts"][0]
 
 

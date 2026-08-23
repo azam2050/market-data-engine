@@ -142,6 +142,13 @@ class Settings(BaseSettings):
     # disables sign-ups entirely (operator-only bot).
     trial_days: int = 30
     post_trial_channel_url: str = ""
+    # the monthly price quoted in the welcome pitch — advertising only until
+    # the payment gateway lands; changing the env var updates every message
+    subscription_price_sar: int = 199
+    # one Claude-written concept lesson after the bell, both channels. Gated
+    # against advice, prices, and any reveal of this desk's own management —
+    # a lesson that trips the gate is dropped, not edited into compliance.
+    daily_lesson_enabled: bool = True
 
     # admin dashboard — off unless both credentials are set, since an
     # unauthenticated view of every trade thesis and lesson is not a risk

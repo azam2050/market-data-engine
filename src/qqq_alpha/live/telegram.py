@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from qqq_alpha.domain import Trade, TradeUpdate
-from qqq_alpha.live.notifier import DISCLAIMER, format_signal, format_update
+from qqq_alpha.live.notifier import format_signal, format_update
 
 if TYPE_CHECKING:
     from qqq_alpha.memory import Memory
@@ -325,6 +325,10 @@ class InboundMessage:
     text: str
     username: str = ""
     first_name: str = ""
+    # the sender's Telegram app language (IETF tag, e.g. "ar", "en") —
+    # recorded silently at /start so the demand for a non-Arabic experience
+    # becomes a number instead of a guess
+    language: str = ""
 
 
 @dataclass
@@ -523,6 +527,7 @@ class TelegramCommandListener:
                         text=text.strip(),
                         username=sender.get("username") or "",
                         first_name=sender.get("first_name") or "",
+                        language=sender.get("language_code") or "",
                     )
                 )
         return messages
@@ -930,102 +935,137 @@ CONSENT_BUTTONS: list[tuple[str, str]] = [
 ]
 
 
-def consent_message(trial_days: int) -> str:
-    """The legal gate: operator-approved wording, shown BEFORE any content.
+def _days_ar(days: int) -> str:
+    """Arabic number agreement: 3-10 take أيام, the rest take يوماً."""
+    return f"{days} أيام" if 3 <= days <= 10 else f"{days} يوماً"
 
-    The subscriber's explicit button press on this exact text is recorded
-    with a timestamp — the platform's proof of informed consent.
+
+def welcome_pitch_message(trial_days: int, price_sar: int) -> str:
+    """Message one of the funnel: the value first, in case-study language.
+
+    Deliberately free of the advisory-room register — no live calls, no
+    follow-alongs, nothing imperative. The reader is a student watching
+    documented case studies, and the sentence about the public channel is
+    the whole sales argument: the free feed is a window, this is the hall.
     """
     return (
         "أهلاً بك في بوت عقود الخيارات 👋\n\n"
-        f"طلب انضمامك وصلنا. قبل الدخول وبدء فترة الاطلاع المجانية ({trial_days} يوماً)، "
-        "يلزم الاطلاع على ما يلي والإقرار به:\n\n"
-        "تعريف الخدمة:\n"
-        "هذه منصة تعليمية آلية غرضها عرض طروحات فنية توضيحية على عقود الخيارات "
-        "الأمريكية، ليتعلّم المتابع عملياً كيف تُبنى الصفقة الاحترافية: اختيار "
-        "العقد، تحديد مستويات المتابعة، وضع وقوف الحماية، إدارة رأس المال، "
-        "وتوثيق النتيجة كما وقعت فعلاً — ربحاً أو خسارة.\n\n"
+        "منصة تعليمية آلية متخصصة حصرياً في عقود خيارات صندوق QQQ الأمريكي "
+        "(ناسداك-100) — تشاهد كيف تُبنى الصفقة الاحترافية خطوة بخطوة: اختيار "
+        "العقد، تحديد المحطات، وضع وقف الحماية، إدارة رأس المال، وتوثيق "
+        "النتيجة كما وقعت فعلاً — ربحاً أو خسارة.\n\n"
+        "ما يصلك داخل القناة الخاصة:\n\n"
+        "⚡ جميع دراسات الحالة كاملة، أولاً بأول — من القراءة إلى المجريات "
+        "إلى الخلاصة\n"
+        "🔄 بطاقة المجريات تتجدد تلقائياً كل ربع ساعة — تعرف تطور المشهد "
+        "بنظرة واحدة\n"
+        "🛡️ اللحظات المفصلية — تأمين التكلفة وبلوغ المحطات — موثقة في وقتها\n"
+        "📚 منهج إدارة المخاطر ورأس المال\n"
+        "📅 التقرير اليومي بعد كل جلسة، و📊 التقرير الأسبوعي الشامل — الرابح "
+        "بالأخضر والخاسر بالأحمر\n\n"
+        "(القناة العامة تعرض دراستي حالة أسبوعياً فقط كنموذج — المشترك "
+        "يشاهد كل شيء.)\n\n"
+        f"🎁 باقتك: فترة اطلاع مجانية {_days_ar(trial_days)}، كاملة المزايا — "
+        "بدون بطاقة وبدون أي التزام. وبعدها الاشتراك "
+        f"{price_sar} ريال شهرياً لمن أحب الاستمرار.\n\n"
+        "وقبل الدخول، اطّلع على الإقرار في الرسالة التالية 👇"
+    )
+
+
+def consent_terms_message() -> str:
+    """The legal gate: operator-approved wording, shown BEFORE any content.
+
+    The subscriber's explicit button press on this exact text is recorded
+    with a timestamp — the platform's proof of informed consent. Static on
+    purpose: no numbers that drift with settings, so the text someone agreed
+    to last month is the text on record today.
+    """
+    return (
         "إقرار وإخلاء مسؤولية:\n\n"
+        "تعريف الخدمة: منصة تعليمية آلية متخصصة حصراً في عقود خيارات صندوق "
+        "QQQ الأمريكي، تعرض دراسات حالة توضيحية موثقة بنتائجها كما وقعت "
+        "فعلاً — ربحاً أو خسارة.\n\n"
         "١. جميع ما يُنشر هو محتوى تعليمي وتوضيحي حصراً، ولا يُعد بأي حال من "
         "الأحوال توصية استثمارية، أو استشارة مالية، أو دعوة لشراء أو بيع أي "
         "أداة مالية.\n\n"
         "٢. تداول عقود الخيارات ينطوي على مخاطر عالية جداً قد تصل إلى خسارة "
         "كامل المبلغ، وقد لا يكون مناسباً لجميع الأشخاص.\n\n"
-        "٣. النتائج والطروحات السابقة — أياً كانت — لا تضمن ولا تشير إلى نتائج "
-        "مستقبلية مماثلة.\n\n"
-        "٤. أي قرار يتخذه المتابع هو قراره الشخصي وعلى مسؤوليته الكاملة وحده، "
-        "ولا تتحمل هذه المنصة أي مسؤولية عن قرارات أو نتائج أي متابع.\n\n"
+        "٣. النتائج ودراسات الحالة السابقة — أياً كانت — لا تضمن ولا تشير "
+        "إلى نتائج مستقبلية مماثلة.\n\n"
+        "٤. أي قرار يتخذه المستخدم هو قراره الشخصي وعلى مسؤوليته الكاملة "
+        "وحده، ولا تتحمل هذه المنصة أي مسؤولية عن قرارات أو نتائج أي "
+        "مستخدم.\n\n"
         "٥. المستخدم يعلم ويقر بأن المنصة لا تقدم أي خدمات وساطة أو تنفيذ "
-        "مالي، ولا تنفذ صفقات نيابة عن أحد، ولا تدير أموالاً أو محافظ — وأي "
-        "تطبيق عملي لهذه الطروحات التعليمية هو قرار مستقل يخص المتابع وحده "
-        "عبر حسابه الخاص لدى وسيطه المالي المرخص.\n\n"
-        "٦. تنبيه أمني: قنواتنا الرسمية الوحيدة هي القناة والبوت المرسل لهذه "
-        "الرسالة فقط. لا نراسل أحداً بشكل خاص أبداً — فاحذر أي جهة تنتحل اسمنا.\n\n"
+        "مالي، ولا تنفذ صفقات نيابة عن أحد، ولا تدير أموالاً أو محافظ — "
+        "وأي قرار عملي هو قرار مستقل يخص المستخدم وحده عبر حسابه الخاص "
+        "لدى وسيطه المالي المرخص.\n\n"
+        "٦. هذه الخدمة موجهة لمن أتم الثامنة عشرة من عمره.\n\n"
+        "٧. تنبيه أمني: قنواتنا الرسمية الوحيدة هي القناة والبوت المرسل لهذه "
+        "الرسالة فقط. لا نراسل أحداً بشكل خاص أبداً ولا نطلب تحويلات — "
+        "فاحذر أي جهة تنتحل اسمنا.\n\n"
         "بالضغط على زر الموافقة أدناه، فأنت تقر بأنك قرأت ما سبق وفهمته "
         "ووافقت عليه:"
     )
 
 
-def consent_accepted_note(trial_days: int) -> str:
-    return (
-        "✅ تم تسجيل إقرارك وقبولك في القناة.\n"
-        f"بدأت فترة اطلاعك المجانية لمدة {trial_days} يوماً — أهلاً بك 🎉"
-    )
+def consent_accepted_note(trial_days: int, expires_on: str = "", link: str = "") -> str:
+    """Post-consent confirmation. ``link`` is included only for the /start
+    path, where no pending join request exists to approve — the personal
+    single-use link IS their admission."""
+    lines = [
+        "✅ تم تسجيل إقرارك — أهلاً بك معنا 🎉",
+        f"بدأت فترة اطلاعك المجانية لمدة {_days_ar(trial_days)}"
+        + (f"، وتنتهي بتاريخ {expires_on}." if expires_on else "."),
+    ]
+    if link:
+        lines.append(
+            "\n🔗 هذا رابط دخولك الشخصي للقناة الخاصة (صالح لشخص واحد):\n" + link
+        )
+    return "\n".join(lines)
 
 
 def consent_declined_note() -> str:
     return (
-        "نحترم قرارك — أُلغي طلب الانضمام ولم يُسجَّل أي شيء.\n"
-        "بابنا مفتوح متى غيّرت رأيك: اضغط رابط القناة من جديد وستصلك هذه "
+        "نحترم قرارك — لم يُسجَّل أي شيء.\n"
+        "بابنا مفتوح متى غيّرت رأيك: أرسل /start من جديد وستصلك هذه "
         "الرسالة مرة أخرى."
     )
 
 
 def cards_guide_message() -> str:
-    """The second welcome message: how to read the channel at a glance."""
+    """Post-consent orientation: how to read the channel at a glance."""
     return (
         "دليل ألوان البطاقات — احفظه وستقرأ القناة بنظرة واحدة 🎨\n\n"
-        "🔵 بطاقة زرقاء — تحت المراقبة:\n"
-        "فرصة تتكوّن ولم يصدر طرح بعد. قد يكتمل شرطها فيصدر الطرح كاملاً، "
-        "وقد لا يكتمل فلا يصدر شيء — والانضباط أهم من الحماس.\n\n"
-        "🌑 بطاقة كحلية (لون العلامة) — طرح جديد:\n"
-        "صدر الآن طرح تعليمي بكامل تفاصيله: العقد، مستويات المتابعة، وقوف "
+        "🔵 بطاقة زرقاء — حالة قيد التكوّن:\n"
+        "فرصة تتشكل ولم تصدر دراستها بعد. قد يكتمل شرطها فتصدر دراسة الحالة "
+        "كاملة، وقد لا يكتمل فلا يصدر شيء — والانضباط أهم من الحماس.\n\n"
+        "🌑 بطاقة كحلية (لون العلامة) — دراسة حالة جديدة:\n"
+        "صدرت الآن دراسة حالة بكامل تفاصيلها: العقد، محطات الدراسة، وقف "
         "الحماية، ونموذج إدارة رأس المال.\n\n"
-        "🟢 بطاقة خضراء نابضة — الطرح حي الآن:\n"
-        "نفس البطاقة تتجدد تلقائياً بالسعر الحالي كل ربع ساعة — تعرف حالة "
-        "الطرح لحظياً دون أي رسائل إضافية.\n\n"
-        "🟢 خضراء بالنتيجة — أُغلق رابحاً | 🔴 حمراء — أُغلق خاسراً:\n"
-        "ننشر الرابح والخاسر بنفس الوضوح والتصميم، مع الدرس المستفاد من كل "
-        "إغلاق — فالسجل الصادق هو منتجنا.\n\n"
+        "🟢 بطاقة خضراء نابضة — مجريات الحالة:\n"
+        "نفس البطاقة تتجدد تلقائياً بالسعر الحالي كل ربع ساعة — تعرف تطور "
+        "المشهد بنظرة واحدة دون أي رسائل إضافية.\n\n"
+        "🟢 خضراء بالنتيجة — خلاصة رابحة | 🔴 حمراء — خلاصة خاسرة:\n"
+        "ننشر الرابح والخاسر بنفس الوضوح والتصميم، مع العبرة من كل خلاصة — "
+        "فالسجل الصادق هو منتجنا.\n\n"
         "لست مضطراً لقراءة كل بطاقة — اللون يخبرك بالحالة من أول نظرة، "
-        "والتفاصيل لمن أراد التعمق. متابعة موفقة 📊"
-    )
-
-
-def welcome_message(trial_days: int) -> str:
-    return (
-        "أهلاً بك في بوت عقود الخيارات 👋\n\n"
-        f"تم تفعيل فترة المتابعة المجانية لمدة {trial_days} يوماً.\n"
-        "ستصلك الطروحات الفنية التعليمية الحية فور صدورها: العقد، الاتجاه، "
-        "مستويات المتابعة، وقف الحماية، والقراءة الفنية كاملة — مع متابعة كل "
-        "طرح حتى إغلاقه بنتيجته الحقيقية، ربحاً أو خسارة.\n\n"
-        f"⚠️ {DISCLAIMER}"
+        "والتفاصيل لمن أراد التعمق 📊"
     )
 
 
 def trial_status_message(days_left: int) -> str:
     return (
-        f"فترة المتابعة المجانية فعّالة — المتبقي {max(days_left, 0)} يوماً.\n"
-        "الطروحات تصلك تلقائياً فور صدورها، لا يلزمك أي إجراء."
+        f"فترة الاطلاع المجانية فعّالة — المتبقي {max(days_left, 0)} يوماً.\n"
+        "دراسات الحالة والتقارير تصلك تلقائياً داخل القناة، لا يلزمك أي إجراء."
     )
 
 
 def farewell_message(channel_url: str) -> str:
     lines = [
-        "انتهت فترة المتابعة المجانية في بوت عقود الخيارات — شكراً لمتابعتك معنا 🙏",
+        "انتهت فترة الاطلاع المجانية في بوت عقود الخيارات — شكراً لبقائك معنا 🙏",
     ]
     if channel_url:
-        lines.append(f"\nللاستمرار ومتابعة النتائج والتقارير، انضم إلينا هنا:\n{channel_url}")
+        lines.append(f"\nللاستمرار والاطلاع على النتائج والتقارير، انضم إلينا هنا:\n{channel_url}")
     return "\n".join(lines)
 
 

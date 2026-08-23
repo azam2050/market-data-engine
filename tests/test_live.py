@@ -399,7 +399,7 @@ def test_signal_message_carries_size_thesis_stop_and_exit_plan():
     assert "يُباع النصف وتُؤمَّن التكلفة" in message
     # the operator's lawyer set the register: educational presentation, no
     # imperative "enter now" phrasing anywhere in the message
-    assert "طرح تعليمي حي" in message
+    assert "دراسة حالة" in message
 
 
 def test_size_factor_pays_for_conviction_and_fears_the_open():
@@ -704,15 +704,44 @@ class _FakeCommands:
 
     def __init__(self) -> None:
         self.sent: list[tuple[str, str]] = []
+        self.buttoned: list[tuple[str, str]] = []
+        self.links_issued = 0
 
     async def send(self, chat_id: str, text: str) -> bool:
         self.sent.append((chat_id, text))
         return True
 
+    async def send_with_buttons(self, chat_id: str, text: str, buttons) -> bool:
+        self.buttoned.append((chat_id, text))
+        return True
+
+    async def answer_button(self, callback_id: str, text: str = "") -> None:
+        return None
+
+    async def replace_message(self, chat_id: str, message_id: int, text: str) -> None:
+        return None
+
+    async def approve_join_request(self, channel_id: str, user_id: str) -> bool:
+        return False  # the /start path: no pending request exists
+
+    async def decline_join_request(self, channel_id: str, user_id: str) -> bool:
+        return True
+
+    async def create_invite_link(self, channel_id: str, name: str = "") -> str:
+        self.links_issued += 1
+        return "https://t.me/+personal"
+
+    async def kick(self, channel_id: str, user_id: str) -> bool:
+        return True
+
 
 def _subscriber_engine(settings, tmp_path) -> LiveEngine:
     scoped = settings.model_copy(
-        update={"trial_days": 30, "post_trial_channel_url": "https://t.me/qqq_free"}
+        update={
+            "trial_days": 30,
+            "post_trial_channel_url": "https://t.me/qqq_free",
+            "telegram_private_channel_id": "-100999",
+        }
     )
     engine = LiveEngine(
         settings=scoped,
@@ -727,18 +756,77 @@ def _subscriber_engine(settings, tmp_path) -> LiveEngine:
 
 
 @pytest.mark.asyncio
-async def test_start_registers_a_trial_and_welcomes(settings, tmp_path):
+async def test_start_shows_pitch_and_terms_but_registers_nothing(settings, tmp_path):
+    """/start is a shop window now, not a signature: the pitch and the terms
+    go out, and nothing lands in the roster until أوافق is pressed."""
     from qqq_alpha.live.telegram import InboundMessage
 
     engine = _subscriber_engine(settings, tmp_path)
+    await engine._handle_subscriber(
+        InboundMessage("555", "/start", username="trader1", language="en")
+    )
+
+    assert engine.memory.subscriber("555") is None  # no consent, no row
+    assert engine.commands.sent and engine.commands.sent[0][0] == "555"
+    pitch = engine.commands.sent[0][1]
+    assert "QQQ" in pitch and "30" in pitch  # specialization + trial length
+    assert "199" in pitch  # the subscription price is stated up front
+    # the terms travel separately, with the consent buttons attached
+    assert engine.commands.buttoned and "إقرار وإخلاء مسؤولية" in engine.commands.buttoned[0][1]
+    # the app language is measured at the top of the funnel
+    assert engine.memory.start_language_counts() == {"en": 1}
+
+
+@pytest.mark.asyncio
+async def test_consent_press_registers_and_issues_a_personal_link(settings, tmp_path):
+    """The أوافق press is the admission ticket: registration, consent stamp,
+    and — with no pending join request — a personal single-use link."""
+    from qqq_alpha.live.telegram import ButtonPress, InboundMessage
+
+    engine = _subscriber_engine(settings, tmp_path)
     await engine._handle_subscriber(InboundMessage("555", "/start", username="trader1"))
+    await engine._handle_button_press(
+        ButtonPress(
+            callback_id="cb1",
+            user_id="555",
+            chat_id="555",
+            message_id=7,
+            data="consent:yes",
+            username="trader1",
+        )
+    )
 
     row = engine.memory.subscriber("555")
     assert row is not None and row["status"] == "trial"
-    assert engine.commands.sent and engine.commands.sent[0][0] == "555"
-    assert "30" in engine.commands.sent[0][1]  # the trial length is stated
-    # the operator is told about the new sign-up
+    assert row["consented_at"]  # the legal stamp exists
+    assert engine.commands.links_issued == 1
+    assert any("t.me/+personal" in text for _, text in engine.commands.sent)
     assert any("مشترك" in note for note in engine.notifier.notes)
+
+
+@pytest.mark.asyncio
+async def test_expired_subscriber_consent_press_does_not_reopen_the_door(settings, tmp_path):
+    """An expired subscriber pressing an old أوافق button must get the
+    farewell, not a fresh link — that leak would be unkickable forever."""
+    from datetime import UTC
+
+    from qqq_alpha.live.telegram import ButtonPress
+
+    engine = _subscriber_engine(settings, tmp_path)
+    long_ago = datetime(2026, 1, 1, tzinfo=UTC)
+    engine.memory.add_subscriber("888", "old", "Old", long_ago, long_ago + timedelta(days=30))
+    await engine._expire_subscribers()
+
+    await engine._handle_button_press(
+        ButtonPress(
+            callback_id="cb2", user_id="888", chat_id="888", message_id=9,
+            data="consent:yes",
+        )
+    )
+
+    assert engine.commands.links_issued == 0
+    assert engine.memory.subscriber("888")["status"] == "expired"
+    assert any("t.me/qqq_free" in text for _, text in engine.commands.sent)
 
 
 @pytest.mark.asyncio
@@ -797,21 +885,21 @@ async def test_operator_can_ask_for_subscriber_counts(settings, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_refused_welcome_is_escalated_to_the_operator(settings, tmp_path):
-    """Registration succeeding while the welcome bounces is a silent funnel
-    break — the operator note must carry the warning."""
+async def test_undeliverable_terms_are_escalated_to_the_operator(settings, tmp_path):
+    """If the terms (and their buttons) cannot reach a /start sender, the
+    funnel is silently broken for them — the operator note must say so."""
     from qqq_alpha.live.telegram import InboundMessage
 
     engine = _subscriber_engine(settings, tmp_path)
 
-    async def refuse(chat_id, text):
+    async def refuse(chat_id, text, buttons):
         return False
 
-    engine.commands.send = refuse
+    engine.commands.send_with_buttons = refuse
     await engine._handle_subscriber(InboundMessage("444", "/start", username="friend"))
 
-    assert engine.memory.subscriber("444") is not None  # sign-up still counted
-    assert any("تعذر إرسال رسالة الترحيب" in note for note in engine.notifier.notes)
+    assert engine.memory.subscriber("444") is None  # nothing half-registered
+    assert any("تعذر إرسال رسائل التسجيل" in note for note in engine.notifier.notes)
 
 
 class _PromiseThenEnterDecider:

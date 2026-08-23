@@ -33,6 +33,18 @@
     هذي القائمة تعرض <strong>كل من سجّل</strong>، نشطًا كان أو منتهيًا. العدّاد في
     الصفحة الرئيسية يحسب النشطين فقط.
   </p>
+
+  {% if start_languages %}
+  <div style="margin-top:14px">
+    <h2 style="font-size:14px">🌐 لغات تطبيقات من ضغط /start ({{ start_languages|sum(attribute='count') }})</h2>
+    <p class="small muted">قياس صامت للطلب — يُقرَّر فتح تجربة بلغة ثانية على هذا الرقم، لا على التخمين.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+      {% for row in start_languages %}
+      <span class="pill">{{ row.language }} — {{ row.count }} ({{ row.pct }}%)</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
   {% if not connected %}
   <p class="small" style="color:var(--yellow)">
     ⚠️ اللوحة تعمل منفصلة عن البوت الآن، فالتعديلات هنا تمسّ قاعدة البيانات فقط —

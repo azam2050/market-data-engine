@@ -267,17 +267,17 @@ def _draw_entry_card(trade: Trade, delayed: bool, live: TradeUpdate | None) -> b
     contract = human_contract(trade.occ_symbol, trade.opened_at)
 
     img, draw = _canvas()
-    y = _header(draw, "طروحات فنية تعليمية على عقود الخيارات")
+    y = _header(draw, "دراسات حالة تعليمية على عقود الخيارات")
 
     # the contract, big enough to read from across a room
     _panel(draw, (MARGIN, y, W - MARGIN, y + 280), outline=accent)
     if live is None:
-        _chip(draw, W / 2, y + 50, "طرح تعليمي حي", GOLD)
+        _chip(draw, W / 2, y + 50, "دراسة حالة جديدة", GOLD)
     else:
         elapsed = int((live.ts - trade.opened_at).total_seconds() // 60)
         _chip(
             draw, W / 2, y + 50,
-            f"ما زلنا في الطرح — الآن {live.return_pct:+.1f}% • {elapsed} دقيقة",
+            f"مجريات الحالة — الآن {live.return_pct:+.1f}% • {elapsed} دقيقة",
             GREEN if live.return_pct >= 0 else GOLD,
         )
     draw.text((W / 2, y + 144), contract, font=_font(84, bold=True), fill=accent, anchor="mm")
@@ -291,7 +291,7 @@ def _draw_entry_card(trade: Trade, delayed: bool, live: TradeUpdate | None) -> b
     # the numbers that define the study — labelled as a plan being followed,
     # never as an instruction to the reader
     rows: list[tuple[str, str, str, bool]] = [
-        ("سعر الطرح", f"${trade.entry_price:.2f}", BLUE, False)
+        ("سعر الدخول", f"${trade.entry_price:.2f}", BLUE, False)
     ]
     if decision.stop_price is not None:
         rows.append(
@@ -302,14 +302,14 @@ def _draw_entry_card(trade: Trade, delayed: bool, live: TradeUpdate | None) -> b
     rows.append(("نموذج إدارة رأس المال", size_label(decision.size_factor), GOLD, True))
     rows.append(("الثقة", f"{decision.confidence}/10", TEXT, False))
 
-    row_y, y = _titled_panel(draw, y, "تفاصيل الطرح", len(rows))
+    row_y, y = _titled_panel(draw, y, "تفاصيل الحالة", len(rows))
     for label, value, fill, value_rtl in rows:
         _row(draw, row_y, label, value, fill, value_rtl)
         row_y += 60
 
     # follow-up levels, plus the management line that makes this desk different
     targets = decision.targets[:4]
-    row_y, y = _titled_panel(draw, y, "مستويات المتابعة", len(targets), extra=90)
+    row_y, y = _titled_panel(draw, y, "محطات الدراسة", len(targets), extra=90)
     for index, target in enumerate(targets, start=1):
         _row(draw, row_y, f"المستوى {index}", f"${target.price:.2f}  (+{target.return_pct:.0f}%)", GREEN)
         row_y += 60
@@ -329,7 +329,7 @@ def _draw_entry_card(trade: Trade, delayed: bool, live: TradeUpdate | None) -> b
 # ---------------------------------------------------------------- scale-out
 def render_scale_out_card(trade: Trade, update: TradeUpdate) -> bytes:
     img, draw = _canvas()
-    y = _header(draw, "تطبيق عملي: تأمين التكلفة")
+    y = _header(draw, "لحظة مفصلية: تأمين التكلفة")
 
     _panel(draw, (MARGIN, y, W - MARGIN, y + 330), outline=GREEN)
     _rtl(draw, (W / 2, y + 78), "تم تأمين التكلفة", _font(64, bold=True), GREEN, "mm")
@@ -349,7 +349,7 @@ def render_scale_out_card(trade: Trade, update: TradeUpdate) -> bytes:
 
     for line in _wrap(
         draw,
-        "الدرس: من هذه اللحظة لا يمكن لهذا الطرح أن يخسر — النصف الباقي يطارد الامتداد",
+        "الدرس: من هذه اللحظة لا يمكن لهذه الحالة أن تخسر — النصف الباقي يطارد الامتداد",
         _font(30, bold=True),
         W - 2 * MARGIN - 60,
     )[:2]:
@@ -370,7 +370,7 @@ def render_update_card(trade: Trade, update: TradeUpdate) -> bytes:
     """
     targets = trade.decision.targets[:3]
     note = (
-        f"مضى على الطرح {int((update.ts - trade.opened_at).total_seconds() // 60)} دقيقة "
+        f"مضى على الحالة {int((update.ts - trade.opened_at).total_seconds() // 60)} دقيقة "
         "— لم يُغلق بعد. الإدارة الآلية مستمرة: النصف مؤمَّن والباقي بوقف متحرك من القمة"
     )
     probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
@@ -385,29 +385,29 @@ def render_update_card(trade: Trade, update: TradeUpdate) -> bytes:
 
     with _stage("live"):
         img, draw = _canvas(height)
-        y = _header(draw, "متابعة حية: مستوى متابعة تحقق")
+        y = _header(draw, "مجريات الحالة: محطة تحققت")
 
         _panel(draw, (MARGIN, y, W - MARGIN, y + 330), outline=GREEN)
-        _rtl(draw, (W / 2, y + 78), "الطرح ما زال مفتوحًا", _font(58, bold=True), GREEN, "mm")
+        _rtl(draw, (W / 2, y + 78), "الحالة ما زالت مفتوحة", _font(58, bold=True), GREEN, "mm")
         draw.text(
             (W / 2, y + 180), f"{update.return_pct:+.1f}%", font=_font(96, bold=True),
             fill=GREEN if update.return_pct > 0 else RED, anchor="mm",
         )
         # the note carries which level, e.g. "target:T1 reached (+50%)"
         label = update.note.split(":", 1)[-1].split(" reached")[0].strip() or "T1"
-        _chip(draw, W / 2, y + 272, f"مستوى المتابعة {label} تحقق", GOLD)
+        _chip(draw, W / 2, y + 272, f"المحطة {label} تحققت", GOLD)
         y += 360
 
         row_y, y = _titled_panel(draw, y, "التفاصيل", 4)
         _row(draw, row_y, "العقد", human_contract(trade.occ_symbol, trade.opened_at), TEXT)
-        _row(draw, row_y + 60, "سعر الطرح", f"${trade.entry_price:.2f}", MUTED)
+        _row(draw, row_y + 60, "سعر الدخول", f"${trade.entry_price:.2f}", MUTED)
         _row(draw, row_y + 120, "السعر الآن", f"${update.price:.2f}", GREEN)
         _row(draw, row_y + 180, "أقصى ربح وصله", f"{trade.max_favorable_pct:+.1f}%", GOLD)
 
         # what a follower actually wants while a study is still running: which
         # levels are already behind us and which are still ahead
         if targets:
-            row_y, y = _titled_panel(draw, y, "مستويات المتابعة", len(targets))
+            row_y, y = _titled_panel(draw, y, "محطات الدراسة", len(targets))
             for index, target in enumerate(targets, start=1):
                 done = trade.max_favorable_pct >= target.return_pct
                 _row(
@@ -438,7 +438,7 @@ def render_education_card(lesson: str) -> bytes:
     everything between is the body.
     """
     parts = [block.strip() for block in lesson.strip().split("\n\n") if block.strip()]
-    title = parts[0] if parts else "سلسلة حماية رأس المال"
+    title = parts[0] if parts else "منهج إدارة المخاطر ورأس المال"
     rule = ""
     body_parts = parts[1:]
     if body_parts and body_parts[-1].startswith("القاعدة"):
@@ -446,7 +446,7 @@ def render_education_card(lesson: str) -> bytes:
     body = " ".join(body_parts)
 
     # the series number sits in the title as (١) — pull it out for the chip
-    chip = "سلسلة حماية رأس المال"
+    chip = "منهج إدارة المخاطر ورأس المال"
     heading = title
     if "—" in title:
         left, right = title.split("—", 1)
@@ -517,10 +517,10 @@ def _draw_close_card(trade: Trade, update: TradeUpdate) -> bytes:
     win = result > 1.0
     flat = -1.0 <= result <= 1.0
     accent = GREEN if win else (MUTED if flat else RED)
-    verdict = "طرح رابح" if win else ("تعادل" if flat else "طرح خاسر")
+    verdict = "خلاصة رابحة" if win else ("تعادل" if flat else "خلاصة خاسرة")
 
     img, draw = _canvas()
-    y = _header(draw, "نتيجة الطرح — كما هي، ربحا أو خسارة")
+    y = _header(draw, "خلاصة الحالة — كما هي، ربحا أو خسارة")
 
     _panel(draw, (MARGIN, y, W - MARGIN, y + 290), outline=accent)
     draw.text(
@@ -542,7 +542,7 @@ def _draw_close_card(trade: Trade, update: TradeUpdate) -> bytes:
     held = int((update.ts - trade.opened_at).total_seconds() // 60) if trade.opened_at else 0
     rows: list[tuple[str, str, str, bool]] = [
         ("العقد", contract, TEXT, False),
-        ("سعر الطرح", f"${trade.entry_price:.2f}", BLUE, False),
+        ("سعر الدخول", f"${trade.entry_price:.2f}", BLUE, False),
         ("سعر الخروج", f"${update.price:.2f}", BLUE, False),
         ("أعلى ما وصلته", f"{trade.max_favorable_pct:+.1f}%", GREEN, False),
         ("مدة الصفقة", f"{held} دقيقة", TEXT, True),
@@ -557,7 +557,7 @@ def _draw_close_card(trade: Trade, update: TradeUpdate) -> bytes:
 
     targets = trade.decision.targets[:3]
     if targets:
-        row_y, y = _titled_panel(draw, y, "مستويات المتابعة", len(targets))
+        row_y, y = _titled_panel(draw, y, "محطات الدراسة", len(targets))
         for index, target in enumerate(targets, start=1):
             achieved = trade.max_favorable_pct >= target.return_pct
             _row(
@@ -576,7 +576,7 @@ def _draw_close_card(trade: Trade, update: TradeUpdate) -> bytes:
 
 
 # ---------------------------------------------------------------- reports
-METHODOLOGY_LINE = "النتائج كما أُغلقت فعليًا — لا نحسب طرحًا رابحًا لمجرد أنه لامس مستوى ثم انعكس"
+METHODOLOGY_LINE = "النتائج كما أُغلقت فعليًا — لا نحسب حالة رابحة لمجرد أنها لامست مستوى ثم انعكست"
 MODEL_NOTE_LINE = "النموذج الافتراضي لأغراض التوضيح فقط — ليست نتائج حساب حقيقي"
 DISCLAIMER_LINE = "محتوى تعليمي وليس توصية استثمارية — الخيارات عالية المخاطر والقرار مسؤوليتك"
 # the hypothetical sizing behind every $ figure on the report cards: $1000
@@ -807,7 +807,7 @@ def render_daily_report_card(day, rows: list[dict]) -> bytes:
     tile_w = (W - 2 * MARGIN - 2 * 20) / 3
     for index, (label, value, color) in enumerate(
         (
-            ("طروحات اليوم", str(len(rows)), TEXT),
+            ("دراسات اليوم", str(len(rows)), TEXT),
             ("رابحة", str(wins), GREEN),
             ("خاسرة", str(losses), RED),
         )
@@ -816,7 +816,7 @@ def render_daily_report_card(day, rows: list[dict]) -> bytes:
         _tile(draw, (int(left), y, int(left + tile_w), y + 124), label, value, color)
     y += 148
 
-    row_y, y = _titled_panel(draw, y, "طروحات اليوم", len(rows))
+    row_y, y = _titled_panel(draw, y, "دراسات اليوم", len(rows))
     for row in rows:
         result = float(row["return_pct"])
         label = str(row["label"])
@@ -871,11 +871,11 @@ def render_monthly_report_card(
     accent = _result_color(total)
 
     tiles = [
-        ("الطروحات المغلقة", str(stats.closed), TEXT, False),
+        ("الحالات المغلقة", str(stats.closed), TEXT, False),
         ("نسبة الرابحة", f"{stats.win_rate:.0f}%", GOLD, False),
-        ("متوسط الطرح", f"{stats.expectancy_pct:+.1f}%", _result_color(stats.expectancy_pct), False),
-        ("أفضل طرح", f"{stats.best_pct:+.1f}%", GREEN, False),
-        ("أسوأ طرح", f"{stats.worst_pct:+.1f}%", RED, False),
+        ("متوسط الحالة", f"{stats.expectancy_pct:+.1f}%", _result_color(stats.expectancy_pct), False),
+        ("أفضل حالة", f"{stats.best_pct:+.1f}%", GREEN, False),
+        ("أسوأ حالة", f"{stats.worst_pct:+.1f}%", RED, False),
         ("أقصى تراجع", f"{drawdown:+.1f}%", RED, False),
         ("جلسات رابحة", str(green_days), GREEN, False),
         ("جلسات خاسرة", str(red_days), RED, False),
@@ -923,7 +923,7 @@ def render_monthly_report_card(
         _week_bars(draw, (MARGIN, y + 16, W - MARGIN, y + 276), weeks, labels)
         y += 300
 
-        row_y, y = _titled_panel(draw, y, "الحصيلة — نموذج افتراضي 1000$ لكل طرح", 3)
+        row_y, y = _titled_panel(draw, y, "الحصيلة — نموذج افتراضي 1000$ لكل حالة", 3)
         _row(draw, row_y, "إجمالي الأرباح", f"{_dollars(gross_win)}  ({gross_win:+.1f}%)", GREEN)
         _row(draw, row_y + 60, "إجمالي الخسائر",
              f"{_dollars(gross_loss)}  ({gross_loss:+.1f}%)", RED)
@@ -931,7 +931,7 @@ def render_monthly_report_card(
 
         if channel_rows:
             row_y, y = _titled_panel(
-                draw, y, "طروحات نُشرت حية في القناة قبل نتيجتها", len(channel_rows)
+                draw, y, "حالات وُثّقت في القناة قبل نتيجتها", len(channel_rows)
             )
             for row in channel_rows:
                 result = float(row.get("return_pct") or 0)
@@ -950,16 +950,16 @@ def render_weekly_report_card(stats, channel_rows: list[dict]) -> bytes:
     gross_loss = stats.avg_loss_pct * stats.losses
     net = stats.expectancy_pct * stats.closed
     stat_rows: list[tuple[str, str, str]] = [
-        ("إجمالي الطروحات المغلقة", str(stats.closed), TEXT),
+        ("إجمالي الحالات المغلقة", str(stats.closed), TEXT),
         ("الرابحة", str(stats.wins), GREEN),
         ("الخاسرة", str(stats.losses), RED),
-        ("نسبة الطروحات الرابحة", f"{stats.win_rate:.0f}%", GOLD),
+        ("نسبة الحالات الرابحة", f"{stats.win_rate:.0f}%", GOLD),
         ("إجمالي الأرباح", f"{_dollars(gross_win)}  ({gross_win:+.1f}%)", GREEN),
         ("إجمالي الخسائر", f"{_dollars(gross_loss)}  ({gross_loss:+.1f}%)", RED),
-        ("الصافي — نموذج 1000$ لكل طرح", f"{_dollars(net)}  ({net:+.1f}%)", GOLD),
-        ("متوسط نتيجة الطرح", f"{stats.expectancy_pct:+.1f}%", GREEN if positive else RED),
-        ("أفضل طرح", f"{stats.best_pct:+.1f}%", GREEN),
-        ("أسوأ طرح", f"{stats.worst_pct:+.1f}%", RED),
+        ("الصافي — نموذج 1000$ لكل حالة", f"{_dollars(net)}  ({net:+.1f}%)", GOLD),
+        ("متوسط نتيجة الحالة", f"{stats.expectancy_pct:+.1f}%", GREEN if positive else RED),
+        ("أفضل حالة", f"{stats.best_pct:+.1f}%", GREEN),
+        ("أسوأ حالة", f"{stats.worst_pct:+.1f}%", RED),
     ]
 
     channel_panel = (110 + len(channel_rows) * 60 + 24) if channel_rows else 0
@@ -974,7 +974,7 @@ def render_weekly_report_card(stats, channel_rows: list[dict]) -> bytes:
 
     if channel_rows:
         row_y, y = _titled_panel(
-            draw, y, "طروحات نُشرت حية في القناة قبل نتيجتها", len(channel_rows)
+            draw, y, "حالات وُثّقت في القناة قبل نتيجتها", len(channel_rows)
         )
         for row in channel_rows:
             result = float(row.get("return_pct") or 0)
@@ -1005,7 +1005,7 @@ def render_watch_card(
         y = _header(draw, "رصد مبكر — فرصة قيد التكوين")
 
         _panel(draw, (MARGIN, y, W - MARGIN, y + 280), outline=BLUE)
-        _chip(draw, W / 2, y + 50, "تحت المراقبة — ليس طرحًا بعد", BLUE)
+        _chip(draw, W / 2, y + 50, "حالة قيد التكوّن — لم تصدر دراستها بعد", BLUE)
         draw.text((W / 2, y + 144), symbol, font=_font(84, bold=True), fill=BLUE, anchor="mm")
         _rtl(
             draw, (W / 2, y + 228),
@@ -1029,7 +1029,7 @@ def render_watch_card(
         y += 8
         for line in _wrap(
             draw,
-            "إذا اكتمل الشرط يصدر طرح تعليمي كامل بتفاصيله — وإذا لم يكتمل فلن "
+            "إذا اكتمل الشرط تصدر دراسة الحالة كاملة بتفاصيلها — وإذا لم يكتمل فلن "
             "يصدر شيء، والانضباط أهم من الحماس",
             _font(28, bold=True), W - 2 * MARGIN - 60,
         )[:2]:
@@ -1049,7 +1049,7 @@ def render_watch_card(
 # Self-test — proof, on every boot, that the cards actually render in Arabic.
 # ---------------------------------------------------------------------------
 _SAMPLE_LESSON = (
-    "📚 سلسلة حماية رأس المال (١) — لماذا نبيع النصف عند +35%؟\n\n"
+    "📚 منهج إدارة المخاطر ورأس المال (١) — تأمين التكلفة: متى تصبح الصفقة بلا مخاطرة؟\n\n"
     "أخطر لحظة في أي صفقة رابحة هي لحظة الطمع: الورقة خضراء، والنفس تقول "
     "\"خلها تكمل\". نظامنا لا يتفاوض مع هذه اللحظة — عند +35% يبيع نصف الكمية آليًا.\n\n"
     "القاعدة: أمِّن بقاءك أولًا، ثم اسمح لنفسك بالحلم."
@@ -1138,14 +1138,14 @@ def self_test() -> tuple[bool, str]:
         trade.exit_reason = "trail_stop"
 
         renders = [
-            ("بطاقة الطرح", lambda: render_entry_card(trade, False)),
-            ("البطاقة الحية", lambda: render_entry_card(trade, False, live=live)),
+            ("بطاقة دراسة الحالة", lambda: render_entry_card(trade, False)),
+            ("بطاقة المجريات", lambda: render_entry_card(trade, False, live=live)),
             ("بطاقة تأمين النصف", lambda: render_scale_out_card(trade, live)),
-            ("بطاقة المتابعة", lambda: render_update_card(trade, target)),
+            ("بطاقة المحطات", lambda: render_update_card(trade, target)),
             ("بطاقة تعليمية", lambda: render_education_card(_SAMPLE_LESSON)),
             ("بطاقة إغلاق رابح", lambda: render_close_card(trade, win)),
             ("بطاقة إغلاق خاسر", lambda: render_close_card(trade, loss)),
-            ("بطاقة المراقبة", lambda: render_watch_card(
+            ("بطاقة قيد التكوّن", lambda: render_watch_card(
                 "QQQ", "صعود CALL", "اختراق 580.10 بحجم", 7, trade.opened_at, level=578.40
             )),
             ("التقرير اليومي", lambda: render_daily_report_card(

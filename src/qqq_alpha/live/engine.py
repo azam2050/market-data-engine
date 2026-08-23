@@ -23,6 +23,7 @@ from qqq_alpha.brain.attention import AttentionEngine
 from qqq_alpha.brain.decider import Decider, next_expiry, occ_symbol
 from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.brain.rails import DayState, SafetyRails, infeasible
+from qqq_alpha.brain.tutor import ConceptTutor
 from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, REGULAR_OPEN, Settings
 from qqq_alpha.data.backfill import GapRepairer
 from qqq_alpha.data.calendar import todays_events
@@ -242,6 +243,14 @@ class LiveEngine:
             else None
         )
         self._channel_daily_posted: date | None = None
+        # the daily concept lesson: Claude teaching one option-market idea a
+        # day, gated so it can never leak advice, prices, or this desk's own
+        # management rules. None when disabled or when no API key is set.
+        self.tutor = (
+            ConceptTutor(self.settings)
+            if self.settings.daily_lesson_enabled and self.settings.anthropic_api_key
+            else None
+        )
         # which session's data-health verdict has already been sent
         self._health_reported: date | None = None
         # blue under-watch cards published today — capped so a choppy session
@@ -345,11 +354,11 @@ class LiveEngine:
         if self.channel is not None:
             await self.notifier.note(
                 f"📢 النشر في القناة مفعّل: {self.settings.telegram_channel_id} — "
-                "طرحان حيّان أسبوعيًا + تقرير يومي وأسبوعي وسلسلة تعليمية"
+                "دراستا حالة أسبوعيًا + تقرير يومي وأسبوعي ومنهج تعليمي"
             )
         if self.settings.telegram_private_channel_id:
             await self.notifier.note(
-                "🔒 قناة المشتركين الخاصة مفعّلة — الطروحات تُنشر فيها منشورًا "
+                "🔒 قناة المشتركين الخاصة مفعّلة — دراسات الحالة تُنشر فيها منشورًا "
                 "واحدًا، والتقرير اليومي والأسبوعي والشهري يصل إليها كما يصل "
                 "للقناة العامة، والانضمام بطلب يوافق عليه البوت آليًا، "
                 "والمنتهون يُخرَجون تلقائيًا"
@@ -742,11 +751,11 @@ class LiveEngine:
         from qqq_alpha.live.notifier import DISCLAIMER
 
         text = (
-            "🔵 تحت المراقبة — ليس طرحًا بعد\n"
+            "🔵 حالة قيد التكوّن — لم تصدر دراستها بعد\n"
             f"الاتجاه المحتمل: {direction_hint}\n"
             f"الشرط المنتظر: {condition[:300]}\n"
             f"قوة الإشارة حتى الآن: {decision.confidence}/10\n"
-            "إذا اكتمل الشرط يصدر طرح كامل — وإذا لم يكتمل فلن يصدر شيء.\n"
+            "إذا اكتمل الشرط تصدر دراسة الحالة كاملة — وإذا لم يكتمل فلن يصدر شيء.\n"
             f"⚠️ {DISCLAIMER}"
         )
         await self.notifier.watch(png, text)
@@ -793,7 +802,7 @@ class LiveEngine:
             await self.notifier.note(
                 f"⚠️ انقطاع في بيانات السوق — لم تصل أي شمعة منذ {age / 60:.0f} دقيقة\n"
                 f"محاولات إعادة الاتصال: {self.status.reconnects}\n"
-                "المحرك يعيد الاتصال تلقائيًا. لن يصدر أي طرح جديد حتى تعود "
+                "المحرك يعيد الاتصال تلقائيًا. لن تصدر أي دراسة حالة جديدة حتى تعود "
                 "البيانات، والصفقات المفتوحة لا تُدار بدون أسعار."
             )
         elif age < TAPE_SILENCE_ALERT_SEC and self._tape_alerted:
@@ -848,7 +857,7 @@ class LiveEngine:
                 self.settings.telegram_channel_id,
                 # a different fact entirely: nothing is misrouted, the public
                 # package is simply switched off
-                "غير مُعدّة — النشر العام معطّل (لا تقارير ولا طروحات حية للجمهور)",
+                "غير مُعدّة — النشر العام معطّل (لا تقارير ولا دراسات حالة للجمهور)",
             ),
         ]
         lines: list[str] = []
@@ -894,7 +903,7 @@ class LiveEngine:
             f"خسارة اليوم بعد وزن الحجم: {state.loss_measure_pct:+.1f}% "
             f"(الحد {-abs(self.settings.daily_loss_circuit_breaker_pct):.0f}%)\n"
             f"الرقم الخام على العقود: {state.realized_return_pct:+.1f}%\n"
-            "لن يُفتح أي طرح جديد حتى جلسة الغد. هذا قرار حماية رأس مال، "
+            "لن تُفتح أي حالة جديدة حتى جلسة الغد. هذا قرار حماية رأس مال، "
             "وليس عطلًا في النظام."
         )
 
@@ -1089,6 +1098,9 @@ class LiveEngine:
             closed = list(self.manager.closed_trades)
             for channel in targets:
                 await channel.post_daily_report(day, closed)
+            # the concept lesson rides the bell's attention: minutes after the
+            # numbers, while the audience is still reading them
+            await self._post_daily_concept_lesson(day, targets)
             if self.channel is not None and day.weekday() in (1, 3):  # Tue, Thu
                 await self.channel.post_education(day)
             if day.weekday() == 4:  # Friday: the weekly scoreboard
@@ -1117,6 +1129,28 @@ class LiveEngine:
                 await self._publish_channel_monthly(day)
         except Exception:  # noqa: BLE001 - the shop window must never stop the desk
             log.exception("channel daily publishing failed")
+
+    async def _post_daily_concept_lesson(self, day: date, targets: list[ChannelPublisher]) -> None:
+        """One gated concept lesson to both rooms. A failure here is a log
+        line and an operator note — never a blocked report."""
+        if self.tutor is None:
+            return
+        try:
+            lesson = await self.tutor.compose(day)
+        except Exception:  # noqa: BLE001 - the lesson is garnish, the reports are dinner
+            log.exception("daily lesson generation failed")
+            return
+        if not lesson:
+            # composed but gated out (or empty) — the operator should know the
+            # gate fired, because a silently missing lesson looks like a bug
+            await self.notifier.note(
+                "🚫 درس اليوم حُجب آلياً (خالف بوابة المحتوى) — راجع السجلات"
+            )
+            return
+        from qqq_alpha.live.notifier import DISCLAIMER
+
+        for channel in targets:
+            await channel.post_text(f"{lesson}\n\n⚠️ {DISCLAIMER}")
 
     @staticmethod
     def _is_last_session_of_month(day: date) -> bool:
@@ -1396,9 +1430,10 @@ class LiveEngine:
         """
         from qqq_alpha.live.telegram import (
             CONSENT_BUTTONS,
-            consent_message,
+            consent_terms_message,
             farewell_message,
             trial_status_message,
+            welcome_pitch_message,
         )
 
         private = self.settings.telegram_private_channel_id
@@ -1432,8 +1467,14 @@ class LiveEngine:
             return
 
         # first-timer: the request stays pending; the verdict is theirs to press
+        await self.commands.send(
+            request.user_id,
+            welcome_pitch_message(
+                self.settings.trial_days, self.settings.subscription_price_sar
+            ),
+        )
         delivered = await self.commands.send_with_buttons(
-            request.user_id, consent_message(self.settings.trial_days), CONSENT_BUTTONS
+            request.user_id, consent_terms_message(), CONSENT_BUTTONS
         )
         if not delivered:
             await self.notifier.note(
@@ -1450,7 +1491,7 @@ class LiveEngine:
             cards_guide_message,
             consent_accepted_note,
             consent_declined_note,
-            consent_message,
+            consent_terms_message,
         )
 
         if self.commands is None:
@@ -1472,42 +1513,70 @@ class LiveEngine:
 
         if press.data == CONSENT_NO:
             await self.commands.decline_join_request(private, press.user_id)
-            await self.commands.answer_button(press.callback_id, "أُلغي الطلب")
+            await self.commands.answer_button(press.callback_id, "لم يُسجَّل شيء")
             await self.commands.replace_message(
                 press.chat_id, press.message_id,
-                consent_message(self.settings.trial_days) + "\n\n❌ لم تتم الموافقة — أُلغي الطلب.",
+                consent_terms_message() + "\n\n❌ لم تتم الموافقة — لم يُسجَّل شيء.",
             )
             await self.commands.send(press.user_id, consent_declined_note())
             return
 
-        # consent:yes — approval first: joining is the thing being consented to
-        if not await self.commands.approve_join_request(private, press.user_id):
-            # most likely the pending request lapsed (they cancelled it)
-            await self.commands.answer_button(
-                press.callback_id, "اضغط رابط القناة مرة أخرى ثم وافق"
-            )
+        # consent:yes. Two doors lead here and both are now behind this one
+        # button: a pending join request (they tapped a channel link) gets
+        # approved, and a /start conversation (no request exists to approve)
+        # gets a personal single-use invite link instead. Consent first,
+        # admission second — in both cases the press is the admission ticket.
+        existing = self.memory.subscriber(press.user_id)
+        if existing is not None and existing["status"] != "trial":
+            # an expired subscriber pressing an old consent button must not
+            # re-enter for free — that would be a permanent unkickable leak
+            from qqq_alpha.live.telegram import farewell_message
+
+            await self.commands.answer_button(press.callback_id)
             await self.commands.send(
-                press.user_id,
-                "يبدو أن طلب انضمامك لم يعد قائمًا — اضغط رابط القناة من جديد "
-                "ثم اضغط زر الموافقة.",
+                press.user_id, farewell_message(self.settings.post_trial_channel_url)
             )
             return
 
+        link = ""
+        if not await self.commands.approve_join_request(private, press.user_id):
+            link = (
+                await self.commands.create_invite_link(
+                    private, name=f"consent-{press.user_id}"
+                )
+                or ""
+            )
+            if not link:
+                await self.commands.answer_button(press.callback_id, "تعذر إصدار الرابط")
+                await self.commands.send(
+                    press.user_id,
+                    "تعذر إصدار رابط الدخول مؤقتاً — أرسل /start من جديد بعد "
+                    "قليل وسيصلك رابطك.",
+                )
+                await self.notifier.note(
+                    f"⚠️ تعذر إصدار رابط دخول لمن أقرّ بالشروط: {name}"
+                )
+                return
+
+        expires = now + timedelta(days=self.settings.trial_days)
         self.memory.add_subscriber(
             press.user_id,
             press.username,
             press.first_name,
             joined_at=now,
-            expires_at=now + timedelta(days=self.settings.trial_days),
+            expires_at=expires,
         )
         self.memory.record_consent(press.user_id, now)
         await self.commands.answer_button(press.callback_id, "تم الإقرار — أهلاً بك 🎉")
         await self.commands.replace_message(
             press.chat_id, press.message_id,
-            consent_message(self.settings.trial_days) + "\n\n✅ تم الإقرار والانضمام.",
+            consent_terms_message() + "\n\n✅ تم الإقرار.",
         )
         await self.commands.send(
-            press.user_id, consent_accepted_note(self.settings.trial_days)
+            press.user_id,
+            consent_accepted_note(
+                self.settings.trial_days, expires.date().isoformat(), link
+            ),
         )
         await self.commands.send(press.user_id, cards_guide_message())
         active = len(self.memory.active_subscriber_ids(now))
@@ -1516,12 +1585,15 @@ class LiveEngine:
         )
 
     async def _handle_subscriber(self, message) -> None:
-        """The trial funnel: /start begins a free month, expiry hands the
-        subscriber to the follow-up channel."""
+        """The trial funnel: /start shows the pitch and the terms — nothing
+        is registered and no link is issued until they press أوافق. The one
+        consent gate now guards every door."""
         from qqq_alpha.live.telegram import (
+            CONSENT_BUTTONS,
+            consent_terms_message,
             farewell_message,
             trial_status_message,
-            welcome_message,
+            welcome_pitch_message,
         )
 
         if self.settings.trial_days <= 0 or self.commands is None:
@@ -1539,34 +1611,26 @@ class LiveEngine:
         if row is None:
             if not message.text.lower().startswith("/start"):
                 return  # unknown chat, no sign-up intent: stay silent
-            self.memory.add_subscriber(
-                message.chat_id,
-                message.username,
-                message.first_name,
-                joined_at=now,
-                expires_at=now + timedelta(days=self.settings.trial_days),
+            # top-of-funnel demand signal, recorded before any consent:
+            # which app language do the people our campaigns reach speak?
+            self.memory.record_start_language(
+                message.chat_id, message.language or "", now
             )
-            welcome = welcome_message(self.settings.trial_days)
-            if private:
-                # already registered here, so their link skips the join queue —
-                # single-use, one member, nothing to free-ride
-                link = await self.commands.create_invite_link(
-                    private, name=f"start-{message.chat_id}"
-                )
-                if link:
-                    welcome += (
-                        "\n\n🔗 الطروحات الحية تصلك داخل قناتنا الخاصة — "
-                        f"رابط دخولك (صالح لشخص واحد):\n{link}"
-                    )
-            delivered = await self.commands.send(message.chat_id, welcome)
-            active = len(self.memory.active_subscriber_ids(now))
-            name = message.username or message.first_name or message.chat_id
-            note = f"👤 مشترك تجريبي جديد: {name} — النشطون الآن: {active}"
+            await self.commands.send(
+                message.chat_id,
+                welcome_pitch_message(
+                    self.settings.trial_days, self.settings.subscription_price_sar
+                ),
+            )
+            delivered = await self.commands.send_with_buttons(
+                message.chat_id, consent_terms_message(), CONSENT_BUTTONS
+            )
             if not delivered:
-                # the sign-up worked but Telegram refused the welcome — the
-                # operator must hear about it, or the funnel fails silently
-                note += "\n⚠️ لكن تعذر إرسال رسالة الترحيب له — تحقق من سجلات Railway"
-            await self.notifier.note(note)
+                name = message.username or message.first_name or message.chat_id
+                await self.notifier.note(
+                    f"⚠️ تعذر إرسال رسائل التسجيل لطالب /start‏ {name} — "
+                    "تحقق من سجلات Railway"
+                )
             return
 
         expires = datetime.fromisoformat(row["expires_at"])
@@ -1624,14 +1688,21 @@ class LiveEngine:
                 PREVIEW_NO,
                 PREVIEW_YES,
                 cards_guide_message,
-                consent_message,
+                consent_terms_message,
+                welcome_pitch_message,
             )
 
             if self.commands is not None:
                 admin = str(self.settings.telegram_chat_id)
+                await self.commands.send(
+                    admin,
+                    welcome_pitch_message(
+                        self.settings.trial_days, self.settings.subscription_price_sar
+                    ),
+                )
                 await self.commands.send_with_buttons(
                     admin,
-                    consent_message(self.settings.trial_days),
+                    consent_terms_message(),
                     [("✅ أوافق وأقر", PREVIEW_YES), ("❌ لا أوافق", PREVIEW_NO)],
                 )
                 await self.commands.send(admin, cards_guide_message())
@@ -1753,41 +1824,41 @@ class LiveEngine:
                 return manager, manager.open_trade(decision, 1.79, snap)
 
             samples.append((
-                "🔵 نموذج: بطاقة المراقبة",
+                "🔵 نموذج: بطاقة قيد التكوّن",
                 cards.render_watch_card(
                     "QQQ", "هبوط PUT", "ارتداد فاشل نحو VWAP", 6, snap.ts, level=732.50
                 ),
             ))
 
             manager, trade = demo_trade(OptionType.PUT)
-            samples.append(("نموذج: بطاقة الطرح الجديد", cards.render_entry_card(trade, False)))
+            samples.append(("نموذج: بطاقة دراسة الحالة", cards.render_entry_card(trade, False)))
 
             live = TradeUpdate(
                 ts=trade.opened_at + timedelta(minutes=31), price=2.01,
                 return_pct=12.3, note="status: still open",
             )
             samples.append((
-                "🟢 نموذج: البطاقة الحية (تتجدد كل ربع ساعة)",
+                "🟢 نموذج: بطاقة المجريات (تتجدد كل ربع ساعة)",
                 cards.render_entry_card(trade, False, live=live),
             ))
 
             scale = manager.update(trade, 2.42, trade.opened_at + timedelta(minutes=9))
             if scale is not None:
                 samples.append((
-                    "🟢 نموذج: تأمين التكلفة", cards.render_scale_out_card(trade, scale)
+                    "🟢 نموذج: لحظة تأمين التكلفة", cards.render_scale_out_card(trade, scale)
                 ))
             manager.update(trade, 3.60, trade.opened_at + timedelta(minutes=20))
             close = manager.update(trade, 3.00, trade.opened_at + timedelta(minutes=26))
             if close is not None:
                 samples.append((
-                    "🟢 نموذج: إغلاق رابح", cards.render_close_card(trade, close)
+                    "🟢 نموذج: خلاصة رابحة", cards.render_close_card(trade, close)
                 ))
 
             manager2, trade2 = demo_trade(OptionType.CALL)
             close2 = manager2.update(trade2, 1.05, trade2.opened_at + timedelta(minutes=7))
             if close2 is not None:
                 samples.append((
-                    "🔴 نموذج: إغلاق خاسر", cards.render_close_card(trade2, close2)
+                    "🔴 نموذج: خلاصة خاسرة", cards.render_close_card(trade2, close2)
                 ))
 
             follow_up = TradeUpdate(
@@ -1795,7 +1866,7 @@ class LiveEngine:
                 return_pct=49.7, note="target:T1 reached (+50%)",
             )
             samples.append((
-                "🟢 نموذج: بطاقة المتابعة (مستوى تحقق)",
+                "🟢 نموذج: بطاقة المحطات (محطة تحققت)",
                 cards.render_update_card(trade, follow_up),
             ))
             samples.append((

@@ -129,10 +129,12 @@ async def test_new_join_request_gets_the_consent_gate_not_auto_approval(tmp_path
 
     methods = _methods(calls)
     assert "approveChatJoinRequest" not in methods  # gate first
-    assert "sendMessage" in methods  # the consent message with buttons
-    consent_payload = next(p for m, p in calls if m == "sendMessage")
-    assert "reply_markup" in consent_payload
-    assert "إقرار وإخلاء مسؤولية" in consent_payload["text"]
+    # two messages: the pitch first, then the terms carrying the buttons
+    payloads = [p for m, p in calls if m == "sendMessage"]
+    assert len(payloads) == 2
+    assert "QQQ" in payloads[0]["text"] and "reply_markup" not in payloads[0]
+    assert "reply_markup" in payloads[1]
+    assert "إقرار وإخلاء مسؤولية" in payloads[1]["text"]
     assert engine.memory.subscriber("777") is None  # nothing recorded yet
 
 

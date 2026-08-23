@@ -512,6 +512,21 @@ def subscribers(settings: Settings) -> list[dict]:
     return rows
 
 
+def start_languages(settings: Settings) -> list[dict]:
+    """Everyone who ever pressed /start, grouped by Telegram app language.
+
+    The number that decides whether an English channel is ever worth
+    building — measured at the top of the funnel, before consent filters
+    anyone out.
+    """
+    counts = Memory(settings.data_dir / "memory.db").start_language_counts()
+    total = sum(counts.values()) or 1
+    return [
+        {"language": lang, "count": count, "pct": round(count / total * 100)}
+        for lang, count in counts.items()
+    ]
+
+
 def _as_utc(stamp: str | None) -> datetime | None:
     if not stamp:
         return None
