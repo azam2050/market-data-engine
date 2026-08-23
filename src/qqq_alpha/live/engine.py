@@ -1639,6 +1639,22 @@ class LiveEngine:
                 )
             return
 
+        if self._wants_pay_link_text(message.text):
+            # a registered person, active or lapsed, asking to pay: hand
+            # them their signed link — or say plainly that payments are dark
+            link = self._pay_link(message.chat_id)
+            if link:
+                await self.commands.send(
+                    message.chat_id,
+                    f"💳 اشتراكك الشهري ({self.settings.subscription_price_sar} ريال) "
+                    "يُفعَّل تلقائياً فور الدفع — هذا رابطك الشخصي:\n" + link,
+                )
+            else:
+                await self.commands.send(
+                    message.chat_id, "الدفع غير مفعّل بعد — سيصلك إشعار عند إتاحته."
+                )
+            return
+
         expires = datetime.fromisoformat(row["expires_at"])
         if row["status"] == "trial" and expires > now:
             days_left = (expires - now).days
@@ -1657,6 +1673,13 @@ class LiveEngine:
                     self.settings.post_trial_channel_url, self._pay_link(message.chat_id)
                 ),
             )
+
+    _PAY_WORDS = ("اشتراك", "اشترك", "دفع", "/pay", "/subscribe")
+
+    @classmethod
+    def _wants_pay_link_text(cls, text: str) -> bool:
+        first = text.strip().split()[0].lower() if text.strip() else ""
+        return first in cls._PAY_WORDS
 
     def _pay_link(self, chat_id: str) -> str:
         """The subscriber's personal payment URL, or "" while payments are
@@ -1710,6 +1733,27 @@ class LiveEngine:
 
     async def _handle_command(self, text: str) -> None:
         parts = text.strip().split()
+        if parts and parts[0].strip().lower() in {"دفع", "رابط", "paylink"}:
+            # the operator's own signed pay link — the fastest way to test
+            # the money door end-to-end with a real card
+            link = self._pay_link(str(self.settings.telegram_chat_id))
+            if link:
+                await self.notifier.note(f"💳 رابط الدفع الخاص بك (للتجربة):\n{link}")
+            else:
+                missing = [
+                    name
+                    for name, value in (
+                        ("MOYASAR_PUBLISHABLE_KEY", self.settings.moyasar_publishable_key),
+                        ("MOYASAR_SECRET_KEY", self.settings.moyasar_secret_key),
+                        ("PUBLIC_BASE_URL", self.settings.public_base_url),
+                    )
+                    if not value
+                ]
+                await self.notifier.note(
+                    "➖ الدفع غير مفعّل — المتغيرات الناقصة في Railway:\n"
+                    + "\n".join(f"  • {name}" for name in missing)
+                )
+            return
         if parts and parts[0].strip().lower() in {"مشتركين", "subscribers"}:
             counts = self.memory.subscriber_counts()
             await self.notifier.note(

@@ -245,3 +245,36 @@ async def test_paid_activation_message_carries_expiry_and_door_key(tmp_path):
     sent = "\n".join(text for _, text in engine.commands.sent)
     assert "2026-09-22" in sent and "t.me/+personal" in sent
     assert any("199" in note and "💳" in note for note in engine.notifier.notes)
+
+
+@pytest.mark.asyncio
+async def test_subscriber_can_ask_for_their_pay_link(tmp_path):
+    """«اشتراك» from a registered chat returns the signed personal link —
+    or an honest "still dark" line when the keys are not in place yet."""
+    from test_live import _subscriber_engine
+
+    engine_settings = Settings(
+        massive_api_key="test-key",
+        anthropic_api_key="test",
+        anthropic_model="test",
+        journal_dir=tmp_path / "journal",
+        data_dir=tmp_path / "data",
+        massive_feed_mode="delayed",
+        moyasar_publishable_key="pk",
+        moyasar_secret_key="sk",
+        public_base_url="https://example.up.railway.app",
+    )
+    engine = _subscriber_engine(engine_settings, tmp_path)
+    now = datetime.now(UTC)
+    engine.memory.add_subscriber("555", "u", "U", now, now + timedelta(days=5))
+
+    from qqq_alpha.live.telegram import InboundMessage
+
+    await engine._handle_subscriber(InboundMessage("555", "اشتراك"))
+    sent = "\n".join(text for _, text in engine.commands.sent)
+    assert "/pay?u=555&t=" in sent and "199" in sent
+
+    # a stranger asking gets silence — no probing the bot for links
+    engine.commands.sent.clear()
+    await engine._handle_subscriber(InboundMessage("999", "اشتراك"))
+    assert engine.commands.sent == []
