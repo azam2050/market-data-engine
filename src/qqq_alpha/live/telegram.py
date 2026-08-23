@@ -537,13 +537,22 @@ class TelegramCommandListener:
     ) -> bool:
         """One message with a single-column inline keyboard.
 
-        ``buttons`` is (label, callback_data) pairs — the consent gate's
-        "أوافق / لا أوافق" and the operator's previews both ride this.
+        ``buttons`` is (label, value) pairs — a value starting with http
+        becomes a URL button (tap opens the page), anything else is
+        callback_data. The consent gate, the operator previews, and the
+        pay button all ride this.
         """
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=20.0)
         markup = {
-            "inline_keyboard": [[{"text": label, "callback_data": data}] for label, data in buttons]
+            "inline_keyboard": [
+                [
+                    {"text": label, "url": value}
+                    if value.startswith("http")
+                    else {"text": label, "callback_data": value}
+                ]
+                for label, value in buttons
+            ]
         }
         try:
             response = await self._client.post(
@@ -1059,32 +1068,42 @@ def trial_status_message(days_left: int) -> str:
     )
 
 
-def renewal_reminder_message(expires_on: str, price_sar: int, pay_url: str = "") -> str:
-    """The two-days-left nudge — sent once per trial window."""
+PAY_BUTTON = "💳 ادفع الآن"
+
+
+def pay_offer_message(price_sar: int, days: int) -> str:
+    """The text above the pay button — the button itself carries the URL,
+    so the message stays clean instead of hosting a raw link."""
+    return (
+        "💳 اشتراك القناة الخاصة\n\n"
+        f"📦 الباقة: شهرية — {price_sar} ريال ({_days_ar(days)})\n"
+        "⚡ التفعيل تلقائي فور الدفع — يصلك التأكيد هنا خلال لحظات\n"
+        "🔒 دفع آمن عبر بوابة مرخصة من البنك المركزي السعودي\n\n"
+        "اضغط الزر لإكمال الدفع 👇"
+    )
+
+
+def renewal_reminder_message(expires_on: str, price_sar: int, with_button: bool) -> str:
+    """The two-days-left nudge — sent once per trial window. The pay URL
+    itself rides an inline button, never the text."""
     lines = [
         f"⏳ تنبيه ودّي: تنتهي فترة اطلاعك المجانية بتاريخ {expires_on}.",
     ]
-    if pay_url:
+    if with_button:
         lines.append(
-            f"\nللاستمرار بلا انقطاع، اشتراكك الشهري ({price_sar} ريال) "
-            f"يُفعَّل تلقائياً فور الدفع:\n{pay_url}"
+            f"\nللاستمرار بلا انقطاع ({price_sar} ريال شهرياً) اضغط الزر — "
+            "التفعيل تلقائي فور الدفع 👇"
         )
     else:
         lines.append("\nتفاصيل الاستمرار ستصلك قبل انتهاء الفترة.")
     return "\n".join(lines)
 
 
-def farewell_message(channel_url: str, pay_url: str = "") -> str:
-    lines = [
-        "انتهت فترة الاطلاع المجانية في بوت عقود الخيارات — شكراً لبقائك معنا 🙏",
-    ]
-    if pay_url:
-        lines.append(
-            f"\n💳 للعودة فوراً، اشتراكك الشهري يُفعَّل تلقائياً فور الدفع:\n{pay_url}"
-        )
-    if channel_url:
-        lines.append(f"\nللاطلاع على النتائج والتقارير مجاناً، قناتنا العامة:\n{channel_url}")
-    return "\n".join(lines)
+def farewell_message(has_buttons: bool) -> str:
+    text = "انتهت فترة الاطلاع المجانية في بوت عقود الخيارات — شكراً لبقائك معنا 🙏"
+    if has_buttons:
+        text += "\n\nخياراتك بضغطة زر 👇"
+    return text
 
 
 class FanoutNotifier:

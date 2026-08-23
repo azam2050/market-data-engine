@@ -271,10 +271,12 @@ async def test_subscriber_can_ask_for_their_pay_link(tmp_path):
     from qqq_alpha.live.telegram import InboundMessage
 
     await engine._handle_subscriber(InboundMessage("555", "اشتراك"))
-    sent = "\n".join(text for _, text in engine.commands.sent)
-    assert "/pay?u=555&t=" in sent and "199" in sent
+    assert engine.commands.buttoned, "the offer must carry the pay button"
+    _, text, buttons = engine.commands.buttoned[-1]
+    assert "199" in text and "ريال" in text
+    assert any("/pay?u=555&t=" in value for _label, value in buttons)
 
     # a stranger asking gets silence — no probing the bot for links
-    engine.commands.sent.clear()
+    engine.commands.buttoned.clear()
     await engine._handle_subscriber(InboundMessage("999", "اشتراك"))
-    assert engine.commands.sent == []
+    assert engine.commands.buttoned == []

@@ -1431,7 +1431,6 @@ class LiveEngine:
         from qqq_alpha.live.telegram import (
             CONSENT_BUTTONS,
             consent_terms_message,
-            farewell_message,
             trial_status_message,
             welcome_pitch_message,
         )
@@ -1456,12 +1455,7 @@ class LiveEngine:
                 )
                 return
             await self.commands.decline_join_request(private, request.user_id)
-            await self.commands.send(
-                request.user_id,
-                farewell_message(
-                    self.settings.post_trial_channel_url, self._pay_link(request.user_id)
-                ),
-            )
+            await self._send_farewell(request.user_id)
             await self.notifier.note(f"⛔ طلب انضمام من مشترك منتهي: {name} — رُفض تلقائيًا")
             return
 
@@ -1533,15 +1527,9 @@ class LiveEngine:
         if existing is not None and existing["status"] != "trial":
             # an expired subscriber pressing an old consent button must not
             # re-enter for free — that would be a permanent unkickable leak
-            from qqq_alpha.live.telegram import farewell_message
 
             await self.commands.answer_button(press.callback_id)
-            await self.commands.send(
-                press.user_id,
-                farewell_message(
-                    self.settings.post_trial_channel_url, self._pay_link(press.user_id)
-                ),
-            )
+            await self._send_farewell(press.user_id)
             return
 
         link = ""
@@ -1597,7 +1585,6 @@ class LiveEngine:
         from qqq_alpha.live.telegram import (
             CONSENT_BUTTONS,
             consent_terms_message,
-            farewell_message,
             trial_status_message,
             welcome_pitch_message,
         )
@@ -1640,19 +1627,9 @@ class LiveEngine:
             return
 
         if self._wants_pay_link_text(message.text):
-            # a registered person, active or lapsed, asking to pay: hand
-            # them their signed link — or say plainly that payments are dark
-            link = self._pay_link(message.chat_id)
-            if link:
-                await self.commands.send(
-                    message.chat_id,
-                    f"💳 اشتراكك الشهري ({self.settings.subscription_price_sar} ريال) "
-                    "يُفعَّل تلقائياً فور الدفع — هذا رابطك الشخصي:\n" + link,
-                )
-            else:
-                await self.commands.send(
-                    message.chat_id, "الدفع غير مفعّل بعد — سيصلك إشعار عند إتاحته."
-                )
+            # a registered person, active or lapsed, asking to pay: a clean
+            # offer message with the URL riding a button, not a raw link
+            await self._send_pay_offer(message.chat_id)
             return
 
         expires = datetime.fromisoformat(row["expires_at"])
@@ -1667,12 +1644,7 @@ class LiveEngine:
                     status += f"\n\n🔗 إن لم تكن داخل القناة الخاصة بعد، هذا رابطك:\n{link}"
             await self.commands.send(message.chat_id, status)
         else:
-            await self.commands.send(
-                message.chat_id,
-                farewell_message(
-                    self.settings.post_trial_channel_url, self._pay_link(message.chat_id)
-                ),
-            )
+            await self._send_farewell(message.chat_id)
 
     _PAY_WORDS = ("اشتراك", "اشترك", "دفع", "/pay", "/subscribe")
 
@@ -1688,6 +1660,45 @@ class LiveEngine:
 
         return pay_link(self.settings, str(chat_id)) or ""
 
+    async def _send_farewell(self, chat_id: str) -> None:
+        """The end-of-trial goodbye: pay and public-channel doors as buttons."""
+        from qqq_alpha.live.telegram import PAY_BUTTON, farewell_message
+
+        if self.commands is None:
+            return
+        buttons: list[tuple[str, str]] = []
+        pay = self._pay_link(chat_id)
+        if pay:
+            buttons.append((PAY_BUTTON, pay))
+        if self.settings.post_trial_channel_url:
+            buttons.append(("📢 القناة العامة المجانية", self.settings.post_trial_channel_url))
+        if buttons:
+            await self.commands.send_with_buttons(
+                chat_id, farewell_message(True), buttons
+            )
+        else:
+            await self.commands.send(chat_id, farewell_message(False))
+
+    async def _send_pay_offer(self, chat_id: str) -> bool:
+        """The pay offer as a card-like message with a real ادفع الآن button."""
+        from qqq_alpha.live.telegram import PAY_BUTTON, pay_offer_message
+
+        if self.commands is None:
+            return False
+        link = self._pay_link(chat_id)
+        if not link:
+            await self.commands.send(
+                chat_id, "الدفع غير مفعّل بعد — سيصلك إشعار عند إتاحته."
+            )
+            return False
+        return await self.commands.send_with_buttons(
+            chat_id,
+            pay_offer_message(
+                self.settings.subscription_price_sar, self.settings.subscription_days
+            ),
+            [(PAY_BUTTON, link)],
+        )
+
     async def _expire_subscribers(self) -> None:
         """Flip finished trials and send each one the follow-up-channel note.
 
@@ -1699,7 +1710,7 @@ class LiveEngine:
         """
         if self.commands is None:
             return
-        from qqq_alpha.live.telegram import farewell_message, renewal_reminder_message
+        from qqq_alpha.live.telegram import renewal_reminder_message
 
         now = datetime.now(UTC)
         due = self.memory.expire_due_subscribers(now)
@@ -1709,24 +1720,24 @@ class LiveEngine:
                 # removal from the private channel IS the cutoff; the DM only
                 # explains it and points at the follow-up channel
                 await self.commands.kick(private, row["chat_id"])
-            await self.commands.send(
-                row["chat_id"],
-                farewell_message(
-                    self.settings.post_trial_channel_url, self._pay_link(row["chat_id"])
-                ),
-            )
+            await self._send_farewell(row["chat_id"])
         if due:
             await self.notifier.note(f"⏳ انتهت الفترة التجريبية لـ {len(due)} مشترك")
 
         for row in self.memory.trials_needing_reminder(now):
-            await self.commands.send(
-                row["chat_id"],
-                renewal_reminder_message(
-                    str(row.get("expires_at") or "")[:10],
-                    self.settings.subscription_price_sar,
-                    self._pay_link(row["chat_id"]),
-                ),
+            expires_on = str(row.get("expires_at") or "")[:10]
+            link = self._pay_link(row["chat_id"])
+            text = renewal_reminder_message(
+                expires_on, self.settings.subscription_price_sar, bool(link)
             )
+            if link:
+                from qqq_alpha.live.telegram import PAY_BUTTON
+
+                await self.commands.send_with_buttons(
+                    row["chat_id"], text, [(PAY_BUTTON, link)]
+                )
+            else:
+                await self.commands.send(row["chat_id"], text)
             # marked regardless of delivery: a blocked bot must not retry the
             # nudge every day for the rest of the window
             self.memory.mark_reminded(row["chat_id"], now)
@@ -1735,10 +1746,11 @@ class LiveEngine:
         parts = text.strip().split()
         if parts and parts[0].strip().lower() in {"دفع", "رابط", "paylink"}:
             # the operator's own signed pay link — the fastest way to test
-            # the money door end-to-end with a real card
+            # the money door end-to-end with a real card. Same styled offer
+            # a subscriber sees, so the test previews the real experience.
             link = self._pay_link(str(self.settings.telegram_chat_id))
             if link:
-                await self.notifier.note(f"💳 رابط الدفع الخاص بك (للتجربة):\n{link}")
+                await self._send_pay_offer(str(self.settings.telegram_chat_id))
             else:
                 missing = [
                     name

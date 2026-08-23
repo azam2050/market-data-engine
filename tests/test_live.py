@@ -712,7 +712,7 @@ class _FakeCommands:
         return True
 
     async def send_with_buttons(self, chat_id: str, text: str, buttons) -> bool:
-        self.buttoned.append((chat_id, text))
+        self.buttoned.append((chat_id, text, list(buttons)))
         return True
 
     async def answer_button(self, callback_id: str, text: str = "") -> None:
@@ -826,7 +826,11 @@ async def test_expired_subscriber_consent_press_does_not_reopen_the_door(setting
 
     assert engine.commands.links_issued == 0
     assert engine.memory.subscriber("888")["status"] == "expired"
-    assert any("t.me/qqq_free" in text for _, text in engine.commands.sent)
+    assert any(
+        "t.me/qqq_free" in value
+        for _, _, buttons in engine.commands.buttoned
+        for _label, value in buttons
+    )
 
 
 @pytest.mark.asyncio
@@ -841,13 +845,20 @@ async def test_expired_subscriber_is_pointed_at_the_next_channel(settings, tmp_p
 
     await engine._expire_subscribers()
 
-    assert engine.memory.subscriber("777")["status"] == "expired"
-    assert any("t.me/qqq_free" in text for _, text in engine.commands.sent)
+    def farewell_buttons():
+        return [
+            value
+            for _, _, buttons in engine.commands.buttoned
+            for _label, value in buttons
+        ]
 
-    # and if they message again later, they get the channel link, not signals
-    engine.commands.sent.clear()
+    assert engine.memory.subscriber("777")["status"] == "expired"
+    assert any("t.me/qqq_free" in value for value in farewell_buttons())
+
+    # and if they message again later, they get the channel door, not signals
+    engine.commands.buttoned.clear()
     await engine._handle_subscriber(InboundMessage("777", "/start"))
-    assert any("t.me/qqq_free" in text for _, text in engine.commands.sent)
+    assert any("t.me/qqq_free" in value for value in farewell_buttons())
 
 
 @pytest.mark.asyncio
