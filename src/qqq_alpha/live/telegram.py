@@ -1059,12 +1059,31 @@ def trial_status_message(days_left: int) -> str:
     )
 
 
-def farewell_message(channel_url: str) -> str:
+def renewal_reminder_message(expires_on: str, price_sar: int, pay_url: str = "") -> str:
+    """The two-days-left nudge — sent once per trial window."""
+    lines = [
+        f"⏳ تنبيه ودّي: تنتهي فترة اطلاعك المجانية بتاريخ {expires_on}.",
+    ]
+    if pay_url:
+        lines.append(
+            f"\nللاستمرار بلا انقطاع، اشتراكك الشهري ({price_sar} ريال) "
+            f"يُفعَّل تلقائياً فور الدفع:\n{pay_url}"
+        )
+    else:
+        lines.append("\nتفاصيل الاستمرار ستصلك قبل انتهاء الفترة.")
+    return "\n".join(lines)
+
+
+def farewell_message(channel_url: str, pay_url: str = "") -> str:
     lines = [
         "انتهت فترة الاطلاع المجانية في بوت عقود الخيارات — شكراً لبقائك معنا 🙏",
     ]
+    if pay_url:
+        lines.append(
+            f"\n💳 للعودة فوراً، اشتراكك الشهري يُفعَّل تلقائياً فور الدفع:\n{pay_url}"
+        )
     if channel_url:
-        lines.append(f"\nللاستمرار والاطلاع على النتائج والتقارير، انضم إلينا هنا:\n{channel_url}")
+        lines.append(f"\nللاطلاع على النتائج والتقارير مجاناً، قناتنا العامة:\n{channel_url}")
     return "\n".join(lines)
 
 

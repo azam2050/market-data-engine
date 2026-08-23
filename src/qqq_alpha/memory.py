@@ -125,6 +125,18 @@ CREATE TABLE IF NOT EXISTS start_pings (
     first_seen  TEXT NOT NULL
 );
 
+-- every Moyasar payment that activated (or tried to activate) a
+-- subscription. The PRIMARY KEY on the gateway's payment id is the
+-- idempotency guard: a webhook replayed ten times extends the
+-- subscription exactly once.
+CREATE TABLE IF NOT EXISTS payments (
+    payment_id  TEXT PRIMARY KEY,
+    chat_id     TEXT NOT NULL,
+    amount      INTEGER NOT NULL,   -- halalas, as the gateway reports it
+    currency    TEXT NOT NULL,
+    paid_at     TEXT NOT NULL
+);
+
 -- setups the engine declined (rail-blocked or the AI's own PASS), priced
 -- forward after the fact. Without this table the engine can only grade its
 -- winners and losers, never its caution.
@@ -272,6 +284,10 @@ class Memory:
             # when the subscriber pressed "أوافق وأقر" — the legal proof of
             # explicit consent, stamped before they saw any content
             conn.execute("ALTER TABLE subscribers ADD COLUMN consented_at TEXT")
+        with suppress(sqlite3.OperationalError):
+            # when the two-days-left renewal reminder went out — one per
+            # trial window, so the funnel nudges without nagging
+            conn.execute("ALTER TABLE subscribers ADD COLUMN reminded_at TEXT")
 
     @staticmethod
     def _purge_infeasible_missed(conn: sqlite3.Connection) -> None:
@@ -751,6 +767,64 @@ class Memory:
                 "SELECT * FROM subscribers ORDER BY joined_at DESC"
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def record_payment(
+        self,
+        payment_id: str,
+        chat_id: str,
+        amount: int,
+        currency: str,
+        when: datetime,
+    ) -> bool:
+        """Book one gateway payment. False means it was already booked —
+        the caller must then do nothing, because whatever this payment buys
+        has been granted by the first delivery of the same webhook."""
+        with closing(self._connect()) as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO payments"
+                " (payment_id, chat_id, amount, currency, paid_at) VALUES (?,?,?,?,?)",
+                (str(payment_id), str(chat_id), int(amount), currency, when.isoformat()),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def payments_for(self, chat_id: str) -> list[dict[str, Any]]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT * FROM payments WHERE chat_id = ? ORDER BY paid_at",
+                (str(chat_id),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def trials_needing_reminder(self, now: datetime, days_ahead: int = 2) -> list[dict[str, Any]]:
+        """Active trials whose clock runs out within ``days_ahead`` days and
+        who have not been nudged this window."""
+        horizon = now + timedelta(days=days_ahead)
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT * FROM subscribers WHERE status = 'trial'"
+                " AND reminded_at IS NULL AND expires_at > ? AND expires_at <= ?",
+                (now.isoformat(), horizon.isoformat()),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_reminded(self, chat_id: str, when: datetime) -> None:
+        with closing(self._connect()) as conn:
+            conn.execute(
+                "UPDATE subscribers SET reminded_at = ? WHERE chat_id = ?",
+                (when.isoformat(), str(chat_id)),
+            )
+            conn.commit()
+
+    def clear_reminder(self, chat_id: str) -> None:
+        """A paid extension opens a new window — the next expiry deserves its
+        own reminder."""
+        with closing(self._connect()) as conn:
+            conn.execute(
+                "UPDATE subscribers SET reminded_at = NULL WHERE chat_id = ?",
+                (str(chat_id),),
+            )
+            conn.commit()
 
     def extend_subscriber(
         self, chat_id: str, days: int, now: datetime

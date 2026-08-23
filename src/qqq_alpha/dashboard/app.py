@@ -16,9 +16,10 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from qqq_alpha import payments as pay_gateway
 from qqq_alpha.brain.playbook import Playbook, load_playbook
 from qqq_alpha.config import Settings
 from qqq_alpha.dashboard import data
@@ -41,6 +42,7 @@ def create_app(
     on_lesson_applied: Callable[[Playbook], None] | None = None,
     on_subscriber_change: Callable[[str, dict, int | None], Awaitable[None]] | None = None,
     channel_roster: Callable[[list[str]], Awaitable[dict]] | None = None,
+    on_payment: Callable[[str, str, dict], Awaitable[None]] | None = None,
 ) -> FastAPI:
     """Build the dashboard app.
 
@@ -84,6 +86,131 @@ def create_app(
             "trades_today": getattr(status, "trades_today", None) if status else None,
             "reconnects": getattr(status, "reconnects", None) if status else None,
         }
+
+    # ------------------------------------------------------------------
+    # Payments — the three deliberately public routes. The pay page carries
+    # the CHANNEL's identity (the shared gateway account belongs to another
+    # brand), the signature stops link forgery, and the webhook trusts
+    # nothing it is told: the payment is re-fetched from Moyasar with the
+    # secret key before a single day is granted.
+    @app.get("/pay")
+    def pay(request: Request, u: str = "", t: str = ""):
+        base = settings.public_base_url.rstrip("/")
+        if not pay_gateway.payments_configured(settings):
+            return templates.TemplateResponse(
+                request,
+                "pay_done.html",
+                {
+                    "ok": False,
+                    "message": "الدفع غير مفعّل بعد — سيصلك إشعار عند إتاحته.",
+                    "brand_name": settings.brand_name,
+                },
+            )
+        if not pay_gateway.verify_chat_signature(settings, u, t):
+            return templates.TemplateResponse(
+                request,
+                "pay_done.html",
+                {
+                    "ok": False,
+                    "message": "هذا الرابط غير صالح — اطلب رابط الدفع الخاص بك من البوت.",
+                    "brand_name": settings.brand_name,
+                },
+            )
+        return templates.TemplateResponse(
+            request,
+            "pay.html",
+            {
+                "brand_name": settings.brand_name,
+                "brand_logo_url": settings.brand_logo_url,
+                "price": settings.subscription_price_sar,
+                "days": settings.subscription_days,
+                "amount_halalas": pay_gateway.expected_amount_halalas(settings),
+                "description": f"اشتراك شهري — {settings.brand_name}",
+                "publishable_key": settings.moyasar_publishable_key,
+                "callback_url": f"{base}/pay/done",
+                "product": pay_gateway.PRODUCT_TAG,
+                "chat_id": u,
+                "signature": t,
+                "statement_name": settings.statement_name,
+            },
+        )
+
+    @app.get("/pay/done")
+    def pay_done(request: Request, status: str = "", message: str = ""):
+        return templates.TemplateResponse(
+            request,
+            "pay_done.html",
+            {
+                "ok": status == "paid",
+                "message": message,
+                "brand_name": settings.brand_name,
+            },
+        )
+
+    @app.post("/moyasar/webhook")
+    async def moyasar_webhook(request: Request):
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 - malformed input is not our problem
+            return JSONResponse({"ok": False}, status_code=400)
+        if (
+            settings.moyasar_webhook_secret
+            and body.get("secret_token") != settings.moyasar_webhook_secret
+        ):
+            return JSONResponse({"ok": False}, status_code=403)
+        if body.get("type") != "payment_paid":
+            return {"ok": True, "ignored": "event type"}
+
+        claimed = body.get("data") or {}
+        claimed_meta = claimed.get("metadata") or {}
+        if claimed_meta.get("product") != pay_gateway.PRODUCT_TAG:
+            # the shared account's other app — none of our business
+            return {"ok": True, "ignored": "other product"}
+        payment_id = str(claimed.get("id") or "")
+        if not payment_id or not pay_gateway.payments_configured(settings):
+            return {"ok": True, "ignored": "unconfigured"}
+
+        # the webhook body is a claim; Moyasar's API is the truth. A 503 on
+        # fetch failure makes Moyasar retry later instead of losing the event.
+        payment = await pay_gateway.fetch_payment(settings, payment_id)
+        if payment is None:
+            return JSONResponse({"ok": False, "retry": True}, status_code=503)
+
+        meta = payment.get("metadata") or {}
+        chat_id = str(meta.get("telegram_id") or "")
+        problems = pay_gateway.payment_problems(settings, payment)
+        if problems:
+            log.warning("payment %s rejected: %s", payment_id, "; ".join(problems))
+            if on_payment is not None:
+                await on_payment(
+                    "rejected", chat_id, {"payment_id": payment_id, "problems": problems}
+                )
+            return {"ok": True, "activated": False}
+
+        now = datetime.now(UTC)
+        memory = Memory(settings.data_dir / "memory.db")
+        if not memory.record_payment(
+            payment_id, chat_id, int(payment.get("amount") or 0),
+            str(payment.get("currency") or "SAR"), now,
+        ):
+            return {"ok": True, "duplicate": True}
+        if memory.subscriber(chat_id) is None:
+            # paid without ever /starting: legal, rare — register on the spot
+            # with a zero-length window for the extension to build on
+            memory.add_subscriber(chat_id, "", "", joined_at=now, expires_at=now)
+        row = memory.extend_subscriber(chat_id, settings.subscription_days, now)
+        memory.clear_reminder(chat_id)
+        if on_payment is not None:
+            await on_payment(
+                "activated",
+                chat_id,
+                {
+                    "payment_id": payment_id,
+                    "row": row or {},
+                    "amount": int(payment.get("amount") or 0),
+                },
+            )
+        return {"ok": True, "activated": True}
 
     @app.get("/")
     def overview(request: Request, _: str = Depends(login)):

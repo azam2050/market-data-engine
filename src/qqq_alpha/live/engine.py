@@ -1457,7 +1457,10 @@ class LiveEngine:
                 return
             await self.commands.decline_join_request(private, request.user_id)
             await self.commands.send(
-                request.user_id, farewell_message(self.settings.post_trial_channel_url)
+                request.user_id,
+                farewell_message(
+                    self.settings.post_trial_channel_url, self._pay_link(request.user_id)
+                ),
             )
             await self.notifier.note(f"⛔ طلب انضمام من مشترك منتهي: {name} — رُفض تلقائيًا")
             return
@@ -1534,7 +1537,10 @@ class LiveEngine:
 
             await self.commands.answer_button(press.callback_id)
             await self.commands.send(
-                press.user_id, farewell_message(self.settings.post_trial_channel_url)
+                press.user_id,
+                farewell_message(
+                    self.settings.post_trial_channel_url, self._pay_link(press.user_id)
+                ),
             )
             return
 
@@ -1646,20 +1652,34 @@ class LiveEngine:
             await self.commands.send(message.chat_id, status)
         else:
             await self.commands.send(
-                message.chat_id, farewell_message(self.settings.post_trial_channel_url)
+                message.chat_id,
+                farewell_message(
+                    self.settings.post_trial_channel_url, self._pay_link(message.chat_id)
+                ),
             )
+
+    def _pay_link(self, chat_id: str) -> str:
+        """The subscriber's personal payment URL, or "" while payments are
+        dark — messages simply omit the line instead of pointing at a 404."""
+        from qqq_alpha.payments import pay_link
+
+        return pay_link(self.settings, str(chat_id)) or ""
 
     async def _expire_subscribers(self) -> None:
         """Flip finished trials and send each one the follow-up-channel note.
 
         Called at boot and at every session roll — daily granularity is plenty
-        for a 30-day trial, and both hooks together survive restarts.
+        for a 30-day trial, and both hooks together survive restarts. The same
+        sweep sends the once-per-window renewal nudge to trials with two days
+        left, so the funnel's last touch happens before the door closes, not
+        after.
         """
         if self.commands is None:
             return
-        from qqq_alpha.live.telegram import farewell_message
+        from qqq_alpha.live.telegram import farewell_message, renewal_reminder_message
 
-        due = self.memory.expire_due_subscribers(datetime.now(UTC))
+        now = datetime.now(UTC)
+        due = self.memory.expire_due_subscribers(now)
         private = self.settings.telegram_private_channel_id
         for row in due:
             if private:
@@ -1667,10 +1687,26 @@ class LiveEngine:
                 # explains it and points at the follow-up channel
                 await self.commands.kick(private, row["chat_id"])
             await self.commands.send(
-                row["chat_id"], farewell_message(self.settings.post_trial_channel_url)
+                row["chat_id"],
+                farewell_message(
+                    self.settings.post_trial_channel_url, self._pay_link(row["chat_id"])
+                ),
             )
         if due:
             await self.notifier.note(f"⏳ انتهت الفترة التجريبية لـ {len(due)} مشترك")
+
+        for row in self.memory.trials_needing_reminder(now):
+            await self.commands.send(
+                row["chat_id"],
+                renewal_reminder_message(
+                    str(row.get("expires_at") or "")[:10],
+                    self.settings.subscription_price_sar,
+                    self._pay_link(row["chat_id"]),
+                ),
+            )
+            # marked regardless of delivery: a blocked bot must not retry the
+            # nudge every day for the rest of the window
+            self.memory.mark_reminded(row["chat_id"], now)
 
     async def _handle_command(self, text: str) -> None:
         parts = text.strip().split()
@@ -1956,6 +1992,46 @@ class LiveEngine:
             )
             await self.notifier.note(f"🗑️ حُذف المشترك {name} وأُخرج من القناة")
 
+    async def _on_payment(self, action: str, chat_id: str, info: dict) -> None:
+        """A verified Moyasar payment reaches Telegram: the subscriber gets
+        their confirmation (and a door key if they need one), the operator
+        gets the receipt. Rejections are operator-only — a tampered payment
+        does not deserve a polite reply."""
+        payment_id = info.get("payment_id", "؟")
+        if action == "rejected":
+            problems = "\n".join(f"  • {p}" for p in info.get("problems", []))
+            await self.notifier.note(
+                f"🚨 دفعة مرفوضة — لم يُفعَّل شيء (المعرف {payment_id}):\n{problems}\n"
+                "راجع لوحة ميسر بنفسك."
+            )
+            return
+        if action != "activated":
+            return
+
+        row = info.get("row") or {}
+        expires = str(row.get("expires_at") or "")[:10]
+        amount_sar = int(info.get("amount") or 0) // 100
+        if self.commands is not None:
+            message = (
+                "✅ تم تفعيل اشتراكك — شكرًا لك 🤍\n"
+                f"اشتراكك فعال حتى {expires}."
+            )
+            private = self.settings.telegram_private_channel_id
+            if private:
+                link = await self.commands.create_invite_link(
+                    private, name=f"paid-{chat_id}"
+                )
+                if link:
+                    message += (
+                        "\n\n🔗 إن لم تكن داخل القناة الخاصة بعد، هذا رابط "
+                        f"دخولك (صالح لشخص واحد):\n{link}"
+                    )
+            await self.commands.send(chat_id, message)
+        name = row.get("first_name") or row.get("username") or chat_id
+        await self.notifier.note(
+            f"💳 دفعة مؤكدة: {name} — {amount_sar} ريال، اشتراكه فعال حتى {expires}"
+        )
+
     async def _run_dashboard(self) -> None:
         """Serve the admin dashboard for the life of the session.
 
@@ -1979,6 +2055,7 @@ class LiveEngine:
             on_lesson_applied=_apply_playbook,
             on_subscriber_change=self._on_subscriber_change,
             channel_roster=self._channel_roster,
+            on_payment=self._on_payment,
         )
         config = uvicorn.Config(
             app,

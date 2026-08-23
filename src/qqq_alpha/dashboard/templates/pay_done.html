@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ brand_name }} — {{ "تمت العملية" if ok else "لم تكتمل العملية" }}</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --border:#2a2f3a; --text:#e7e9ee;
+          --muted:#8b93a3; --green:#35c78a; --red:#ef5f6b; }
+  body { margin:0; background:var(--bg); color:var(--text); line-height:1.8;
+         font-family:"Segoe UI", Tahoma, Arial, sans-serif;
+         display:flex; justify-content:center; align-items:center;
+         min-height:100vh; padding:20px; text-align:center; }
+  .card { background:var(--panel); border:1px solid var(--border);
+          border-radius:16px; padding:34px 28px; max-width:420px; }
+  .icon { font-size:52px; }
+  h1 { font-size:20px; margin:12px 0 8px; }
+  p { color:var(--muted); font-size:14px; margin:0; }
+</style>
+</head>
+<body>
+  <div class="card">
+    {% if ok %}
+    <div class="icon">✅</div>
+    <h1>تم استلام دفعتك</h1>
+    <p>جارٍ التحقق والتفعيل تلقائيًا — ستصلك رسالة التأكيد في تيليجرام خلال
+    لحظات، وفيها تاريخ انتهاء اشتراكك الجديد. يمكنك إغلاق هذه الصفحة.</p>
+    {% else %}
+    <div class="icon">❌</div>
+    <h1>لم تكتمل العملية</h1>
+    <p>{{ message or "لم يتم أي خصم مكتمل." }}<br>
+    يمكنك المحاولة مرة أخرى من نفس رابط الدفع في أي وقت.</p>
+    {% endif %}
+  </div>
+</body>
+</html>

@@ -145,6 +145,28 @@ class Settings(BaseSettings):
     # the monthly price quoted in the welcome pitch — advertising only until
     # the payment gateway lands; changing the env var updates every message
     subscription_price_sar: int = 199
+    # Moyasar direct integration. Keys live ONLY in Railway env vars — the
+    # payment page renders the publishable key, the secret key never leaves
+    # the server (used solely to re-verify a payment before activating it).
+    # All three empty ⇒ payments are dark: no links offered, webhook inert.
+    moyasar_publishable_key: str = ""
+    moyasar_secret_key: str = ""
+    # optional shared token Moyasar attaches to webhook payloads; when set,
+    # a payload without it is dropped before any other work
+    moyasar_webhook_secret: str = ""
+    # where this app is reachable from a subscriber's browser, e.g.
+    # https://market-data-engine-production.up.railway.app — needed to build
+    # pay links and the Apple Pay callback
+    public_base_url: str = ""
+    # what one payment buys, in days
+    subscription_days: int = 30
+    # the identity on the payment page — the channel's, never the gateway's
+    brand_name: str = "عقود الخيارات — القناة التعليمية"
+    brand_logo_url: str = ""
+    # what the payer's bank SMS/statement will show (the Moyasar account's
+    # registered trade name) — stated on the page so nobody mistakes their
+    # own payment for fraud
+    statement_name: str = "Kwadrz Est"
     # one Claude-written concept lesson after the bell, both channels. Gated
     # against advice, prices, and any reveal of this desk's own management —
     # a lesson that trips the gate is dropped, not edited into compliance.
