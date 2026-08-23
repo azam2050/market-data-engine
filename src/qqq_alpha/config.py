@@ -166,7 +166,7 @@ class Settings(BaseSettings):
     # what the payer's bank SMS/statement will show (the Moyasar account's
     # registered trade name) — stated on the page so nobody mistakes their
     # own payment for fraud
-    statement_name: str = "Kwadrz Est"
+    statement_name: str = "Moassasat Kwadrz"
     # one Claude-written concept lesson after the bell, both channels. Gated
     # against advice, prices, and any reveal of this desk's own management —
     # a lesson that trips the gate is dropped, not edited into compliance.
