@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from qqq_alpha import payments as pay_gateway
@@ -30,6 +30,13 @@ from qqq_alpha.memory import Memory
 log = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+# Moyasar's Apple Pay domain verification file. Apple fetches this exact
+# path unauthenticated before it will show the Apple Pay button on /pay —
+# it is meant for public hosting, not a secret.
+APPLE_PAY_ASSOCIATION_FILE = (
+    Path(__file__).parent / "well_known" / "apple-developer-merchantid-domain-association"
+)
 
 # an upper bound on a single grant, so a slipped keystroke in the days box
 # cannot hand out a decade of free access
@@ -86,6 +93,17 @@ def create_app(
             "trades_today": getattr(status, "trades_today", None) if status else None,
             "reconnects": getattr(status, "reconnects", None) if status else None,
         }
+
+    @app.get("/.well-known/apple-developer-merchantid-domain-association")
+    def apple_pay_domain_association():
+        """Proof of domain ownership for Apple Pay — Apple fetches this
+        unauthenticated at exactly this path before enabling the button.
+        A 404 here is why Apple Pay opens and immediately closes itself."""
+        if not APPLE_PAY_ASSOCIATION_FILE.exists():
+            return PlainTextResponse("", status_code=404)
+        return PlainTextResponse(
+            APPLE_PAY_ASSOCIATION_FILE.read_text(), media_type="text/plain"
+        )
 
     # ------------------------------------------------------------------
     # Payments — the three deliberately public routes. The pay page carries

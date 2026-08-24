@@ -201,6 +201,18 @@ def test_pay_page_while_dark_says_so(tmp_path):
     assert "غير مفعّل" in page.text
 
 
+# ------------------------------------------------------------------ Apple Pay
+def test_apple_pay_domain_association_is_served_at_the_well_known_path(tmp_path):
+    """Apple fetches this exact path unauthenticated before it will show the
+    button on /pay — a 404 here is why Apple Pay opens then closes itself."""
+    settings = _settings(tmp_path)
+    client = TestClient(create_app(settings))
+    response = client.get("/.well-known/apple-developer-merchantid-domain-association")
+    assert response.status_code == 200
+    assert '"psdId"' in response.text
+    assert '"signature"' in response.text
+
+
 # ---------------------------------------------------------------- reminders
 def test_reminder_sweep_targets_only_the_two_day_window_once(tmp_path):
     settings = _settings(tmp_path)
