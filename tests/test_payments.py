@@ -209,8 +209,11 @@ def test_apple_pay_domain_association_is_served_at_the_well_known_path(tmp_path)
     client = TestClient(create_app(settings))
     response = client.get("/.well-known/apple-developer-merchantid-domain-association")
     assert response.status_code == 200
-    assert '"psdId"' in response.text
+    assert '"pspId"' in response.text
     assert '"signature"' in response.text
+    import json
+
+    json.loads(response.text)  # must be well-formed, not truncated
 
 
 # ---------------------------------------------------------------- reminders
