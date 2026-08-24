@@ -94,11 +94,16 @@ def create_app(
             "reconnects": getattr(status, "reconnects", None) if status else None,
         }
 
-    @app.get("/.well-known/apple-developer-merchantid-domain-association")
+    @app.api_route(
+        "/.well-known/apple-developer-merchantid-domain-association",
+        methods=["GET", "HEAD"],
+    )
     def apple_pay_domain_association():
         """Proof of domain ownership for Apple Pay — Apple fetches this
         unauthenticated at exactly this path before enabling the button.
-        A 404 here is why Apple Pay opens and immediately closes itself."""
+        A 404 here is why Apple Pay opens and immediately closes itself.
+        HEAD is explicit: FastAPI 405s a bare @app.get on HEAD, and domain
+        validators commonly probe with HEAD before the real GET."""
         if not APPLE_PAY_ASSOCIATION_FILE.exists():
             return PlainTextResponse("", status_code=404)
         return PlainTextResponse(

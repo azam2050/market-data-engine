@@ -215,6 +215,11 @@ def test_apple_pay_domain_association_is_served_at_the_well_known_path(tmp_path)
 
     json.loads(response.text)  # must be well-formed, not truncated
 
+    # domain validators commonly probe with HEAD before the real GET —
+    # a bare @app.get 405s HEAD in FastAPI, which reads as "not verified"
+    head = client.head("/.well-known/apple-developer-merchantid-domain-association")
+    assert head.status_code == 200
+
 
 # ---------------------------------------------------------------- reminders
 def test_reminder_sweep_targets_only_the_two_day_window_once(tmp_path):
