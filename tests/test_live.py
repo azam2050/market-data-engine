@@ -1336,3 +1336,44 @@ async def test_the_brain_is_told_about_the_trade_it_already_closed(settings, tmp
         await engine._on_bar(bar)
 
     assert seen[-1] == 1, "the brain should now see the trade it closed today"
+
+
+# ---------------------------------------------------------------- restart safety
+@pytest.mark.asyncio
+async def test_a_restart_after_the_bell_does_not_repeat_the_daily_report(settings, tmp_path):
+    """The 'did we already publish today?' guard used to live in memory only.
+    A deploy that restarted the engine right after the bell forgot the
+    attempt and the next post-close bar sent the daily report a second
+    time — once as the photo card, once as its text fallback, from two
+    different process lifetimes. It must now survive the restart."""
+    from datetime import datetime
+
+    from qqq_alpha.config import MARKET_TZ
+
+    engine = _engine(settings, tmp_path)
+    day = datetime.now(MARKET_TZ).date()  # _restore only accepts today's state
+    engine._current_day = day
+    engine._channel_daily_posted = day
+    engine._persist()
+
+    fresh = _engine(settings, tmp_path)
+    await fresh._restore()
+    assert fresh._channel_daily_posted == day
+
+
+@pytest.mark.asyncio
+async def test_a_restart_before_the_bell_still_lets_the_report_through(settings, tmp_path):
+    """The flip side: a restart earlier in the day, before anything has been
+    published, must not permanently block today's report."""
+    from datetime import datetime
+
+    from qqq_alpha.config import MARKET_TZ
+
+    engine = _engine(settings, tmp_path)
+    day = datetime.now(MARKET_TZ).date()  # _restore only accepts today's state
+    engine._current_day = day
+    engine._persist()  # channel_daily_posted defaults to False
+
+    fresh = _engine(settings, tmp_path)
+    await fresh._restore()
+    assert fresh._channel_daily_posted is None

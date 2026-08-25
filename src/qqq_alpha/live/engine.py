@@ -278,6 +278,7 @@ class LiveEngine:
                 open_trades=list(self.manager.open_trades),
                 closed_trades=list(self.manager.closed_trades),
                 executed=dict(self._executed),
+                channel_daily_posted=(self._channel_daily_posted == self._current_day),
             )
         )
 
@@ -300,6 +301,10 @@ class LiveEngine:
         # it from a budget and a price that has since moved would be a guess
         # wearing the shape of a fact
         self._executed = dict(state.executed)
+        # a restart after the bell must not repeat the daily report — the
+        # attempt already happened in a previous process lifetime
+        if state.channel_daily_posted:
+            self._channel_daily_posted = state.session_day
 
         if state.open_trades:
             symbols = ", ".join(t.occ_symbol for t in state.open_trades)
@@ -1094,6 +1099,9 @@ class LiveEngine:
         if not targets or self._channel_daily_posted == day:
             return
         self._channel_daily_posted = day
+        # written to disk before the attempt, not after: a crash mid-publish
+        # must still be remembered, or the next boot repeats it verbatim
+        self._persist()
         try:
             closed = list(self.manager.closed_trades)
             for channel in targets:
