@@ -1377,3 +1377,25 @@ async def test_a_restart_before_the_bell_still_lets_the_report_through(settings,
     fresh = _engine(settings, tmp_path)
     await fresh._restore()
     assert fresh._channel_daily_posted is None
+
+
+@pytest.mark.asyncio
+async def test_a_restart_remembers_health_and_breaker_announcements_too(settings, tmp_path):
+    """Same bug, same fix, two more flags: the data-health verdict and the
+    circuit-breaker announcement must each survive a restart without
+    re-firing for a day already reported."""
+    from datetime import datetime
+
+    from qqq_alpha.config import MARKET_TZ
+
+    engine = _engine(settings, tmp_path)
+    day = datetime.now(MARKET_TZ).date()
+    engine._current_day = day
+    engine._health_reported = day
+    engine._breaker_announced = day
+    engine._persist()
+
+    fresh = _engine(settings, tmp_path)
+    await fresh._restore()
+    assert fresh._health_reported == day
+    assert fresh._breaker_announced == day

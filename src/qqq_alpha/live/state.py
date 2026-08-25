@@ -49,6 +49,10 @@ class SessionState(BaseModel):
     # sent the daily report a second time — once as the photo card, once as
     # its text fallback, from two different process lifetimes.
     channel_daily_posted: bool = False
+    # same restart-forgets-it bug, same fix: the data-health verdict and the
+    # circuit-breaker announcement are each meant to fire once a day too
+    health_reported: bool = False
+    breaker_announced: bool = False
 
     def belongs_to(self, day: date) -> bool:
         return self.session_day == day

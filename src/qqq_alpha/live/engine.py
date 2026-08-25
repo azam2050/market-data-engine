@@ -279,6 +279,8 @@ class LiveEngine:
                 closed_trades=list(self.manager.closed_trades),
                 executed=dict(self._executed),
                 channel_daily_posted=(self._channel_daily_posted == self._current_day),
+                health_reported=(self._health_reported == self._current_day),
+                breaker_announced=(self._breaker_announced == self._current_day),
             )
         )
 
@@ -305,6 +307,10 @@ class LiveEngine:
         # attempt already happened in a previous process lifetime
         if state.channel_daily_posted:
             self._channel_daily_posted = state.session_day
+        if state.health_reported:
+            self._health_reported = state.session_day
+        if state.breaker_announced:
+            self._breaker_announced = state.session_day
 
         if state.open_trades:
             symbols = ", ".join(t.occ_symbol for t in state.open_trades)
@@ -903,6 +909,7 @@ class LiveEngine:
         if self._breaker_announced == today:
             return
         self._breaker_announced = today
+        self._persist()
         await self.notifier.note(
             "🛑 قاطع الخسارة اليومي فُعِّل — أُغلق المكتب لبقية الجلسة\n"
             f"خسارة اليوم بعد وزن الحجم: {state.loss_measure_pct:+.1f}% "
@@ -2196,6 +2203,7 @@ class LiveEngine:
         if self._health_reported == day or not self.session_bars:
             return
         self._health_reported = day
+        self._persist()
         health = assess(
             inspect_session(self.session_bars),
             self.status.reconnects,
