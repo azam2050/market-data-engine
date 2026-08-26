@@ -98,12 +98,20 @@ def create_app(
         "/.well-known/apple-developer-merchantid-domain-association",
         methods=["GET", "HEAD"],
     )
+    @app.api_route(
+        "/.well-known/apple-developer-merchantid-domain-association.txt",
+        methods=["GET", "HEAD"],
+    )
     def apple_pay_domain_association():
         """Proof of domain ownership for Apple Pay — Apple fetches this
         unauthenticated at exactly this path before enabling the button.
         A 404 here is why Apple Pay opens and immediately closes itself.
         HEAD is explicit: FastAPI 405s a bare @app.get on HEAD, and domain
-        validators commonly probe with HEAD before the real GET."""
+        validators commonly probe with HEAD before the real GET.
+        Both the bare and .txt spellings are served: Apple's original spec
+        named the file with .txt, and Moyasar's validator rejects a domain
+        with "must show the verification text file" when only the bare
+        path answers."""
         if not APPLE_PAY_ASSOCIATION_FILE.exists():
             return PlainTextResponse("", status_code=404)
         return PlainTextResponse(

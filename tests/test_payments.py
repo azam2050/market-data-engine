@@ -220,6 +220,17 @@ def test_apple_pay_domain_association_is_served_at_the_well_known_path(tmp_path)
     head = client.head("/.well-known/apple-developer-merchantid-domain-association")
     assert head.status_code == 200
 
+    # Apple's original spec named the file with .txt, and Moyasar's validator
+    # fails a domain with "must show the verification text file" when only
+    # the bare path answers — so both spellings must serve the same content
+    txt = client.get("/.well-known/apple-developer-merchantid-domain-association.txt")
+    assert txt.status_code == 200
+    assert txt.text == response.text
+    assert (
+        client.head("/.well-known/apple-developer-merchantid-domain-association.txt").status_code
+        == 200
+    )
+
 
 # ---------------------------------------------------------------- reminders
 def test_reminder_sweep_targets_only_the_two_day_window_once(tmp_path):
