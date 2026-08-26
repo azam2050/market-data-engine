@@ -411,6 +411,24 @@ async def test_education_falls_back_to_the_full_text_when_the_photo_fails():
     assert "القاعدة" in posts["texts"][0]
 
 
+@pytest.mark.asyncio
+async def test_the_daily_concept_lesson_goes_out_as_a_card_too():
+    """Same branded delivery as the risk-management series — a plain-text
+    lesson beside a carded one would read like a lesser product."""
+    lesson = (
+        "قراءة السوق — الدعم: أرضية يتذكرها السوق\n\n"
+        "مثال توضيحي عام عن منطقة سعرية يتذكرها السوق.\n\n"
+        "القاعدة: الدعم منطقة يتذكرها السوق."
+    )
+    posts, transport = _recorder()
+    async with httpx.AsyncClient(transport=transport) as client:
+        publisher = ChannelPublisher("token", "@chan", client=client)
+        await publisher.post_lesson(lesson)
+
+    assert posts["photos"] == 1
+    assert posts["texts"] == []
+
+
 def test_education_card_parses_title_body_and_rule():
     from io import BytesIO
 

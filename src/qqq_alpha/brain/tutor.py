@@ -1,16 +1,20 @@
-"""The daily concept lesson: Claude teaches, and never reveals the kitchen.
+"""The daily concept lesson: Claude teaches market-reading, and never reveals
+the kitchen.
 
-One short lesson a day, on a rotating syllabus of option-market concepts
-(delta, gamma, theta, implied volatility, ...), written in plain Arabic with
-one analogy and one closing rule. The operator's standing constraints are
-structural here, not stylistic:
+One short lesson a day, on a rotating syllabus of market-reading concepts
+(support and resistance, false breakouts, reversal patterns, ...), written in
+plain Arabic as a purely generic, illustrative phenomenon — never framed as
+something that happened in a real, specific session. The operator's standing
+constraints are structural here, not stylistic:
 
 - no imperative or advisory language — the lesson explains phenomena, it
   never tells anyone to do anything;
-- no reference to this desk's own system, strategy, or management numbers —
-  curiosity about "how is this handled in practice?" is what the channel's
-  case studies are for;
-- no prices, strikes, or levels — a lesson must still be true next month.
+- no reference to this desk's own system, strategy, trades, or management
+  actions — not even worded neutrally. "دخلنا"، "خرجنا"، "أدرنا"، "هدفنا"،
+  "صفقتنا" are all off-limits regardless of phrasing, because a number
+  attached to any of them is traceable back to a real trade this desk made;
+- no prices, strikes, or levels presented as real data — every example must
+  stay illustrative and true in any month, for any stock.
 
 Every generated lesson passes through :func:`gate_violations` before it can
 be published. A lesson that trips the gate is dropped and logged, never
@@ -34,20 +38,20 @@ log = logging.getLogger(__name__)
 # survives restarts; a holiday skips a topic, which is harmless — the cycle
 # still covers everything before repeating
 TOPICS: list[tuple[str, str]] = [
-    ("الدلتا", "كم يتحرك سعر العقد عندما يتحرك السهم دولاراً واحداً — سرعة العقد"),
-    ("الجاما", "لماذا تنقلب عقود اليوم الأخير فجأة — تسارع الدلتا نفسها"),
-    ("الثيتا", "الإيجار اليومي الذي يدفعه حامل العقد للزمن — تبخر القيمة مع كل ساعة"),
-    ("التقلب الضمني", "الترقب المسعّر داخل العقد — لماذا يغلى قبل الحدث ويرخص بعده"),
-    ("القيمة الزمنية والقيمة الجوهرية", "مما يتركب سعر العقد فعلياً — جزء حقيقي وجزء أمل"),
-    ("حجم التداول والعقود المفتوحة", "كيف تُقرأ سيولة عقد قبل الاقتراب منه"),
-    ("فارق العرض والطلب", "الباب الضيق — التكلفة الخفية التي تُدفع مرتين، دخولاً وخروجاً"),
-    ("الفيغا", "حساسية سعر العقد لتغير التقلب — الربح والخسارة بلا حركة سهم"),
-    ("داخل النطاق وخارجه", "ITM وATM وOTM — ماذا تعني المسافة عن سعر السهم"),
-    ("الرافعة في العقود", "لماذا يتضاعف العقد بينما السهم يتحرك واحداً بالمئة"),
-    ("المتوسط المرجّح بالحجم VWAP", "السعر العادل للجلسة — المرجع الذي تقيس به الحركة"),
-    ("الدعم والمقاومة", "ذاكرة الأسعار — لماذا تتباطأ الحركة عند مستويات بعينها"),
-    ("فجوات الافتتاح", "عندما يفتح السوق بعيداً عن إغلاقه — ماذا تقول الفجوة وماذا لا تقول"),
-    ("عقود اليوم الواحد 0DTE", "يوم كامل من حياة عقد يولد ويموت في جلسة واحدة"),
+    ("الدعم والمقاومة", "كيف \"تتذكر\" السوق منطقة سعرية توقفت عندها الحركة من قبل"),
+    ("القاع المزدوج", "لماذا يميل السهم للارتداد عند اختباره منطقة قاع سبق أن صمدت"),
+    ("القمة المزدوجة", "لماذا تفشل المحاولة الثانية غالباً عند نفس السقف السابق"),
+    ("الاختراق الكاذب", "متى يخترق السعر مستوى ثم يتراجع عنه سريعاً بلا استمرار"),
+    ("إغلاق الفجوة السعرية", "لماذا يميل السعر أحياناً للعودة نحو الفجوة التي تركها خلفه"),
+    ("تأكيد الحجم", "لماذا يحتاج اختراق أي مستوى حجم تداول يدعمه حتى يُؤخذ على محمل الجد"),
+    ("الاتجاه العام مقابل التصحيح المؤقت", "كيف يُفرَّق بين تراجع داخل اتجاه وانعكاس للاتجاه نفسه"),
+    ("خطوط الاتجاه", "كيف يعمل خط صاعد أو هابط كدعم أو مقاومة متحركة مع الوقت"),
+    ("تباعد السعر عن الزخم", "حين يصنع السعر قمة أعلى بينما يضعف الزخم خلفها — إشارة إنذار مبكر"),
+    ("النطاق السعري الجانبي", "حين يتحرك السعر بين سقف وقاع واضحين دون اتجاه حقيقي"),
+    ("المتوسطات المتحركة كدعم متحرك", "كيف يتحول متوسط سعري إلى مستوى يُختبر ويُحترم مع الوقت"),
+    ("نطاق الافتتاح", "ما تقوله أول حركة في الجلسة عن بقيتها، وما لا تقوله"),
+    ("الشمعة الانعكاسية", "إشارة قصيرة على الرسم البياني تُقرأ كتردد عند نهاية موجة"),
+    ("تسارع الزخم", "كيف تبدو حركة سعرية متتابعة بلا فترات راحة، وماذا يعنيه ذلك عادة"),
 ]
 
 # ---------------------------------------------------------------- the gate
@@ -67,13 +71,24 @@ _IMPERATIVE = [
     "فرصة بيع",
     "لا تفوت",
 ]
-# The kitchen: any reference to this desk's own machinery or its numbers.
+# The kitchen: any reference to this desk's own machinery, or any first-person
+# system-action verb — a neutral-sounding "دخلنا" or "أدرنا" is still a leak,
+# because whatever number rides along with it traces back to a real trade.
 _KITCHEN = [
     "نظامنا",
     "استراتيجيت",
     "خوارزم",
     "محركنا",
     "بوتنا",
+    "حسابنا",
+    "مركزنا",
+    "صفقتنا",
+    "قرارنا",
+    "هدفنا",
+    "دخلنا",
+    "خرجنا",
+    "أدرنا",
+    "ندير",
     "نبيع النصف",
     "بيع النصف",
     "35%",
@@ -127,22 +142,28 @@ class ConceptTutor:
         """One lesson, or None — silence over a lesson that broke the rules."""
         topic, angle = self.topic_for(day)
         system = (
-            "أنت معلّم أسواق مالية عربي محترف تكتب درساً يومياً قصيراً لقناة "
-            "تعليمية متخصصة في عقود خيارات صندوق QQQ.\n\n"
+            "أنت معلّم أسواق مالية عربي محترف تكتب درساً يومياً قصيراً في "
+            "قراءة السوق (تحليل الحركة السعرية) لقناة تعليمية.\n\n"
             "قواعد صارمة لا استثناء فيها:\n"
-            "- الدرس يشرح الظاهرة فقط. ممنوع أي فعل أمر أو نصيحة أو توصية أو "
-            "دعوة لفعل شيء.\n"
-            "- ممنوع ذكر أي نظام أو استراتيجية أو طريقة إدارة خاصة بالقناة، "
-            "وممنوع كشف أي أرقام قواعد إدارة.\n"
+            "- الدرس يشرح ظاهرة سوقية عامة فقط. ممنوع أي فعل أمر أو نصيحة أو "
+            "توصية أو دعوة لفعل شيء.\n"
+            "- الدرس مثال توضيحي عام يصلح لأي سهم وأي شهر — وليس وصفاً لما "
+            "حدث في جلسة حقيقية اليوم أو أمس. لا تذكر أرقاماً أو مستويات على "
+            "أنها بيانات فعلية حدثت، واستخدم صياغة عامة مثل \"قد يحدث\" أو "
+            "\"في كثير من الحالات\" بدل السرد الزمني المحدد.\n"
+            "- ممنوع نهائياً أي إشارة من قريب أو بعيد إلى نظام أو استراتيجية "
+            "أو حساب أو صفقة أو قرار خاص بهذه القناة، وممنوع أي صيغة متكلم "
+            "جماعي تصف فعلاً تداولياً مثل \"دخلنا\" أو \"خرجنا\" أو \"أدرنا\" أو "
+            "\"هدفنا\" — حتى لو بدت الصياغة محايدة.\n"
             "- ممنوع ذكر أسعار أو مستويات أو سترايكات حقيقية، وممنوع أي رقم "
             "من ثلاث خانات فأكثر إلا نسبة مئوية.\n"
-            "- ممنوع اختلاق أحداث محددة لجلسة اليوم — تكلم عن الظاهرة عموماً.\n"
             "- اللغة عربية فصيحة بسيطة يفهمها المبتدئ، والمصطلح الإنجليزي بين "
             "قوسين عند أول ذكر فقط.\n\n"
             "البنية الإلزامية:\n"
-            "السطر الأول: 📚 درس اليوم — {عنوان جذاب قصير}\n"
+            "السطر الأول: قراءة السوق — {عنوان قصير للمفهوم}\n"
             "ثم فقرة أو فقرتان (٤ إلى ٧ جمل) تبدأ بتشبيه من الحياة اليومية "
-            "يبسّط المفهوم، ثم تشرح الظاهرة في سوق العقود.\n"
+            "يبسّط المفهوم، ثم تشرح الظاهرة كمثال توضيحي عام غير مرتبط بجلسة "
+            "أو سهم بعينه.\n"
             "السطر الأخير: القاعدة: {خلاصة من جملة واحدة، وصفية لا أمرية}.\n"
             "أخرج نص الدرس فقط دون أي مقدمات."
         )

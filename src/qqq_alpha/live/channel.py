@@ -406,5 +406,15 @@ class ChannelPublisher:
             png, lesson.split("\n", 1)[0], lesson + f"\n\n⚠️ {DISCLAIMER}"
         )
 
+    async def post_lesson(self, lesson: str) -> None:
+        """The daily Claude-written market-reading lesson, delivered in the
+        same branded card as the risk-management series — a plain-text wall
+        of prose next to that card would read like a different, lesser
+        product."""
+        png = self._render_report("education", lesson=lesson)
+        await self._post_card(
+            png, lesson.split("\n", 1)[0], lesson + f"\n\n⚠️ {DISCLAIMER}"
+        )
+
     async def aclose(self) -> None:
         await self._notifier.aclose()

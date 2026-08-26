@@ -1162,10 +1162,8 @@ class LiveEngine:
                 "🚫 درس اليوم حُجب آلياً (خالف بوابة المحتوى) — راجع السجلات"
             )
             return
-        from qqq_alpha.live.notifier import DISCLAIMER
-
         for channel in targets:
-            await channel.post_text(f"{lesson}\n\n⚠️ {DISCLAIMER}")
+            await channel.post_lesson(lesson)
 
     @staticmethod
     def _is_last_session_of_month(day: date) -> bool:
