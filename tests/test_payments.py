@@ -209,11 +209,16 @@ def test_apple_pay_domain_association_is_served_at_the_well_known_path(tmp_path)
     client = TestClient(create_app(settings))
     response = client.get("/.well-known/apple-developer-merchantid-domain-association")
     assert response.status_code == 200
-    assert '"pspId"' in response.text
-    assert '"signature"' in response.text
+    # the issued file is hex-encoded JSON and must be served VERBATIM in that
+    # hex form — that's how every merchant hosts it, and Moyasar's validator
+    # compares byte-for-byte. Decoding it to JSON (as we once did) fails
+    # verification with "must show the verification text file".
     import json
 
-    json.loads(response.text)  # must be well-formed, not truncated
+    decoded = bytes.fromhex(response.text.strip())
+    payload = json.loads(decoded)  # must be well-formed, not truncated
+    assert "pspId" in payload
+    assert "signature" in payload
 
     # domain validators commonly probe with HEAD before the real GET —
     # a bare @app.get 405s HEAD in FastAPI, which reads as "not verified"
