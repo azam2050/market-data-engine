@@ -179,6 +179,18 @@ caution:
       bounce with the trend. The counter-rule demands the STRUCTURE (a real
       failed bounce with trend and flow still aligned), never an entry on the
       clock — see QUOTA_IS_NOT_A_SIGNAL.
+      THE COUNTER-RULE'S OWN GATE, from 2026-08-26: "trend and flow aligned"
+      is a precondition, not a decoration. In a chop/ranging regime, or
+      mid-range of the week's tested levels, or with flow admittedly mixed,
+      the counter-rule NEVER applies — waiting an Nth time there is still the
+      correct answer, and the wake-count is not evidence of anything. The
+      failure it must prevent recurring: a 4th-wake PUT forced by citing this
+      counter-rule alone, bought at RSI(1m) 23 on the floor of a week-tested
+      range in VOLATILE_CHOP, 0.15% from its own target, while the same
+      thesis's risk list admitted the caution's condition was present — the
+      floor held, the trade died on the bounce. If the caution's condition is
+      admittedly TRUE and the day is not an aligned trend, the count argues
+      for nothing.
   - id: QUOTA_IS_NOT_A_SIGNAL
     condition: >
       Considering an ENTER whose honest main driver is that trade slots remain
