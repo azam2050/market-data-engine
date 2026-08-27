@@ -100,6 +100,12 @@ class SnapshotBuilder:
         # the hourly needs the previous sessions to exist at all; without
         # them it is left empty rather than rendered from a stub
         hourly_bars = hourly(list(history_bars or []) + list(session_bars))
+        # the week's levels come off the same hourly bars: the range whose
+        # edges were set days ago is what decides whether today's break runs,
+        # and without it a position taken mid-range looks identical to one
+        # taken at its edge
+        multiday = levels.multi_day_levels(hourly_bars, session_bars[-1].close)
+        lvl = levels.merge_multi_day(lvl, multiday)
         hourly_pack: dict = {}
         if len(hourly_bars) >= 6:
             pack = indicators.compute_all(hourly_bars)
@@ -192,6 +198,7 @@ class SnapshotBuilder:
             indicators=ind,
             timeframes=timeframe_packs,
             levels=lvl,
+            multiday=multiday,
             flow=flow,
             regime=regime,
             observations=observations,

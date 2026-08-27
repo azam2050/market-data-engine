@@ -6,7 +6,9 @@ professional reads off a chart is a number; we hand the brain the numbers.
 
 from __future__ import annotations
 
+from qqq_alpha.config import MARKET_TZ
 from qqq_alpha.domain import Bar
+from qqq_alpha.features import structure
 
 OPENING_RANGE_MINUTES = 15
 
@@ -63,6 +65,119 @@ def compute_levels(
 
     levels.update(_round_levels(price))
     return levels
+
+
+# a swing is "the same level" as another when they sit this close together.
+# 0.15% of QQQ is roughly a point — tight enough that two genuinely different
+# levels stay apart, loose enough that the same level tested on three days
+# does not fragment into three separate near-identical numbers.
+TOUCH_TOLERANCE_PCT = 0.15
+# how many independent touches make a level worth naming. Two is a level a
+# trader would draw; one is just a high.
+MIN_TOUCHES = 2
+
+
+def multi_day_levels(
+    bars: list[Bar],
+    price: float,
+    tolerance_pct: float = TOUCH_TOLERANCE_PCT,
+    min_touches: int = MIN_TOUCHES,
+    min_sessions: int = 2,
+) -> dict:
+    """The levels a trader sees after scrolling the chart LEFT.
+
+    Everything else in this module describes today and yesterday. That is the
+    horizon a 0DTE position lives inside, and for a long time it was assumed to
+    be the only horizon that mattered. It is not: a range whose edges were set
+    three sessions ago still decides whether today's breakout runs or fades,
+    and a position opened in the middle of that range is a coin flip no matter
+    how clean the one-minute tape looks. The engine already fetches five prior
+    sessions to build the hourly candles — this reads the levels out of the
+    same bars, so the week costs no extra data.
+
+    ``bars`` should span the whole history window (hourly is the right
+    granularity: fine enough to place a level, coarse enough that intraday
+    noise does not mint one). Returns the window's extremes, where price
+    currently sits inside them, and the levels price has tested repeatedly.
+    """
+    if not bars or price <= 0:
+        return {}
+
+    # one session is not a week. Without this the first day back from a data
+    # outage would hand the model today's own high and low relabelled as the
+    # range of the week — the same two numbers it already has as
+    # session_high/session_low, wearing a name that claims far more authority
+    sessions = len({b.ts.astimezone(MARKET_TZ).date() for b in bars})
+    if sessions < min_sessions:
+        return {}
+
+    window_high = max(b.high for b in bars)
+    window_low = min(b.low for b in bars)
+    span = window_high - window_low
+    result: dict = {
+        "high": round(window_high, 2),
+        "low": round(window_low, 2),
+        "sessions": sessions,
+    }
+    if span > 0:
+        # 0 = sitting on the floor of the week, 100 = on its ceiling, 50 = the
+        # middle, where directional trades have the worst odds
+        result["range_position_pct"] = round((price - window_low) / span * 100.0, 1)
+        result["range_width_pct"] = round(span / price * 100.0, 2)
+
+    # cluster the week's pivots: a price several swings agree on is a level,
+    # a price one swing touched is a high
+    swings = structure.swing_points(bars)
+    clusters: list[list] = []
+    for swing in sorted(swings, key=lambda s: s.price):
+        if clusters and abs(swing.price - clusters[-1][-1].price) / price * 100.0 <= tolerance_pct:
+            clusters[-1].append(swing)
+        else:
+            clusters.append([swing])
+
+    repeated = []
+    for cluster in clusters:
+        if len(cluster) < min_touches:
+            continue
+        level = sum(s.price for s in cluster) / len(cluster)
+        kinds = {s.kind for s in cluster}
+        repeated.append(
+            {
+                "price": round(level, 2),
+                "touches": len(cluster),
+                # a level tested from both sides has flipped role at least once
+                # (resistance that became support, or the reverse) — the kind a
+                # trader trusts most
+                "kind": "both" if len(kinds) > 1 else next(iter(kinds)),
+                "distance_pct": round((level - price) / price * 100.0, 2),
+            }
+        )
+
+    # most-tested first; ties broken by proximity, since a level far from price
+    # cannot matter to a position that expires this afternoon
+    repeated.sort(key=lambda item: (-item["touches"], abs(item["distance_pct"])))
+    result["repeated"] = repeated
+    return result
+
+
+def merge_multi_day(levels: dict[str, float | None], multi: dict) -> dict[str, float | None]:
+    """Fold the week's levels into the session levels dict.
+
+    Done as a merge rather than a separate channel so that ``nearest_levels``
+    and ``distance_to_nearest_pct`` — which already answer "what is price about
+    to run into?" — start counting the week's levels without knowing they
+    exist.
+    """
+    if not multi:
+        return levels
+    merged = dict(levels)
+    if multi.get("high") is not None:
+        merged["week_high"] = multi["high"]
+    if multi.get("low") is not None:
+        merged["week_low"] = multi["low"]
+    for index, level in enumerate(multi.get("repeated", [])[:4], start=1):
+        merged[f"tested_{index}x{level['touches']}"] = level["price"]
+    return merged
 
 
 def opening_gap(session_bars: list[Bar], prior_day: Bar | None) -> dict | None:

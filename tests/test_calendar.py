@@ -82,6 +82,21 @@ def test_an_after_close_report_is_flagged_on_the_day_it_lands(tmp_path):
     events = todays_events(now, path=path)
     assert len(events) == 1
     assert events[0]["minutes_from_now"] == 120  # two hours out, still to come
+    # the flag must travel with today's event, not only with yesterday's: a
+    # bare "16:20" reads as merely distant, when the real constraint is that
+    # today's 0DTE contracts expire before the report is even published
+    assert events[0]["after_close"] is True
+
+
+def test_an_intraday_release_is_not_marked_after_close(tmp_path):
+    path = _write_calendar(
+        tmp_path,
+        "events:\n" '  - {date: 2026-08-12, time_et: "08:30", label: "CPI", impact: high}\n',
+    )
+    now = datetime(2026, 8, 12, 10, 0, tzinfo=MARKET_TZ)
+
+    events = todays_events(now, path=path)
+    assert events[0]["after_close"] is False
 
 
 def test_the_gap_morning_after_an_after_close_report_is_flagged_too(tmp_path):
@@ -182,3 +197,67 @@ def test_an_earnings_day_reaches_the_brains_prompt(tmp_path):
         ),
     )
     assert "NVDA" in prompt and "صدرت بعد إغلاق أمس" in prompt
+
+
+def test_an_after_close_session_tells_the_brain_its_contracts_expire_first(tmp_path):
+    """The failure this closes: on NVDA earnings day the brain saw a bare
+    "16:20 (in 380 min)" and read it as far away and therefore irrelevant.
+
+    The truth is structural, not a countdown — the report lands after the bell,
+    so the whole session is positioning into it and a 0DTE contract expires
+    before the catalyst prints. Two trades were taken that day inside a 0.6%
+    range and both lost.
+    """
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.brain.prompts import build_user_prompt
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    path = _write_calendar(
+        tmp_path,
+        "events:\n"
+        '  - {date: 2026-08-26, time_et: "16:20", label: "أرباح NVDA", '
+        "impact: high, after_close: true}\n",
+    )
+    bars = synthetic_session("QQQ", datetime(2026, 8, 26).date(), seed=3)
+    snap = SnapshotBuilder("QQQ").build(bars[:60])
+
+    prompt = build_user_prompt(
+        snap,
+        Playbook(),
+        calendar_events=todays_events(
+            datetime(2026, 8, 26, 10, 0, tzinfo=MARKET_TZ), path=path
+        ),
+    )
+    assert "RELEASED AFTER TODAY'S CLOSE" in prompt
+    assert "WAITING IS THE DEFAULT TODAY" in prompt
+    # the countdown must be explicitly disarmed: the constraint applies from
+    # the opening bell, not from an hour before the release
+    assert "irrelevant" in prompt
+
+
+def test_an_intraday_release_keeps_the_ordinary_event_guidance(tmp_path):
+    """CPI at 08:30 is a normal event day — the after-close block must not
+    fire and turn every release into a stand-down."""
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.brain.prompts import build_user_prompt
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    path = _write_calendar(
+        tmp_path,
+        "events:\n" '  - {date: 2026-08-12, time_et: "08:30", label: "CPI", impact: high}\n',
+    )
+    bars = synthetic_session("QQQ", datetime(2026, 8, 12).date(), seed=3)
+    snap = SnapshotBuilder("QQQ").build(bars[:60])
+
+    prompt = build_user_prompt(
+        snap,
+        Playbook(),
+        calendar_events=todays_events(
+            datetime(2026, 8, 12, 10, 0, tzinfo=MARKET_TZ), path=path
+        ),
+    )
+    assert "ECONOMIC CALENDAR TODAY" in prompt
+    assert "RELEASED AFTER TODAY'S CLOSE" not in prompt
+    assert "WAITING IS THE DEFAULT TODAY" not in prompt

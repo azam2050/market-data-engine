@@ -290,6 +290,7 @@ def build_user_prompt(
 
     if calendar_events:
         lines = []
+        after_close_pending = False
         for event in calendar_events:
             when = event.get("time_et", "?")
             marker = event.get("minutes_from_now")
@@ -298,15 +299,45 @@ def build_user_prompt(
                 timing = (
                     f" (in {abs(marker):.0f} min)" if marker > 0 else f" ({abs(marker):.0f} min ago)"
                 )
-            lines.append(f"- {when} ET: {event.get('label', '?')} [{event.get('impact', '?')}]{timing}")
-        sections.append(
-            "=== ECONOMIC CALENDAR TODAY (operator-maintained schedule) ===\n"
-            + "\n".join(lines)
-            + "\nEvent days have their own character: the hour before a high-impact "
+            note = ""
+            if event.get("after_close"):
+                after_close_pending = True
+                note = " — RELEASED AFTER TODAY'S CLOSE"
+            lines.append(
+                f"- {when} ET: {event.get('label', '?')} [{event.get('impact', '?')}]{timing}{note}"
+            )
+        guidance = (
+            "\nEvent days have their own character: the hour before a high-impact "
             "release is usually positioning noise — a breakout there rarely holds. "
             "The first minutes after a release are violent whipsaw where stops die; "
             "the tradeable move is the trend that emerges once the reaction picks a "
             "side. Weigh every setup against where you are relative to the event."
+        )
+        if after_close_pending:
+            guidance += (
+                "\n\nONE EVENT TODAY LANDS AFTER THE BELL, AND THAT CHANGES THE WHOLE "
+                "SESSION, NOT ITS LAST HOUR. Two facts follow and neither is optional. "
+                "First, there is no 'after the release' for you: a 0DTE contract "
+                "expires this afternoon, so it dies before the catalyst prints. The "
+                "move everyone is waiting for is tomorrow's gap and you cannot be in "
+                "it. Second, the entire session in front of you is pre-event "
+                "positioning — desks hedge rather than take direction into the print, "
+                "so the day tends to compress into a range, breakouts fail back into "
+                "it, and the volatility that would pay for your contract is being "
+                "stored for tonight instead of spent today. This is the classic shape "
+                "of a mega-cap earnings session in an index that holds that name. "
+                "Treat the countdown in `minutes_from_now` as irrelevant — the "
+                "constraint applies from the opening bell. WAITING IS THE DEFAULT "
+                "TODAY. Enter only on a genuine structural break with volume behind "
+                "it, size the target off what the tape has actually produced today "
+                "rather than off a normal session, and say in your thesis that you "
+                "are trading into an after-close event anyway and why the setup earns "
+                "the exception."
+            )
+        sections.append(
+            "=== ECONOMIC CALENDAR TODAY (operator-maintained schedule) ===\n"
+            + "\n".join(lines)
+            + guidance
         )
 
     # the raw tape comes BEFORE the derived views on purpose: rule 1 of HOW TO
@@ -388,6 +419,29 @@ def build_user_prompt(
         sections.append("=== INDICATORS ===\n" + _compact(snapshot.indicators))
 
     sections.append("=== LEVELS ===\n" + _compact(snapshot.levels))
+
+    if snapshot.multiday:
+        sections.append(
+            "=== THE WEEK BEHIND TODAY ===\n"
+            "The chart scrolled left. `high`/`low` are the extremes of the last "
+            "few sessions and `range_position_pct` says where price sits inside "
+            "them: 0 is the floor of the week, 100 its ceiling, 50 the middle. "
+            "`repeated` lists the prices this week keeps stopping at — `touches` "
+            "is how many swings agree on that level and `kind: both` means it "
+            "has served as resistance AND support, which is the strongest kind "
+            "there is.\n"
+            "Read it as location, not as a signal. The same one-minute setup is "
+            "a different trade at the edge of a multi-day range than in the "
+            "middle of one: near a level tested repeatedly, a break needs volume "
+            "behind it or it is the failure that funds the other side, and a "
+            "rejection there is a real thesis with a small invalidation. In the "
+            "middle of a week-long range — no level near, `range_position_pct` "
+            "around 50 — there is usually no asymmetry to buy, and PASS is the "
+            "honest answer however clean the tape looks. A narrow "
+            "`range_width_pct` says the week itself is compressed, so the move "
+            "your target needs may be larger than anything this week produced.\n"
+            + _compact(snapshot.multiday)
+        )
 
     if snapshot.data_quality:
         sections.append(

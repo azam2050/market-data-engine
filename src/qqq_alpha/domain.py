@@ -181,6 +181,10 @@ class MarketSnapshot(BaseModel):
         description="Indicator pack per timeframe: 1m for timing, 5m for structure, 15m for trend",
     )
     levels: dict[str, float | None] = Field(default_factory=dict)
+    # the week behind today: the range's edges, where price sits inside it, and
+    # the levels tested more than once across sessions. Session levels alone
+    # cannot tell a break from a bounce at a level set three days ago.
+    multiday: dict = Field(default_factory=dict)
     flow: FlowSummary | None = None
     regime: MarketRegime = MarketRegime.UNKNOWN
     observations: list[Observation] = Field(default_factory=list)

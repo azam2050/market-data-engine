@@ -95,11 +95,19 @@ def todays_events(now: datetime, path: Path | None = None) -> list[dict]:
         row_date = _row_date(row)
         after_close = bool(row.get("after_close"))
         if row_date == today:
+            # `after_close` travels with today's event too, not only with
+            # yesterday's. Without it the brain sees a bare "16:20" and reads
+            # the event as merely distant, when the truth is structural: the
+            # report lands after the bell, so the WHOLE session is positioning
+            # ahead of it and a 0DTE contract expires before the catalyst it
+            # would need. That is the shape of an NVDA-earnings session — the
+            # index goes nowhere all day, then gaps tomorrow.
             events.append(
                 {
                     "time_et": str(row.get("time_et", "?")),
                     "label": str(row.get("label", "?")),
                     "impact": str(row.get("impact", "medium")),
+                    "after_close": after_close,
                 }
             )
         elif row_date == yesterday and after_close:
