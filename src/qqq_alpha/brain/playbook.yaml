@@ -106,6 +106,46 @@ setups:
       The recovery stalls below VWAP, or the bounce is on fading volume and
       price re-enters the flush range.
 
+  - id: TESTED_FLOOR_RECLAIM
+    name: "Held floor, bounce, retest that holds"
+    description: >
+      A floor (or ceiling, mirrored) that has already held two or more times —
+      today or across the week's levels — takes another hit, bounces with real
+      volume, and then price comes BACK to it and the retest holds: smaller
+      range, smaller volume, buyers absorbing. That second touch is the entry,
+      CALL off the floor / PUT off the ceiling, with invalidation just beyond
+      the level — one of the smallest honest invalidations any setup offers.
+      The operator named this pattern directly, and 2026-08-27 is the evidence
+      by absence: the 715.00 double bottom bounced on 392k volume, reclaimed
+      VWAP, retested shallow and ran +6 points to the session high — while the
+      engine was short from the flush low. The bounce alone is NOT the entry
+      (that is knife-catching); the held retest is.
+    typical_window: "09:45-15:00 ET"
+    typical_hold_minutes: 20-60
+    fails_when: >
+      The retest arrives on EXPANDING volume with full-bodied candles — that is
+      not a test, that is the level being run; or the bounce never reclaimed
+      VWAP, leaving the "floor" just a pause inside a markdown.
+
+  - id: GAP_AND_GO
+    name: "Unfilled opening gap, with the gap"
+    description: >
+      The session opens with a gap of roughly 0.4% or more, the gap does NOT
+      fill, and price holds above the open — that combination is a trend-day
+      signature whatever the computed regime label says, because the regime
+      classifier sees intraday bars while the gap IS the day's dominant fact.
+      The entry is with the gap: the morning shakeout that fails to reach the
+      fill level and V-reclaims the open/VWAP is the classic trigger, and a
+      later flag near the highs is the second chance. Positions against an
+      unfilled holding gap need exceptional, stated evidence — not a regime
+      label, not an intraday shelf break.
+    typical_window: "09:45-14:30 ET"
+    typical_hold_minutes: 25-90
+    fails_when: >
+      The gap actually fills (price trades back through yesterday's close) —
+      after a fill the signature is void and often reverses; or the gap is an
+      exhaustion gap straight into a week-tested edge with rejection prints.
+
 # ---------------------------------------------------------------------------
 # Conditions that historically degrade edge. These lower confidence — they do
 # not forbid a trade.
@@ -125,6 +165,22 @@ caution:
   - id: LUNCH_CHOP
     condition: "11:45-13:15 ET with relative volume below 1.0"
     note: "Liquidity thins, ranges compress, 0DTE theta keeps burning."
+  - id: UNFILLED_GAP_FADE
+    condition: >
+      Entering AGAINST an opening gap of ~0.4%+ that has not filled and is
+      holding above (below, for a gap down) its open
+    note: >
+      An unfilled holding gap is the single strongest day-type signal there
+      is, and it outranks the regime label. Evidence 2026-08-27, the morning
+      after NVDA earnings gapped QQQ +0.87%: two PUTs were taken against the
+      unfilled gap — one at the very low of the opening flush minutes before
+      the V-reclaim (-43%), one on a mid-shelf breakdown "consistent with
+      range-day logic" while the risk list itself wrote that fading an
+      unfilled gap is a trend-day signature (-38%). The breaker then locked
+      the session and the day closed on its high. Both theses were coherent;
+      both were fighting the day's dominant fact. Against an unfilled holding
+      gap: no counter-gap entry without exceptional, named evidence — and a
+      GAP_AND_GO entry in the gap's direction is the setup to hunt instead.
   - id: PRE_EVENT
     condition: "Within 20 minutes of a scheduled macro release (CPI, PPI, FOMC, NFP)"
     note: "Implied volatility is inflated; a correct direction can still lose on the crush."

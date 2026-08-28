@@ -91,3 +91,82 @@ def test_the_trade_cap_still_defaults_to_three():
     from qqq_alpha.config import Settings
 
     assert Settings.model_fields["max_trades_per_day"].default == 3
+
+
+# ================================================================ the rebuild
+# 2026-08-28: after a week where every loss was a B-grade improvisation and
+# the one win was a list setup, the operator asked for a trader, not a
+# rule-checker. The rebuild has three parts, each pinned here.
+
+
+def test_the_first_act_of_every_wake_is_a_free_chart_read():
+    assert "READ THE DAY BEFORE THE RULES" in SYSTEM_PROMPT
+    # the three questions that define the read
+    assert "What kind of day is this?" in SYSTEM_PROMPT
+    assert "Where are we inside the week?" in SYSTEM_PROMPT
+    assert "Who is driving?" in SYSTEM_PROMPT
+
+
+def test_rule_citing_is_demoted_from_analysis_to_guardrail():
+    assert "cite a caution only when it actually changes what you do" in SYSTEM_PROMPT
+    assert "mostly rule names strung together has failed" in SYSTEM_PROMPT
+
+
+def test_the_chart_outranks_the_labels():
+    """The Aug-27 failure in one sentence: regime said RANGING while an
+    unfilled gap was holding, and the label won. Now the chart wins."""
+    assert "trade the chart, not the label" in SYSTEM_PROMPT
+    assert "OVERRIDES the computed regime label" in SYSTEM_PROMPT
+
+
+def test_entries_must_name_a_setup_from_the_hunting_list():
+    assert "ENTRIES COME FROM THE HUNTING LIST" in SYSTEM_PROMPT
+    assert "must NAME the setup it matches" in SYSTEM_PROMPT
+    # off-list trades are an explicit exception, not a habit
+    assert "off-list entry is allowed only as an explicit exception" in SYSTEM_PROMPT
+
+
+def test_the_operators_setup_is_on_the_hunting_list():
+    """A floor that held twice, a bounce with volume, a retest that holds —
+    the operator named it, and 2026-08-27's 715.00 double bottom proved it."""
+    playbook = load_playbook(PLAYBOOK_PATH)
+    ids = [s["id"] for s in playbook.setups]
+    assert "TESTED_FLOOR_RECLAIM" in ids
+    reclaim = next(s for s in playbook.setups if s["id"] == "TESTED_FLOOR_RECLAIM")
+    # the bounce alone is knife-catching; the held retest is the entry
+    assert "the held retest is" in reclaim["description"]
+
+
+def test_gap_and_go_is_on_the_hunting_list_and_gap_fading_is_cautioned():
+    playbook = load_playbook(PLAYBOOK_PATH)
+    setup_ids = [s["id"] for s in playbook.setups]
+    caution_ids = [c["id"] for c in playbook.caution]
+    assert "GAP_AND_GO" in setup_ids
+    assert "UNFILLED_GAP_FADE" in caution_ids
+    fade = next(c for c in playbook.caution if c["id"] == "UNFILLED_GAP_FADE")
+    # the caution carries the paired 2026-08-27 loss as evidence
+    assert "2026-08-27" in fade["note"]
+    # and both travel into the prompt the brain actually reads
+    block = load_playbook(PLAYBOOK_PATH).as_prompt_block()
+    assert "GAP_AND_GO" in block and "UNFILLED_GAP_FADE" in block
+
+
+def test_the_gap_section_of_the_live_prompt_names_the_doctrine():
+    from datetime import date as _date
+
+    from qqq_alpha.brain.playbook import Playbook
+    from qqq_alpha.brain.prompts import build_user_prompt
+    from qqq_alpha.data.synthetic import synthetic_session
+    from qqq_alpha.features.snapshot import SnapshotBuilder
+
+    day = _date(2026, 8, 27)
+    session = synthetic_session("QQQ", day, seed=7)
+    # a prior day closing well below today's open produces a gap in the snapshot
+    prior = synthetic_session("QQQ", _date(2026, 8, 26), seed=8)
+    prior_daily = prior[-1].model_copy(update={"close": session[0].open * 0.99})
+    snap = SnapshotBuilder("QQQ").build(session[:60], prior_day=prior_daily)
+    assert snap.gap.get("direction") == "up"
+
+    prompt = build_user_prompt(snap, Playbook())
+    assert "GAP_AND_GO" in prompt
+    assert "UNFILLED_GAP_FADE" in prompt
