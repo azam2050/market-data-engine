@@ -119,11 +119,36 @@ def test_the_chart_outranks_the_labels():
     assert "OVERRIDES the computed regime label" in SYSTEM_PROMPT
 
 
-def test_entries_must_name_a_setup_from_the_hunting_list():
-    assert "ENTRIES COME FROM THE HUNTING LIST" in SYSTEM_PROMPT
-    assert "must NAME the setup it matches" in SYSTEM_PROMPT
-    # off-list trades are an explicit exception, not a habit
-    assert "off-list entry is allowed only as an explicit exception" in SYSTEM_PROMPT
+def test_the_hunting_list_is_precedent_not_permission():
+    """2026-08-28 revision: the list started as a gate ("an ENTER must NAME the
+    setup it matches") and the first live session showed the cost — the model
+    read the week-high distribution leg aloud and still WAITed because no
+    listed setup matched. The operator's verdict was blunt: a Claude that needs
+    a rule per situation is an indicator, not a trader. The list is demoted to
+    a library of precedents and the free read carries entry authority."""
+    assert "PRECEDENT, NOT PERMISSION" in SYSTEM_PROMPT
+    assert "READ_ENTRY" in SYSTEM_PROMPT
+    assert "FULL authority" in SYSTEM_PROMPT
+    # the recorded failure that forced the revision
+    assert "2026-08-28" in SYSTEM_PROMPT
+    assert "not discipline; it is abdication" in SYSTEM_PROMPT
+
+
+def test_read_entries_are_anchored_at_edges_not_mid_range():
+    """The loosening must not reopen the Aug 26-27 wounds: judgement entries
+    live at edges with a decisive candle and volume, never mid-range."""
+    assert "at an edge" in SYSTEM_PROMPT
+    assert "Never from the middle of a range" in SYSTEM_PROMPT
+    # cautions veto known errors; they are not a reason to sit out
+    assert "not to stop trading" in SYSTEM_PROMPT
+
+
+def test_at_an_edge_the_rejection_candle_is_the_entry():
+    """The one-leg-day lesson: demanding a pullback the tape never promised is
+    how the 724→715 waterfall escaped whole."""
+    assert "the rejection or reclaim candle IS the entry" in SYSTEM_PROMPT
+    # a correctly-read trade left on the table is a miss, not discipline
+    assert "counts as a miss, not as discipline" in SYSTEM_PROMPT
 
 
 def test_the_operators_setup_is_on_the_hunting_list():
