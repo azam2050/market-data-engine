@@ -32,6 +32,7 @@ entryModeS = input.string("انتظار ارتداد — أدق سعراً", "و
      options=["فوري عند إغلاق الشمعة", "انتظار ارتداد — أدق سعراً"], group=grpSig)
 maxCndAtr = input.float(1.8, "أقصى حجم لشمعة الإشارة (ATR)", minval=1.0, maxval=3.0, step=0.1, group=grpSig)
 waitBars  = input.int(5, "شموع انتظار الارتداد", minval=2, maxval=15, group=grpSig)
+trailAtr  = input.float(2.5, "مسافة الوقف المتحرك (ATR)", minval=1.5, maxval=4.0, step=0.1, group=grpSig)
 retraceMode = entryModeS != "فوري عند إغلاق الشمعة"
 
 grpDisp = "العرض"
@@ -67,6 +68,20 @@ deltaShare = deltaEmaP > 0 ? 100 * deltaEmaS / deltaEmaP : 0.0
 emaF = ta.ema(close, 9)
 emaS = ta.ema(close, 21)
 
+// قيعان/قمم متأرجحة مؤكدة — للوقف البنيوي
+pivL = ta.pivotlow(low, 2, 2)
+pivH = ta.pivothigh(high, 2, 2)
+var float lastPivL = na
+var float lastPivH = na
+var int   lastPivLBar = 0
+var int   lastPivHBar = 0
+if not na(pivL)
+    lastPivL := pivL
+    lastPivLBar := bar_index - 2
+if not na(pivH)
+    lastPivH := pivH
+    lastPivHBar := bar_index - 2
+
 // نص جهة الصفقة
 f_side(d) => d > 0 ? "كول" : "بوت"
 
@@ -98,6 +113,8 @@ if newDay
 else
     dayHi := math.max(nz(dayHi, high), high)
     dayLo := math.min(nz(dayLo, low), low)
+var int barsToday = 0
+barsToday := newDay ? 0 : barsToday + 1
 
 // نوع اليوم — موقع السعر مقابل افتتاح اليوم
 dayMovePct = dOpen > 0 ? 100 * (close - dOpen) / dOpen : 0.0
@@ -111,14 +128,21 @@ midRange = posInDay > 0.40 and posInDay < 0.60
 // ------------------------------------------------------------- صائد المصائد
 // ذيل يكسر أرضية الأمس/الأسبوع ويغلق فوقها + حجم مضاعف + دلتا شرائية
 tol = 0.05 * atr
-bullTrap = ((low < pdL - tol and close > pdL) or (low < pwL - tol and close > pwL)) and relVol > trapVolX and deltaEst > 0
-bearTrap = ((high > pdH + tol and close < pdH) or (high > pwH + tol and close < pwH)) and relVol > trapVolX and deltaEst < 0
+sessSwpL = barsToday > 6 and low < dayLo[1] - tol and close > dayLo[1]
+sessSwpH = barsToday > 6 and high > dayHi[1] + tol and close < dayHi[1]
+bullTrap = ((low < pdL - tol and close > pdL) or (low < pwL - tol and close > pwL) or sessSwpL) and relVol > trapVolX and deltaEst > 0
+bearTrap = ((high > pdH + tol and close < pdH) or (high > pwH + tol and close < pwH) or sessSwpH) and relVol > trapVolX and deltaEst < 0
 trapRecUp = nz(ta.barssince(bullTrap), 99999) <= 6
 trapRecDn = nz(ta.barssince(bearTrap), 99999) <= 6
 
 // -------------------------------------------------------------- قوة الاتجاه
 nearFloor = (close - math.max(pdL, pwL)) >= 0 and (close - math.max(pdL, pwL)) < 1.2 * atr
 nearCeil  = (math.min(pdH, pwH) - close) >= 0 and (math.min(pdH, pwH) - close) < 1.2 * atr
+
+// ارتداد مؤكد من الأرضية / رفض مؤكد من السقف — دخول من القاع نفسه بشمعة حاسمة
+bodyRatio  = math.abs(close - open) / rngHL
+bullBounce = nearFloor and close > open and bodyRatio > 0.55 and deltaEst > 0 and relVol > 1.2
+bearBounce = nearCeil  and close < open and bodyRatio > 0.55 and deltaEst < 0 and relVol > 1.2
 
 f_score(algn, dSideOk, nearMy, trapMy) =>
     sA = algn * 10
@@ -149,6 +173,7 @@ var bool  t1Hit    = false
 var bool  t2Hit    = false
 var bool  t3Hit    = false
 var int   lastExit = -99999
+var int   entryBar = 0
 var int    pendDir   = 0
 var float  pendLvl   = na
 var float  pendStp   = na
@@ -197,15 +222,19 @@ canEnter = barstate.isconfirmed and not inTrade and pendDir == 0 and (bar_index 
 
 longTrap  = canEnter and bullTrap and callScore >= minScore and alignCall >= needAlign
 shortTrap = canEnter and bearTrap and putScore >= minScore and alignPut >= needAlign
-brkUp = canEnter and not longTrap and (ta.crossover(close, pdH) or ta.crossover(close, pwH)) and
+longBnc  = canEnter and not longTrap and bullBounce and callScore >= minScore and alignCall >= needAlign
+shortBnc = canEnter and not shortTrap and bearBounce and putScore >= minScore and alignPut >= needAlign
+brkUp = canEnter and not longTrap and not longBnc and (ta.crossover(close, pdH) or ta.crossover(close, pwH)) and
      relVol > 1.3 and deltaEst > 0 and callScore >= minScore and alignCall >= needAlign and not midRange
-brkDn = canEnter and not shortTrap and (ta.crossunder(close, pdL) or ta.crossunder(close, pwL)) and
+brkDn = canEnter and not shortTrap and not shortBnc and (ta.crossunder(close, pdL) or ta.crossunder(close, pwL)) and
      relVol > 1.3 and deltaEst < 0 and putScore >= minScore and alignPut >= needAlign and not midRange
 
-sigDir  = longTrap ? 1 : shortTrap ? -1 : brkUp ? 1 : brkDn ? -1 : 0
+sigDir  = longTrap ? 1 : shortTrap ? -1 : longBnc ? 1 : shortBnc ? -1 : brkUp ? 1 : brkDn ? -1 : 0
 sigWhy  = longTrap ? "انعكاس مصيدة على الأرضية" : shortTrap ? "انعكاس مصيدة على السقف" :
+     longBnc ? "ارتداد مؤكد من الأرضية" : shortBnc ? "رفض مؤكد من السقف" :
      brkUp ? "اختراق حافة بحجم" : brkDn ? "كسر حافة بحجم" : ""
 sigStop = longTrap ? low - 0.25 * atr : shortTrap ? high + 0.25 * atr :
+     longBnc ? math.min(low, low[1]) - 0.25 * atr : shortBnc ? math.max(high, high[1]) + 0.25 * atr :
      brkUp ? math.min(low, low[1]) - 0.25 * atr : brkDn ? math.max(high, high[1]) + 0.25 * atr : na
 
 openDir  = 0
@@ -252,6 +281,7 @@ if pendDir != 0 and barstate.isconfirmed and not inTrade and bar_index > pendSin
 
 if openDir != 0
     inTrade := true
+    entryBar := bar_index
     tDir    := openDir
     entryP  := openEntry
     stopP   := openStop
@@ -301,8 +331,12 @@ if inTrade and barstate.isconfirmed and openDir == 0
         label.set_text(lbT3, "هدف 3 ✓ ممتد · " + str.tostring(t3P, format.mintick))
         alert("🔺 الهدف الممتد تحقق | " + syminfo.ticker, alert.freq_once_per_bar)
     if t1Hit
-        trail = tDir > 0 ? close - 2.0 * atr : close + 2.0 * atr
-        stopP := tDir > 0 ? math.max(stopP, trail) : math.min(stopP, trail)
+        chandS  = tDir > 0 ? close - trailAtr * atr : close + trailAtr * atr
+        okPivL  = not na(lastPivL) and lastPivLBar > entryBar
+        okPivH  = not na(lastPivH) and lastPivHBar > entryBar
+        structS = tDir > 0 ? (okPivL ? lastPivL - 0.25 * atr : chandS) : (okPivH ? lastPivH + 0.25 * atr : chandS)
+        trail   = tDir > 0 ? math.max(chandS, structS) : math.min(chandS, structS)
+        stopP  := tDir > 0 ? math.max(stopP, trail) : math.min(stopP, trail)
     line.set_y1(lnStop, stopP)
     line.set_y2(lnStop, stopP)
     label.set_y(lbStop, stopP)
