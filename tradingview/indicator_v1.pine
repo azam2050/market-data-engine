@@ -15,7 +15,7 @@
 //  ⏳ استعداد · 🪤 مصيدة · 🎯 دخول · 🔺 هدف · 🔴/✅ خروج
 // ============================================================================
 indicator("المؤشر V1 — تجريبي", shorttitle="المؤشر V1", overlay=true,
-     max_lines_count=500, max_labels_count=500, max_boxes_count=100)
+     max_lines_count=100, max_labels_count=150, max_boxes_count=50)
 
 // ---------------------------------------------------------------- المدخلات
 grpTF = "فريمات العميل (٣ يختارها)"
@@ -496,16 +496,19 @@ if showDash and barstate.islast
     table.cell(dash, 2, 11, inTrade ? "✓" + str.tostring(hitsN) + " من 3" : "", text_color=cUp, text_size=size.small)
 
 // ------------------------------------------------------------- لوحة المراقبة
+// استدعاء واحد لكل سهم (بدل اثنين) — نسبة اليوم تُحسب من افتتاح اليوم داخل نفس الاستدعاء
 f_wlDir() =>
     eF = ta.ema(close, 9)
     eS = ta.ema(close, 21)
     dd = eF > eS and close > eS ? 1 : eF < eS and close < eS ? -1 : 0
-    [close, dd]
+    var float dOp = na
+    if ta.change(time("D")) != 0
+        dOp := open
+    wy = not na(dOp) and dOp > 0 ? 100 * (close - dOp) / dOp : 0.0
+    [close, dd, wy]
 
 f_wlFetch(sym) =>
-    [wc, wd] = request.security(sym, timeframe.period, f_wlDir(), lookahead=barmerge.lookahead_off)
-    wday = request.security(sym, "D", open > 0 ? 100 * (close - open) / open : 0.0, lookahead=barmerge.lookahead_off)
-    [wc, wd, wday]
+    request.security(sym, timeframe.period, f_wlDir(), lookahead=barmerge.lookahead_off)
 
 [w1c, w1d, w1y] = f_wlFetch(wl1)
 [w2c, w2d, w2y] = f_wlFetch(wl2)
