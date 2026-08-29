@@ -1,6 +1,6 @@
 //@version=5
 // ============================================================================
-//  المؤشر — النسخة التجريبية 1.6  (الاسم مؤقت — يتغيّر عند النشر)
+//  المؤشر — النسخة التجريبية 1.7  (الاسم مؤقت — يتغيّر عند النشر)
 // ----------------------------------------------------------------------------
 //  الفلسفة: شارت نظيف. على الشارت فقط: خط الدخول، الوقف المتحرك، الأهداف
 //  (تضيء عند التحقق وتختفي بانتهاء الصفقة)، وعلامات المصيدة/الاستعداد.
@@ -72,7 +72,9 @@ szSig  = sigSizeS == "كبير" ? size.large  : sigSizeS == "صغير" ? size.sm
 
 grpEnd = "نهاية الجلسة (حماية عقود اليوم)"
 endGuard = input.bool(true, "تفعيل حارس نهاية الجلسة", group=grpEnd)
-hardMin  = input.int(30,  "منع إشارات جديدة آخر (دقيقة)", minval=5,  maxval=120, group=grpEnd)
+hardMin  = input.int(30,  "نافذة آخر الجلسة (دقيقة)", minval=5,  maxval=120, group=grpEnd)
+endModeS = input.string("إشارات لعقد الغد 🌙", "وضع آخر الجلسة",
+     options=["إشارات لعقد الغد 🌙", "منع الإشارات تماماً"], group=grpEnd)
 warnMin  = input.int(120, "وسم ⚡ سكالب سريع آخر (دقيقة)", minval=30, maxval=240, group=grpEnd)
 grpWL = "لوحة المراقبة (أسهم يختارها العميل)"
 showWatch = input.bool(true, "إظهار لوحة المراقبة", group=grpWL)
@@ -255,11 +257,16 @@ var float sumR    = 0.0
 // ------------------------------------------------------ علامات استعداد ومصيدة
 prepZoneL = nearFloor and verdict != "بوت"
 prepZoneS = nearCeil and verdict != "كول"
+// تهدئة: علامة ⏳ لا تتكرر لنفس الجهة إلا بعد ٨ شموع — منعاً للتكدس في التذبذب
+var int lastPrepLBar = -999
+var int lastPrepHBar = -999
 if showPrep and barstate.isconfirmed and not inTrade
-    if prepZoneL and not prepZoneL[1]
+    if prepZoneL and not prepZoneL[1] and bar_index - lastPrepLBar > 8
+        lastPrepLBar := bar_index
         label.new(bar_index, low, "⏳", style=label.style_label_up, color=color.new(cCyan, 20), textcolor=#04222B, size=szMark)
         alert("⏳ استعداد | " + syminfo.ticker + " يقترب من أرضية قرار عند " + str.tostring(close, format.mintick), alert.freq_once_per_bar)
-    if prepZoneS and not prepZoneS[1]
+    if prepZoneS and not prepZoneS[1] and bar_index - lastPrepHBar > 8
+        lastPrepHBar := bar_index
         label.new(bar_index, high, "⏳", style=label.style_label_down, color=color.new(cCyan, 20), textcolor=#04222B, size=szMark)
         alert("⏳ استعداد | " + syminfo.ticker + " يقترب من سقف قرار عند " + str.tostring(close, format.mintick), alert.freq_once_per_bar)
 
@@ -271,10 +278,13 @@ if barstate.isconfirmed and bearTrap
     alert("🪤 مصيدة سيولة فوق السقف | " + syminfo.ticker + " — اختراق كاذب وإغلاق تحت المستوى", alert.freq_once_per_bar)
 
 // ------------------------------------------------------------------- الدخول
-// حارس نهاية الجلسة: آخر hardMin دقيقة لا إشارات جديدة، وما قبلها بوسم ⚡ سكالب سريع
+// حارس نهاية الجلسة: آخر hardMin دقيقة إما منع تام أو إشارات موسومة 🌙 لعقد الغد،
+// وما قبلها (حتى warnMin) بوسم ⚡ سكالب سريع
 minsLeft  = timeframe.isintraday ? math.max(0.0, (time_close("D") - time_close) / 60000.0) : na
-lateBlock = endGuard and timeframe.isintraday and not na(minsLeft) and minsLeft <= hardMin
-lateWarn  = endGuard and timeframe.isintraday and not na(minsLeft) and minsLeft <= warnMin and not lateBlock
+lastWin   = endGuard and timeframe.isintraday and not na(minsLeft) and minsLeft <= hardMin
+lateBlock = lastWin and endModeS == "منع الإشارات تماماً"
+lateNext  = lastWin and not lateBlock
+lateWarn  = endGuard and timeframe.isintraday and not na(minsLeft) and minsLeft <= warnMin and not lastWin
 
 canEnter = barstate.isconfirmed and not inTrade and pendDir == 0 and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr and not lateBlock
 
@@ -294,7 +304,7 @@ sigWhy  = longTrap ? "انعكاس مصيدة على الأرضية" : shortTrap
 sigStop = longTrap ? low - 0.25 * atr : shortTrap ? high + 0.25 * atr :
      longBnc ? math.min(low, low[1]) - 0.25 * atr : shortBnc ? math.max(high, high[1]) + 0.25 * atr :
      brkUp ? math.min(low, low[1]) - 0.25 * atr : brkDn ? math.max(high, high[1]) + 0.25 * atr : na
-lateTag = lateWarn ? " · ⚡ سكالب سريع (قرب الإغلاق)" : ""
+lateTag = lateNext ? " · 🌙 لعقد الغد — سترايك قريب بنفس الاتجاه" : lateWarn ? " · ⚡ سكالب سريع (قرب الإغلاق)" : ""
 
 openDir  = 0
 openEntry = float(na)
@@ -315,7 +325,7 @@ if sigDir != 0
         pendUntil := bar_index + waitBars
         pendSince := bar_index
         lnPend := line.new(bar_index, pendLvl, bar_index + 1, pendLvl, extend=extend.right, color=color.new(cCyan, 30), style=line.style_dashed, width=1)
-        lbPend := label.new(bar_index + 3, pendLvl, (lateWarn ? "⚡ " : "") + "منطقة دخول " + f_side(sigDir) + " · " + str.tostring(pendLvl, format.mintick), style=label.style_label_left, textcolor=#04222B, color=color.new(cCyan, 15), size=szSig)
+        lbPend := label.new(bar_index + 3, pendLvl, (lateNext ? "🌙 " : lateWarn ? "⚡ " : "") + "منطقة دخول " + f_side(sigDir) + " · " + str.tostring(pendLvl, format.mintick), style=label.style_label_left, textcolor=#04222B, color=color.new(cCyan, 15), size=szSig)
         alert("🎯 إشارة " + f_side(sigDir) + " | " + syminfo.ticker + " — انتظر الارتداد لمنطقة الدخول " + str.tostring(pendLvl, format.mintick) + " | وقف " + str.tostring(sigStop, format.mintick) + lateTag, alert.freq_once_per_bar)
 
 // معالجة إشارة الانتظار: دخول على الارتداد أو إلغاء
@@ -360,7 +370,7 @@ if openDir != 0
     lbT2    := label.new(bar_index + 3, t2P, "هدف 2 · " + str.tostring(t2P, format.mintick), style=label.style_label_left, textcolor=cTxt, color=color.new(#2A3245, 20), size=szMark)
     lbT3    := label.new(bar_index + 3, t3P, "هدف 3 ↗ · " + str.tostring(t3P, format.mintick), style=label.style_label_left, textcolor=cGold, color=color.new(#2A3245, 20), size=szMark)
     lbStop  := label.new(bar_index + 3, stopP, "الوقف · " + str.tostring(stopP, format.mintick), style=label.style_label_left, textcolor=#1A0E02, color=cOrng, size=szMark)
-    label.new(bar_index, openDir > 0 ? low : high, (str.contains(openWhy, "⚡") ? "⚡ " : "") + "🎯 دخول " + f_side(openDir) + " " + str.tostring(entryP, format.mintick),
+    label.new(bar_index, openDir > 0 ? low : high, (str.contains(openWhy, "🌙") ? "🌙 " : str.contains(openWhy, "⚡") ? "⚡ " : "") + "🎯 دخول " + f_side(openDir) + " " + str.tostring(entryP, format.mintick),
          style=openDir > 0 ? label.style_label_up : label.style_label_down,
          color=openDir > 0 ? cUp : cDn, textcolor=openDir > 0 ? #04211D : #2B0606, size=szSig)
     alert("🎯 دخول " + f_side(openDir) + " | " + syminfo.ticker + " فريم " + timeframe.period +
@@ -493,7 +503,7 @@ if showDash and barstate.islast
     table.cell(dash, 1, 7, (deltaShare >= 0 ? "شراء " : "بيع ") + str.tostring(math.abs(math.round(deltaShare))) + "%", text_color=deltaShare >= 0 ? cUp : cDn, text_size=size.small)
     table.cell(dash, 2, 7, "حجم ×" + str.tostring(relVol, "#.#"), text_color=cMut, text_size=size.small)
     vCol  = verdict == "كول" ? cUp : verdict == "بوت" ? cDn : cMut
-    stTxt = inTrade ? "صفقة نشطة 🎯 " + f_side(tDir) : lateBlock ? "⏸ قرب الإغلاق — لا إشارات جديدة" : "الحكم: " + verdict + " · الثقة " + confTxt + (lateWarn ? " · ⚡" : "")
+    stTxt = inTrade ? "صفقة نشطة 🎯 " + f_side(tDir) : lateBlock ? "⏸ قرب الإغلاق — لا إشارات جديدة" : lateNext ? "🌙 آخر الجلسة — الإشارات لعقد الغد" : "الحكم: " + verdict + " · الثقة " + confTxt + (lateWarn ? " · ⚡" : "")
     hitsN = (t1Hit ? 1 : 0) + (t2Hit ? 1 : 0) + (t3Hit ? 1 : 0)
     table.cell(dash, 0, 8, stTxt, text_color=vCol, bgcolor=color.new(vCol, 85), text_size=size.small)
     table.cell(dash, 1, 8, "", bgcolor=color.new(vCol, 85))
@@ -533,8 +543,12 @@ f_wlShort(sym) =>
     parts = str.split(sym, ":")
     array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : sym
 
+// في وضع إعادة التشغيل لا تتوفر بيانات بقية الأسهم — نعرض "—" بدل NaN
+f_wlPx(c)  => na(c) ? "—" : str.tostring(c, format.mintick)
+f_wlPct(y) => na(y) ? "—" : (y >= 0 ? "+" : "−") + str.tostring(math.abs(y), "#.#") + "%"
+
 f_wlTrend(wd, wy) =>
-    wy > 0.6 and wd > 0 ? "صعود قوي" : wy > 0.15 ? "صعود" : wy < -0.6 and wd < 0 ? "هبوط قوي" : wy < -0.15 ? "هبوط" : "محايد"
+    na(wy) ? "—" : wy > 0.6 and wd > 0 ? "صعود قوي" : wy > 0.15 ? "صعود" : wy < -0.6 and wd < 0 ? "هبوط قوي" : wy < -0.15 ? "هبوط" : "محايد"
 
 f_wlCol(wy) => wy > 0.15 ? cUp : wy < -0.15 ? cDn : cMut
 
@@ -545,20 +559,20 @@ if showWatch and barstate.islast
     table.cell(wtab, 2, 0, "اليوم", text_color=cMut, bgcolor=cHead, text_size=size.tiny)
     table.cell(wtab, 3, 0, "الاتجاه", text_color=cMut, bgcolor=cHead, text_size=size.tiny)
     table.cell(wtab, 0, 1, f_wlShort(wl1), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 1, 1, str.tostring(w1c, format.mintick), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 2, 1, (w1y >= 0 ? "+" : "−") + str.tostring(math.abs(w1y), "#.#") + "%", text_color=f_wlCol(w1y), text_size=size.small)
+    table.cell(wtab, 1, 1, f_wlPx(w1c), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 2, 1, f_wlPct(w1y), text_color=f_wlCol(w1y), text_size=size.small)
     table.cell(wtab, 3, 1, f_wlTrend(w1d, w1y), text_color=f_wlCol(w1y), text_size=size.small)
     table.cell(wtab, 0, 2, f_wlShort(wl2), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 1, 2, str.tostring(w2c, format.mintick), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 2, 2, (w2y >= 0 ? "+" : "−") + str.tostring(math.abs(w2y), "#.#") + "%", text_color=f_wlCol(w2y), text_size=size.small)
+    table.cell(wtab, 1, 2, f_wlPx(w2c), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 2, 2, f_wlPct(w2y), text_color=f_wlCol(w2y), text_size=size.small)
     table.cell(wtab, 3, 2, f_wlTrend(w2d, w2y), text_color=f_wlCol(w2y), text_size=size.small)
     table.cell(wtab, 0, 3, f_wlShort(wl3), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 1, 3, str.tostring(w3c, format.mintick), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 2, 3, (w3y >= 0 ? "+" : "−") + str.tostring(math.abs(w3y), "#.#") + "%", text_color=f_wlCol(w3y), text_size=size.small)
+    table.cell(wtab, 1, 3, f_wlPx(w3c), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 2, 3, f_wlPct(w3y), text_color=f_wlCol(w3y), text_size=size.small)
     table.cell(wtab, 3, 3, f_wlTrend(w3d, w3y), text_color=f_wlCol(w3y), text_size=size.small)
     table.cell(wtab, 0, 4, f_wlShort(wl4), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 1, 4, str.tostring(w4c, format.mintick), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 2, 4, (w4y >= 0 ? "+" : "−") + str.tostring(math.abs(w4y), "#.#") + "%", text_color=f_wlCol(w4y), text_size=size.small)
+    table.cell(wtab, 1, 4, f_wlPx(w4c), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 2, 4, f_wlPct(w4y), text_color=f_wlCol(w4y), text_size=size.small)
     table.cell(wtab, 3, 4, f_wlTrend(w4d, w4y), text_color=f_wlCol(w4y), text_size=size.small)
 
 // --------------------------------------------------------------- لوحة الصدق

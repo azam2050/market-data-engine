@@ -59,7 +59,9 @@ retraceMode = entryModeS != "فوري عند إغلاق الشمعة"
 
 grpEnd = "نهاية الجلسة (حماية عقود اليوم)"
 endGuard = input.bool(true, "تفعيل حارس نهاية الجلسة", group=grpEnd)
-hardMin  = input.int(30, "منع إشارات جديدة آخر (دقيقة)", minval=5, maxval=120, group=grpEnd)
+hardMin  = input.int(30, "نافذة آخر الجلسة (دقيقة)", minval=5, maxval=120, group=grpEnd)
+endModeS = input.string("إشارات لعقد الغد 🌙", "وضع آخر الجلسة",
+     options=["إشارات لعقد الغد 🌙", "منع الإشارات تماماً"], group=grpEnd)
 
 // ----------------------------------------------------------- حسابات أساسية
 atr    = ta.atr(14)
@@ -167,7 +169,7 @@ posDir  = strategy.position_size > 0 ? 1 : strategy.position_size < 0 ? -1 : 0
 
 // ------------------------------------------------------------------- الدخول
 minsLeft  = timeframe.isintraday ? math.max(0.0, (time_close("D") - time_close) / 60000.0) : na
-lateBlock = endGuard and timeframe.isintraday and not na(minsLeft) and minsLeft <= hardMin
+lateBlock = endGuard and timeframe.isintraday and not na(minsLeft) and minsLeft <= hardMin and endModeS == "منع الإشارات تماماً"
 
 canEnter = not posNow and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr and not lateBlock
 
