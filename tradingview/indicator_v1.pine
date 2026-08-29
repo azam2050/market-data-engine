@@ -83,6 +83,9 @@ wl1 = input.symbol("NASDAQ:QQQ",  "السهم ١", group=grpWL)
 wl2 = input.symbol("NASDAQ:TSLA", "السهم ٢", group=grpWL)
 wl3 = input.symbol("NASDAQ:NVDA", "السهم ٣", group=grpWL)
 wl4 = input.symbol("NASDAQ:AAPL", "السهم ٤", group=grpWL)
+wl5 = input.symbol("NASDAQ:MSFT", "السهم ٥", group=grpWL)
+wl6 = input.symbol("NASDAQ:MU",   "السهم ٦", group=grpWL)
+wlN = input.int(4, "عدد الأسهم المعروضة", minval=1, maxval=6, group=grpWL)
 
 // ------------------------------------------------------------------ الألوان
 cUp   = #26A69A
@@ -538,6 +541,8 @@ f_wlFetch(sym) =>
 [w2c, w2d, w2y] = f_wlFetch(wl2)
 [w3c, w3d, w3y] = f_wlFetch(wl3)
 [w4c, w4d, w4y] = f_wlFetch(wl4)
+[w5c, w5d, w5y] = f_wlFetch(wl5)
+[w6c, w6d, w6y] = f_wlFetch(wl6)
 
 f_wlShort(sym) =>
     parts = str.split(sym, ":")
@@ -552,28 +557,32 @@ f_wlTrend(wd, wy) =>
 
 f_wlCol(wy) => wy > 0.15 ? cUp : wy < -0.15 ? cDn : cMut
 
-var table wtab = table.new(f_pos(watchPosS), 4, 5, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+f_wlRow(t, r, sym, wc, wd, wy) =>
+    table.cell(t, 0, r, f_wlShort(sym), text_color=cTxt, text_size=size.small)
+    table.cell(t, 1, r, f_wlPx(wc), text_color=cTxt, text_size=size.small)
+    table.cell(t, 2, r, f_wlPct(wy), text_color=f_wlCol(wy), text_size=size.small)
+    table.cell(t, 3, r, f_wlTrend(wd, wy), text_color=f_wlCol(wy), text_size=size.small)
+
+var table wtab = na
 if showWatch and barstate.islast
+    if not na(wtab)
+        table.delete(wtab)
+    wtab := table.new(f_pos(watchPosS), 4, wlN + 1, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
     table.cell(wtab, 0, 0, "لوحة المراقبة", text_color=cTxt, bgcolor=cHead, text_size=size.small)
     table.cell(wtab, 1, 0, "السعر", text_color=cMut, bgcolor=cHead, text_size=size.tiny)
     table.cell(wtab, 2, 0, "اليوم", text_color=cMut, bgcolor=cHead, text_size=size.tiny)
     table.cell(wtab, 3, 0, "الاتجاه", text_color=cMut, bgcolor=cHead, text_size=size.tiny)
-    table.cell(wtab, 0, 1, f_wlShort(wl1), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 1, 1, f_wlPx(w1c), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 2, 1, f_wlPct(w1y), text_color=f_wlCol(w1y), text_size=size.small)
-    table.cell(wtab, 3, 1, f_wlTrend(w1d, w1y), text_color=f_wlCol(w1y), text_size=size.small)
-    table.cell(wtab, 0, 2, f_wlShort(wl2), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 1, 2, f_wlPx(w2c), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 2, 2, f_wlPct(w2y), text_color=f_wlCol(w2y), text_size=size.small)
-    table.cell(wtab, 3, 2, f_wlTrend(w2d, w2y), text_color=f_wlCol(w2y), text_size=size.small)
-    table.cell(wtab, 0, 3, f_wlShort(wl3), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 1, 3, f_wlPx(w3c), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 2, 3, f_wlPct(w3y), text_color=f_wlCol(w3y), text_size=size.small)
-    table.cell(wtab, 3, 3, f_wlTrend(w3d, w3y), text_color=f_wlCol(w3y), text_size=size.small)
-    table.cell(wtab, 0, 4, f_wlShort(wl4), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 1, 4, f_wlPx(w4c), text_color=cTxt, text_size=size.small)
-    table.cell(wtab, 2, 4, f_wlPct(w4y), text_color=f_wlCol(w4y), text_size=size.small)
-    table.cell(wtab, 3, 4, f_wlTrend(w4d, w4y), text_color=f_wlCol(w4y), text_size=size.small)
+    f_wlRow(wtab, 1, wl1, w1c, w1d, w1y)
+    if wlN >= 2
+        f_wlRow(wtab, 2, wl2, w2c, w2d, w2y)
+    if wlN >= 3
+        f_wlRow(wtab, 3, wl3, w3c, w3d, w3y)
+    if wlN >= 4
+        f_wlRow(wtab, 4, wl4, w4c, w4d, w4y)
+    if wlN >= 5
+        f_wlRow(wtab, 5, wl5, w5c, w5d, w5y)
+    if wlN >= 6
+        f_wlRow(wtab, 6, wl6, w6c, w6d, w6y)
 
 // --------------------------------------------------------------- لوحة الصدق
 var table hon = table.new(dashPosS == "أسفل يمين" ? position.bottom_left : position.bottom_right, 1, 2, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
