@@ -57,6 +57,10 @@ waitBars  = input.int(5, "شموع انتظار الارتداد", minval=2, max
 trailAtr  = input.float(2.5, "مسافة الوقف المتحرك (ATR)", minval=1.5, maxval=4.0, step=0.1, group=grpSig)
 retraceMode = entryModeS != "فوري عند إغلاق الشمعة"
 
+grpEnd = "نهاية الجلسة (حماية عقود اليوم)"
+endGuard = input.bool(true, "تفعيل حارس نهاية الجلسة", group=grpEnd)
+hardMin  = input.int(30, "منع إشارات جديدة آخر (دقيقة)", minval=5, maxval=120, group=grpEnd)
+
 // ----------------------------------------------------------- حسابات أساسية
 atr    = ta.atr(14)
 volSma = ta.sma(volume, 20)
@@ -162,7 +166,10 @@ posNow  = strategy.position_size != 0
 posDir  = strategy.position_size > 0 ? 1 : strategy.position_size < 0 ? -1 : 0
 
 // ------------------------------------------------------------------- الدخول
-canEnter = not posNow and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr
+minsLeft  = timeframe.isintraday ? math.max(0.0, (time_close("D") - time_close) / 60000.0) : na
+lateBlock = endGuard and timeframe.isintraday and not na(minsLeft) and minsLeft <= hardMin
+
+canEnter = not posNow and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr and not lateBlock
 
 longTrap  = canEnter and bullTrap and callScore >= minScore and alignCall >= needAlign
 shortTrap = canEnter and bearTrap and putScore >= minScore and alignPut >= needAlign

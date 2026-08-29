@@ -1,6 +1,6 @@
 //@version=5
 // ============================================================================
-//  المؤشر — النسخة التجريبية 1.5  (الاسم مؤقت — يتغيّر عند النشر)
+//  المؤشر — النسخة التجريبية 1.6  (الاسم مؤقت — يتغيّر عند النشر)
 // ----------------------------------------------------------------------------
 //  الفلسفة: شارت نظيف. على الشارت فقط: خط الدخول، الوقف المتحرك، الأهداف
 //  (تضيء عند التحقق وتختفي بانتهاء الصفقة)، وعلامات المصيدة/الاستعداد.
@@ -66,6 +66,14 @@ showDash = input.bool(true, "لوحة القيادة",              group=grpDis
 showHon  = input.bool(true, "لوحة الصدق (آخر الإشارات)",  group=grpDisp)
 showPrep = input.bool(true, "علامة الاستعداد ⏳",         group=grpDisp)
 showLvls = input.bool(true, "خطوط الحواف (خفيفة)", group=grpDisp)
+sigSizeS = input.string("عادي", "حجم علامات الإشارة", options=["صغير", "عادي", "كبير"], group=grpDisp)
+szMark = sigSizeS == "كبير" ? size.normal : sigSizeS == "صغير" ? size.tiny : size.small
+szSig  = sigSizeS == "كبير" ? size.large  : sigSizeS == "صغير" ? size.small : size.normal
+
+grpEnd = "نهاية الجلسة (حماية عقود اليوم)"
+endGuard = input.bool(true, "تفعيل حارس نهاية الجلسة", group=grpEnd)
+hardMin  = input.int(30,  "منع إشارات جديدة آخر (دقيقة)", minval=5,  maxval=120, group=grpEnd)
+warnMin  = input.int(120, "وسم ⚡ سكالب سريع آخر (دقيقة)", minval=30, maxval=240, group=grpEnd)
 grpWL = "لوحة المراقبة (أسهم يختارها العميل)"
 showWatch = input.bool(true, "إظهار لوحة المراقبة", group=grpWL)
 watchPosS = input.string("أعلى يسار", "مكانها", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpWL)
@@ -249,21 +257,26 @@ prepZoneL = nearFloor and verdict != "بوت"
 prepZoneS = nearCeil and verdict != "كول"
 if showPrep and barstate.isconfirmed and not inTrade
     if prepZoneL and not prepZoneL[1]
-        label.new(bar_index, low, "⏳", style=label.style_label_up, color=color.new(cCyan, 20), textcolor=#04222B, size=size.tiny)
+        label.new(bar_index, low, "⏳", style=label.style_label_up, color=color.new(cCyan, 20), textcolor=#04222B, size=szMark)
         alert("⏳ استعداد | " + syminfo.ticker + " يقترب من أرضية قرار عند " + str.tostring(close, format.mintick), alert.freq_once_per_bar)
     if prepZoneS and not prepZoneS[1]
-        label.new(bar_index, high, "⏳", style=label.style_label_down, color=color.new(cCyan, 20), textcolor=#04222B, size=size.tiny)
+        label.new(bar_index, high, "⏳", style=label.style_label_down, color=color.new(cCyan, 20), textcolor=#04222B, size=szMark)
         alert("⏳ استعداد | " + syminfo.ticker + " يقترب من سقف قرار عند " + str.tostring(close, format.mintick), alert.freq_once_per_bar)
 
 if barstate.isconfirmed and bullTrap
-    label.new(bar_index, low, "🪤", style=label.style_label_up, color=cGold, textcolor=#161309, size=size.small)
+    label.new(bar_index, low, "🪤", style=label.style_label_up, color=cGold, textcolor=#161309, size=szMark)
     alert("🪤 مصيدة سيولة تحت الأرضية | " + syminfo.ticker + " — كسر كاذب وإغلاق فوق المستوى", alert.freq_once_per_bar)
 if barstate.isconfirmed and bearTrap
-    label.new(bar_index, high, "🪤", style=label.style_label_down, color=cGold, textcolor=#161309, size=size.small)
+    label.new(bar_index, high, "🪤", style=label.style_label_down, color=cGold, textcolor=#161309, size=szMark)
     alert("🪤 مصيدة سيولة فوق السقف | " + syminfo.ticker + " — اختراق كاذب وإغلاق تحت المستوى", alert.freq_once_per_bar)
 
 // ------------------------------------------------------------------- الدخول
-canEnter = barstate.isconfirmed and not inTrade and pendDir == 0 and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr
+// حارس نهاية الجلسة: آخر hardMin دقيقة لا إشارات جديدة، وما قبلها بوسم ⚡ سكالب سريع
+minsLeft  = timeframe.isintraday ? math.max(0.0, (time_close("D") - time_close) / 60000.0) : na
+lateBlock = endGuard and timeframe.isintraday and not na(minsLeft) and minsLeft <= hardMin
+lateWarn  = endGuard and timeframe.isintraday and not na(minsLeft) and minsLeft <= warnMin and not lateBlock
+
+canEnter = barstate.isconfirmed and not inTrade and pendDir == 0 and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr and not lateBlock
 
 longTrap  = canEnter and bullTrap and callScore >= minScore and alignCall >= needAlign
 shortTrap = canEnter and bearTrap and putScore >= minScore and alignPut >= needAlign
@@ -281,6 +294,7 @@ sigWhy  = longTrap ? "انعكاس مصيدة على الأرضية" : shortTrap
 sigStop = longTrap ? low - 0.25 * atr : shortTrap ? high + 0.25 * atr :
      longBnc ? math.min(low, low[1]) - 0.25 * atr : shortBnc ? math.max(high, high[1]) + 0.25 * atr :
      brkUp ? math.min(low, low[1]) - 0.25 * atr : brkDn ? math.max(high, high[1]) + 0.25 * atr : na
+lateTag = lateWarn ? " · ⚡ سكالب سريع (قرب الإغلاق)" : ""
 
 openDir  = 0
 openEntry = float(na)
@@ -292,17 +306,17 @@ if sigDir != 0
         openDir  := sigDir
         openEntry := close
         openStop := sigStop
-        openWhy  := sigWhy
+        openWhy  := sigWhy + lateTag
     else
         pendDir   := sigDir
         pendLvl   := math.round_to_mintick((high + low) / 2)
         pendStp   := sigStop
-        pendWhy   := sigWhy
+        pendWhy   := sigWhy + lateTag
         pendUntil := bar_index + waitBars
         pendSince := bar_index
         lnPend := line.new(bar_index, pendLvl, bar_index + 1, pendLvl, extend=extend.right, color=color.new(cCyan, 30), style=line.style_dashed, width=1)
-        lbPend := label.new(bar_index + 3, pendLvl, "منطقة دخول " + f_side(sigDir) + " · " + str.tostring(pendLvl, format.mintick), style=label.style_label_left, textcolor=#04222B, color=color.new(cCyan, 15), size=size.small)
-        alert("🎯 إشارة " + f_side(sigDir) + " | " + syminfo.ticker + " — انتظر الارتداد لمنطقة الدخول " + str.tostring(pendLvl, format.mintick) + " | وقف " + str.tostring(sigStop, format.mintick), alert.freq_once_per_bar)
+        lbPend := label.new(bar_index + 3, pendLvl, (lateWarn ? "⚡ " : "") + "منطقة دخول " + f_side(sigDir) + " · " + str.tostring(pendLvl, format.mintick), style=label.style_label_left, textcolor=#04222B, color=color.new(cCyan, 15), size=szSig)
+        alert("🎯 إشارة " + f_side(sigDir) + " | " + syminfo.ticker + " — انتظر الارتداد لمنطقة الدخول " + str.tostring(pendLvl, format.mintick) + " | وقف " + str.tostring(sigStop, format.mintick) + lateTag, alert.freq_once_per_bar)
 
 // معالجة إشارة الانتظار: دخول على الارتداد أو إلغاء
 if pendDir != 0 and barstate.isconfirmed and not inTrade and bar_index > pendSince
@@ -320,7 +334,7 @@ if pendDir != 0 and barstate.isconfirmed and not inTrade and bar_index > pendSin
     else if broken or expired
         line.delete(lnPend)
         label.delete(lbPend)
-        label.new(bar_index, pendDir > 0 ? high : low, "⨯", style=pendDir > 0 ? label.style_label_down : label.style_label_up, color=color.new(cMut, 40), textcolor=cTxt, size=size.tiny)
+        label.new(bar_index, pendDir > 0 ? high : low, "⨯", style=pendDir > 0 ? label.style_label_down : label.style_label_up, color=color.new(cMut, 40), textcolor=cTxt, size=szMark)
         alert("⨯ أُلغيت إشارة " + f_side(pendDir) + " | " + syminfo.ticker + (expired ? " — لم يرتد للسعر خلال المهلة" : " — كُسر مستوى الإبطال قبل الدخول"), alert.freq_once_per_bar)
         pendDir := 0
 
@@ -342,13 +356,13 @@ if openDir != 0
     lnT1    := line.new(bar_index, t1P, bar_index + 1, t1P, extend=extend.right, color=color.new(cUp, 65), style=line.style_dotted, width=1)
     lnT2    := line.new(bar_index, t2P, bar_index + 1, t2P, extend=extend.right, color=color.new(cUp, 65), style=line.style_dotted, width=1)
     lnT3    := line.new(bar_index, t3P, bar_index + 1, t3P, extend=extend.right, color=color.new(cGold, 55), style=line.style_dotted, width=1)
-    lbT1    := label.new(bar_index + 3, t1P, "هدف 1 · " + str.tostring(t1P, format.mintick), style=label.style_label_left, textcolor=cTxt, color=color.new(#2A3245, 20), size=size.small)
-    lbT2    := label.new(bar_index + 3, t2P, "هدف 2 · " + str.tostring(t2P, format.mintick), style=label.style_label_left, textcolor=cTxt, color=color.new(#2A3245, 20), size=size.small)
-    lbT3    := label.new(bar_index + 3, t3P, "هدف 3 ↗ · " + str.tostring(t3P, format.mintick), style=label.style_label_left, textcolor=cGold, color=color.new(#2A3245, 20), size=size.small)
-    lbStop  := label.new(bar_index + 3, stopP, "الوقف · " + str.tostring(stopP, format.mintick), style=label.style_label_left, textcolor=#1A0E02, color=cOrng, size=size.small)
-    label.new(bar_index, openDir > 0 ? low : high, "🎯 دخول " + f_side(openDir) + " " + str.tostring(entryP, format.mintick),
+    lbT1    := label.new(bar_index + 3, t1P, "هدف 1 · " + str.tostring(t1P, format.mintick), style=label.style_label_left, textcolor=cTxt, color=color.new(#2A3245, 20), size=szMark)
+    lbT2    := label.new(bar_index + 3, t2P, "هدف 2 · " + str.tostring(t2P, format.mintick), style=label.style_label_left, textcolor=cTxt, color=color.new(#2A3245, 20), size=szMark)
+    lbT3    := label.new(bar_index + 3, t3P, "هدف 3 ↗ · " + str.tostring(t3P, format.mintick), style=label.style_label_left, textcolor=cGold, color=color.new(#2A3245, 20), size=szMark)
+    lbStop  := label.new(bar_index + 3, stopP, "الوقف · " + str.tostring(stopP, format.mintick), style=label.style_label_left, textcolor=#1A0E02, color=cOrng, size=szMark)
+    label.new(bar_index, openDir > 0 ? low : high, (str.contains(openWhy, "⚡") ? "⚡ " : "") + "🎯 دخول " + f_side(openDir) + " " + str.tostring(entryP, format.mintick),
          style=openDir > 0 ? label.style_label_up : label.style_label_down,
-         color=openDir > 0 ? cUp : cDn, textcolor=openDir > 0 ? #04211D : #2B0606, size=size.small)
+         color=openDir > 0 ? cUp : cDn, textcolor=openDir > 0 ? #04211D : #2B0606, size=szSig)
     alert("🎯 دخول " + f_side(openDir) + " | " + syminfo.ticker + " فريم " + timeframe.period +
          " | سعر " + str.tostring(entryP, format.mintick) + " | وقف " + str.tostring(stopP, format.mintick) +
          " | السبب: " + openWhy, alert.freq_once_per_bar)
@@ -414,7 +428,7 @@ if inTrade and barstate.isconfirmed and openDir == 0
              win ? "✅ خروج +" + str.tostring(rMult, "#.#") + "R" : "🔴 خروج على الوقف",
              style=tDir > 0 ? label.style_label_up : label.style_label_down,
              color=win ? color.new(cUp, 20) : color.new(cDn, 10),
-             textcolor=win ? #04211D : #2B0606, size=size.small)
+             textcolor=win ? #04211D : #2B0606, size=szSig)
         alert((win ? "✅" : "🔴") + " خروج — كسر الوقف المتحرك | " + syminfo.ticker +
              " | النتيجة " + (win ? "+" : "") + str.tostring(rMult, "#.#") + "R", alert.freq_once_per_bar)
         inTrade  := false
@@ -479,7 +493,7 @@ if showDash and barstate.islast
     table.cell(dash, 1, 7, (deltaShare >= 0 ? "شراء " : "بيع ") + str.tostring(math.abs(math.round(deltaShare))) + "%", text_color=deltaShare >= 0 ? cUp : cDn, text_size=size.small)
     table.cell(dash, 2, 7, "حجم ×" + str.tostring(relVol, "#.#"), text_color=cMut, text_size=size.small)
     vCol  = verdict == "كول" ? cUp : verdict == "بوت" ? cDn : cMut
-    stTxt = inTrade ? "صفقة نشطة 🎯 " + f_side(tDir) : "الحكم: " + verdict + " · الثقة " + confTxt
+    stTxt = inTrade ? "صفقة نشطة 🎯 " + f_side(tDir) : lateBlock ? "⏸ قرب الإغلاق — لا إشارات جديدة" : "الحكم: " + verdict + " · الثقة " + confTxt + (lateWarn ? " · ⚡" : "")
     hitsN = (t1Hit ? 1 : 0) + (t2Hit ? 1 : 0) + (t3Hit ? 1 : 0)
     table.cell(dash, 0, 8, stTxt, text_color=vCol, bgcolor=color.new(vCol, 85), text_size=size.small)
     table.cell(dash, 1, 8, "", bgcolor=color.new(vCol, 85))
