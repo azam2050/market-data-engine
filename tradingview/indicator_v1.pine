@@ -313,8 +313,8 @@ if inTrade and barstate.isconfirmed and openDir == 0
     label.set_x(lbStop, bar_index + 3)
     if tDir > 0 ? close < stopP : close > stopP
         risk  = math.abs(entryP - stop0)
-        best  = t3Hit ? t3P : t2Hit ? t2P : t1Hit ? t1P : close
-        rMult = risk > 0 ? (tDir > 0 ? best - entryP : entryP - best) / risk : 0.0
+        // R يُحسب على سعر الخروج الفعلي (إغلاق شمعة كسر الوقف) — لا على أفضل هدف ملموس
+        rMult = risk > 0 ? (tDir > 0 ? close - entryP : entryP - close) / risk : 0.0
         win   = t1Hit
         array.unshift(resArr, win ? 1 : 0)
         if array.size(resArr) > 20
