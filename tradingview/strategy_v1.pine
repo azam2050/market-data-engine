@@ -19,9 +19,31 @@ strategy("فاحص المؤشر V1", shorttitle="فاحص V1", overlay=true,
 
 // ---------------------------------------------------------------- المدخلات
 grpTF = "فريمات العميل (٣ يختارها)"
-tf1 = input.timeframe("5",  "الفريم الأول",  group=grpTF)
-tf2 = input.timeframe("15", "الفريم الثاني", group=grpTF)
-tf3 = input.timeframe("60", "الفريم الثالث", group=grpTF)
+tfMode = input.string("تلقائي حسب فريم الشارت", "وضع الفريمات",
+     options=["تلقائي حسب فريم الشارت", "يدوي (الثلاثة أدناه)"], group=grpTF)
+tf1 = input.timeframe("5",  "الفريم الأول (يدوي)",  group=grpTF)
+tf2 = input.timeframe("15", "الفريم الثاني (يدوي)", group=grpTF)
+tf3 = input.timeframe("60", "الفريم الثالث (يدوي)", group=grpTF)
+
+// السلم العلمي: الفريم الثاني = ضعف فريم الشارت، والثالث = أربعة أضعافه
+f_autoTf() =>
+    sec = timeframe.in_seconds(timeframe.period)
+    string a2 = "W"
+    string a3 = "M"
+    if timeframe.isintraday
+        m  = math.max(1, int(sec / 60))
+        m2 = m * 2
+        m3 = m * 4
+        a2 := m2 >= 1440 ? "D" : str.tostring(m2)
+        a3 := m3 >= 1440 ? (m2 >= 1440 ? "W" : "D") : str.tostring(m3)
+    else
+        a2 := timeframe.isdaily ? "W" : timeframe.isweekly ? "M" : "3M"
+        a3 := timeframe.isdaily ? "M" : timeframe.isweekly ? "3M" : "12M"
+    [timeframe.period, a2, a3]
+[aT1, aT2, aT3] = f_autoTf()
+useTf1 = tfMode == "يدوي (الثلاثة أدناه)" ? tf1 : aT1
+useTf2 = tfMode == "يدوي (الثلاثة أدناه)" ? tf2 : aT2
+useTf3 = tfMode == "يدوي (الثلاثة أدناه)" ? tf3 : aT3
 
 grpSig = "الإشارة (نفس إعدادات المؤشر)"
 minScore  = input.int(65, "أدنى قوة للدخول (من 100)", minval=50, maxval=90,  group=grpSig)
@@ -65,9 +87,9 @@ f_dirPair() =>
     d  = eF > eS and close > eS ? 1 : eF < eS and close < eS ? -1 : 0
     [d, d[1]]
 
-[c1, p1] = request.security(syminfo.tickerid, tf1, f_dirPair(), lookahead=barmerge.lookahead_off)
-[c2, p2] = request.security(syminfo.tickerid, tf2, f_dirPair(), lookahead=barmerge.lookahead_off)
-[c3, p3] = request.security(syminfo.tickerid, tf3, f_dirPair(), lookahead=barmerge.lookahead_off)
+[c1, p1] = request.security(syminfo.tickerid, useTf1, f_dirPair(), lookahead=barmerge.lookahead_off)
+[c2, p2] = request.security(syminfo.tickerid, useTf2, f_dirPair(), lookahead=barmerge.lookahead_off)
+[c3, p3] = request.security(syminfo.tickerid, useTf3, f_dirPair(), lookahead=barmerge.lookahead_off)
 
 alignCall = (c1 > 0 ? 1 : 0) + (c2 > 0 ? 1 : 0) + (c3 > 0 ? 1 : 0)
 alignPut  = (c1 < 0 ? 1 : 0) + (c2 < 0 ? 1 : 0) + (c3 < 0 ? 1 : 0)

@@ -19,9 +19,33 @@ indicator("المؤشر V1 — تجريبي", shorttitle="المؤشر V1", over
 
 // ---------------------------------------------------------------- المدخلات
 grpTF = "فريمات العميل (٣ يختارها)"
-tf1 = input.timeframe("5",  "الفريم الأول",  group=grpTF)
-tf2 = input.timeframe("15", "الفريم الثاني", group=grpTF)
-tf3 = input.timeframe("60", "الفريم الثالث", group=grpTF)
+tfMode = input.string("تلقائي حسب فريم الشارت", "وضع الفريمات",
+     options=["تلقائي حسب فريم الشارت", "يدوي (الثلاثة أدناه)"], group=grpTF)
+tf1 = input.timeframe("5",  "الفريم الأول (يدوي)",  group=grpTF)
+tf2 = input.timeframe("15", "الفريم الثاني (يدوي)", group=grpTF)
+tf3 = input.timeframe("60", "الفريم الثالث (يدوي)", group=grpTF)
+
+// السلم التلقائي: فريم الشارت + درجتان فوقه
+// السلم العلمي: الفريم الثاني = ضعف فريم الشارت، والثالث = أربعة أضعافه
+// مثال: شارت ١٥ د → ١٥ / ٣٠ / ساعة — شارت ساعة → ساعة / ساعتان / ٤ س
+f_autoTf() =>
+    sec = timeframe.in_seconds(timeframe.period)
+    string a2 = "W"
+    string a3 = "M"
+    if timeframe.isintraday
+        m  = math.max(1, int(sec / 60))
+        m2 = m * 2
+        m3 = m * 4
+        a2 := m2 >= 1440 ? "D" : str.tostring(m2)
+        a3 := m3 >= 1440 ? (m2 >= 1440 ? "W" : "D") : str.tostring(m3)
+    else
+        a2 := timeframe.isdaily ? "W" : timeframe.isweekly ? "M" : "3M"
+        a3 := timeframe.isdaily ? "M" : timeframe.isweekly ? "3M" : "12M"
+    [timeframe.period, a2, a3]
+[aT1, aT2, aT3] = f_autoTf()
+useTf1 = tfMode == "يدوي (الثلاثة أدناه)" ? tf1 : aT1
+useTf2 = tfMode == "يدوي (الثلاثة أدناه)" ? tf2 : aT2
+useTf3 = tfMode == "يدوي (الثلاثة أدناه)" ? tf3 : aT3
 
 grpSig = "الإشارة"
 minScore  = input.int(65, "أدنى قوة للدخول (من 100)", minval=50, maxval=90,  group=grpSig)
@@ -42,6 +66,13 @@ showDash = input.bool(true, "لوحة القيادة",              group=grpDis
 showHon  = input.bool(true, "لوحة الصدق (آخر الإشارات)",  group=grpDisp)
 showPrep = input.bool(true, "علامة الاستعداد ⏳",         group=grpDisp)
 showLvls = input.bool(true, "خطا الأمس والأسبوع (خفيفان)", group=grpDisp)
+grpWL = "لوحة المراقبة (أسهم يختارها العميل)"
+showWatch = input.bool(true, "إظهار لوحة المراقبة", group=grpWL)
+watchPosS = input.string("أعلى يسار", "مكانها", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpWL)
+wl1 = input.symbol("NASDAQ:QQQ",  "السهم ١", group=grpWL)
+wl2 = input.symbol("NASDAQ:TSLA", "السهم ٢", group=grpWL)
+wl3 = input.symbol("NASDAQ:NVDA", "السهم ٣", group=grpWL)
+wl4 = input.symbol("NASDAQ:AAPL", "السهم ٤", group=grpWL)
 
 // ------------------------------------------------------------------ الألوان
 cUp   = #26A69A
@@ -85,16 +116,26 @@ if not na(pivH)
 // نص جهة الصفقة
 f_side(d) => d > 0 ? "كول" : "بوت"
 
-// ------------------------------------------------------- اتجاه الفريمات الثلاثة
-f_dirPair() =>
+// ------------------- اتجاه الفريمات الثلاثة + نتيجة الإشارة السابقة لكل فريم
+f_tfState() =>
     eF = ta.ema(close, 9)
     eS = ta.ema(close, 21)
     d  = eF > eS and close > eS ? 1 : eF < eS and close < eS ? -1 : 0
-    [d, d[1]]
+    var int   segDir   = 0
+    var float segStart = na
+    var int   prevDir  = 0
+    var float prevPerf = na
+    if d != segDir
+        if segDir != 0 and not na(segStart) and segStart != 0
+            prevDir  := segDir
+            prevPerf := 100 * (close - segStart) / segStart * (segDir > 0 ? 1 : -1)
+        segDir   := d
+        segStart := close
+    [d, prevDir, prevPerf]
 
-[c1, p1] = request.security(syminfo.tickerid, tf1, f_dirPair(), lookahead=barmerge.lookahead_off)
-[c2, p2] = request.security(syminfo.tickerid, tf2, f_dirPair(), lookahead=barmerge.lookahead_off)
-[c3, p3] = request.security(syminfo.tickerid, tf3, f_dirPair(), lookahead=barmerge.lookahead_off)
+[c1, pd1, pf1] = request.security(syminfo.tickerid, useTf1, f_tfState(), lookahead=barmerge.lookahead_off)
+[c2, pd2, pf2] = request.security(syminfo.tickerid, useTf2, f_tfState(), lookahead=barmerge.lookahead_off)
+[c3, pd3, pf3] = request.security(syminfo.tickerid, useTf3, f_tfState(), lookahead=barmerge.lookahead_off)
 
 alignCall = (c1 > 0 ? 1 : 0) + (c2 > 0 ? 1 : 0) + (c3 > 0 ? 1 : 0)
 alignPut  = (c1 < 0 ? 1 : 0) + (c2 < 0 ? 1 : 0) + (c3 < 0 ? 1 : 0)
@@ -390,17 +431,24 @@ f_dirCell(d, isPrev) =>
     ic = isPrev ? (d > 0 ? "✅ " : d < 0 ? "❌ " : "➖ ") : "⌛ "
     ic + t
 
+// خلية الإشارة السابقة: جهتها + نتيجتها الفعلية ±%
+f_prevCell(pd, pf) =>
+    na(pf) ? "—" : (pf >= 0 ? "✅ " : "❌ ") + (pd > 0 ? "كول " : pd < 0 ? "بوت " : "") + (pf >= 0 ? "+" : "−") + str.tostring(math.abs(pf), "#.#") + "%"
+
+f_prevCol(pf) => na(pf) ? cMut : pf >= 0 ? cUp : cDn
+
 f_dirCol(d) => d > 0 ? cUp : d < 0 ? cDn : cMut
 
 f_tfName(tf) =>
-    tf == "1" ? "١ د" : tf == "3" ? "٣ د" : tf == "5" ? "٥ د" : tf == "15" ? "١٥ د" :
-     tf == "30" ? "٣٠ د" : tf == "60" ? "ساعة" : tf == "240" ? "٤ س" : tf == "D" ? "يوم" : tf
+    tf == "60" ? "ساعة" : tf == "120" ? "ساعتان" : tf == "180" ? "٣ س" : tf == "240" ? "٤ س" :
+     tf == "D" ? "يوم" : tf == "W" ? "أسبوع" : tf == "M" ? "شهر" : tf == "3M" ? "٣ أشهر" :
+     tf == "12M" ? "سنة" : tf + " د"
 
 f_bar10(n) =>
     k = math.round(n / 10)
     str.repeat("█", k) + str.repeat("░", 10 - k)
 
-var table dash = table.new(f_pos(dashPosS), 3, 9, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+var table dash = table.new(f_pos(dashPosS), 3, 12, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
 if showDash and barstate.islast
     table.cell(dash, 0, 0, syminfo.ticker + " · " + f_tfName(timeframe.period), text_color=cTxt, bgcolor=cHead, text_size=size.small)
     table.cell(dash, 1, 0, "", bgcolor=cHead)
@@ -408,14 +456,14 @@ if showDash and barstate.islast
     table.cell(dash, 0, 1, "الفريم",  text_color=cMut, text_size=size.tiny)
     table.cell(dash, 1, 1, "السابقة", text_color=cMut, text_size=size.tiny)
     table.cell(dash, 2, 1, "الحالية", text_color=cMut, text_size=size.tiny)
-    table.cell(dash, 0, 2, f_tfName(tf1), text_color=cTxt, text_size=size.small)
-    table.cell(dash, 1, 2, f_dirCell(p1, true), text_color=f_dirCol(p1), text_size=size.small)
+    table.cell(dash, 0, 2, f_tfName(useTf1), text_color=cTxt, text_size=size.small)
+    table.cell(dash, 1, 2, f_prevCell(pd1, pf1), text_color=f_prevCol(pf1), text_size=size.small)
     table.cell(dash, 2, 2, f_dirCell(c1, false), text_color=f_dirCol(c1), text_size=size.small)
-    table.cell(dash, 0, 3, f_tfName(tf2), text_color=cTxt, text_size=size.small)
-    table.cell(dash, 1, 3, f_dirCell(p2, true), text_color=f_dirCol(p2), text_size=size.small)
+    table.cell(dash, 0, 3, f_tfName(useTf2), text_color=cTxt, text_size=size.small)
+    table.cell(dash, 1, 3, f_prevCell(pd2, pf2), text_color=f_prevCol(pf2), text_size=size.small)
     table.cell(dash, 2, 3, f_dirCell(c2, false), text_color=f_dirCol(c2), text_size=size.small)
-    table.cell(dash, 0, 4, f_tfName(tf3), text_color=cTxt, text_size=size.small)
-    table.cell(dash, 1, 4, f_dirCell(p3, true), text_color=f_dirCol(p3), text_size=size.small)
+    table.cell(dash, 0, 4, f_tfName(useTf3), text_color=cTxt, text_size=size.small)
+    table.cell(dash, 1, 4, f_prevCell(pd3, pf3), text_color=f_prevCol(pf3), text_size=size.small)
     table.cell(dash, 2, 4, f_dirCell(c3, false), text_color=f_dirCol(c3), text_size=size.small)
     table.cell(dash, 0, 5, "قوة كول", text_color=cUp, text_size=size.small)
     table.cell(dash, 1, 5, f_bar10(callScore), text_color=cUp, text_size=size.small)
@@ -432,6 +480,65 @@ if showDash and barstate.islast
     table.cell(dash, 0, 8, stTxt, text_color=vCol, bgcolor=color.new(vCol, 85), text_size=size.small)
     table.cell(dash, 1, 8, "", bgcolor=color.new(vCol, 85))
     table.cell(dash, 2, 8, inTrade ? "أهداف ✓" + str.tostring(hitsN) + "/3" : "جاهز للمراقبة", text_color=vCol, bgcolor=color.new(vCol, 85), text_size=size.small)
+    // متابعة الصفقة الحية — تُطوى تلقائياً عند الانتهاء
+    table.cell(dash, 0, 9,  inTrade ? "الدخول" : "", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 9,  "", text_size=size.small)
+    table.cell(dash, 2, 9,  inTrade ? str.tostring(entryP, format.mintick) : "", text_color=cTxt, text_size=size.small)
+    table.cell(dash, 0, 10, inTrade ? "الوقف" : "", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 10, inTrade ? (stopP >= entryP == (tDir > 0) ? "مؤمّنة ✓" : "") : "", text_color=cUp, text_size=size.small)
+    table.cell(dash, 2, 10, inTrade ? str.tostring(stopP, format.mintick) : "", text_color=cOrng, text_size=size.small)
+    table.cell(dash, 0, 11, inTrade ? "الأهداف" : "", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 11, inTrade and t2Hit and not t3Hit ? "الثالث ممتد ↗" : "", text_color=cGold, text_size=size.small)
+    table.cell(dash, 2, 11, inTrade ? "✓" + str.tostring(hitsN) + " من 3" : "", text_color=cUp, text_size=size.small)
+
+// ------------------------------------------------------------- لوحة المراقبة
+f_wlDir() =>
+    eF = ta.ema(close, 9)
+    eS = ta.ema(close, 21)
+    dd = eF > eS and close > eS ? 1 : eF < eS and close < eS ? -1 : 0
+    [close, dd]
+
+f_wlFetch(sym) =>
+    [wc, wd] = request.security(sym, timeframe.period, f_wlDir(), lookahead=barmerge.lookahead_off)
+    wday = request.security(sym, "D", open > 0 ? 100 * (close - open) / open : 0.0, lookahead=barmerge.lookahead_off)
+    [wc, wd, wday]
+
+[w1c, w1d, w1y] = f_wlFetch(wl1)
+[w2c, w2d, w2y] = f_wlFetch(wl2)
+[w3c, w3d, w3y] = f_wlFetch(wl3)
+[w4c, w4d, w4y] = f_wlFetch(wl4)
+
+f_wlShort(sym) =>
+    parts = str.split(sym, ":")
+    array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : sym
+
+f_wlTrend(wd, wy) =>
+    wy > 0.6 and wd > 0 ? "صعود قوي" : wy > 0.15 ? "صعود" : wy < -0.6 and wd < 0 ? "هبوط قوي" : wy < -0.15 ? "هبوط" : "محايد"
+
+f_wlCol(wy) => wy > 0.15 ? cUp : wy < -0.15 ? cDn : cMut
+
+var table wtab = table.new(f_pos(watchPosS), 4, 5, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+if showWatch and barstate.islast
+    table.cell(wtab, 0, 0, "لوحة المراقبة", text_color=cTxt, bgcolor=cHead, text_size=size.small)
+    table.cell(wtab, 1, 0, "السعر", text_color=cMut, bgcolor=cHead, text_size=size.tiny)
+    table.cell(wtab, 2, 0, "اليوم", text_color=cMut, bgcolor=cHead, text_size=size.tiny)
+    table.cell(wtab, 3, 0, "الاتجاه", text_color=cMut, bgcolor=cHead, text_size=size.tiny)
+    table.cell(wtab, 0, 1, f_wlShort(wl1), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 1, 1, str.tostring(w1c, format.mintick), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 2, 1, (w1y >= 0 ? "+" : "−") + str.tostring(math.abs(w1y), "#.#") + "%", text_color=f_wlCol(w1y), text_size=size.small)
+    table.cell(wtab, 3, 1, f_wlTrend(w1d, w1y), text_color=f_wlCol(w1y), text_size=size.small)
+    table.cell(wtab, 0, 2, f_wlShort(wl2), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 1, 2, str.tostring(w2c, format.mintick), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 2, 2, (w2y >= 0 ? "+" : "−") + str.tostring(math.abs(w2y), "#.#") + "%", text_color=f_wlCol(w2y), text_size=size.small)
+    table.cell(wtab, 3, 2, f_wlTrend(w2d, w2y), text_color=f_wlCol(w2y), text_size=size.small)
+    table.cell(wtab, 0, 3, f_wlShort(wl3), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 1, 3, str.tostring(w3c, format.mintick), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 2, 3, (w3y >= 0 ? "+" : "−") + str.tostring(math.abs(w3y), "#.#") + "%", text_color=f_wlCol(w3y), text_size=size.small)
+    table.cell(wtab, 3, 3, f_wlTrend(w3d, w3y), text_color=f_wlCol(w3y), text_size=size.small)
+    table.cell(wtab, 0, 4, f_wlShort(wl4), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 1, 4, str.tostring(w4c, format.mintick), text_color=cTxt, text_size=size.small)
+    table.cell(wtab, 2, 4, (w4y >= 0 ? "+" : "−") + str.tostring(math.abs(w4y), "#.#") + "%", text_color=f_wlCol(w4y), text_size=size.small)
+    table.cell(wtab, 3, 4, f_wlTrend(w4d, w4y), text_color=f_wlCol(w4y), text_size=size.small)
 
 // --------------------------------------------------------------- لوحة الصدق
 var table hon = table.new(dashPosS == "أسفل يمين" ? position.bottom_left : position.bottom_right, 1, 2, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
