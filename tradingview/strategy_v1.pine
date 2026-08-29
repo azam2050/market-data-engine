@@ -1,0 +1,157 @@
+//@version=5
+// ============================================================================
+//  فاحص المؤشر V1 — نسخة الباك تست (نفس منطق المؤشر حرفياً)
+// ----------------------------------------------------------------------------
+//  الغرض: اختبار تاريخي رسمي عبر "اختبار الاستراتيجية" في TradingView.
+//  بعد الإضافة افتح تبويب "اختبار الاستراتيجية" أسفل الشارت:
+//   · "نظرة عامة": صافي الربح ومنحنى الأرباح
+//   · "الأداء": نسبة الصفقات الرابحة، أفضل صفقة، أسوأ صفقة، متوسط الصفقة
+//   · "قائمة الصفقات": كل دخول وخروج بتاريخه وسعره ونتيجته
+//  بدّل السهم أو الفريم من أعلى الشارت والأرقام تتحدث فوراً.
+//
+//  ملاحظة صدق: الفاحص يحسب على حركة السهم نفسه (لا على عقود الأوبشن)،
+//  والنتائج بالنسبة المئوية من حركة السعر — نفس منطق R في لوحة الصدق.
+// ============================================================================
+strategy("فاحص المؤشر V1", shorttitle="فاحص V1", overlay=true,
+     initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     process_orders_on_close=true, calc_on_every_tick=false,
+     max_lines_count=100, max_labels_count=200)
+
+// ---------------------------------------------------------------- المدخلات
+grpTF = "فريمات العميل (٣ يختارها)"
+tf1 = input.timeframe("5",  "الفريم الأول",  group=grpTF)
+tf2 = input.timeframe("15", "الفريم الثاني", group=grpTF)
+tf3 = input.timeframe("60", "الفريم الثالث", group=grpTF)
+
+grpSig = "الإشارة (نفس إعدادات المؤشر)"
+minScore  = input.int(65, "أدنى قوة للدخول (من 100)", minval=50, maxval=90,  group=grpSig)
+needAlign = input.int(2,  "أقل عدد فريمات متوافقة",   minval=1,  maxval=3,   group=grpSig)
+coolBars  = input.int(10, "شموع انتظار بعد كل صفقة",  minval=0,  maxval=200, group=grpSig)
+trapVolX  = input.float(1.5, "مضاعف حجم المصيدة", minval=1.0, step=0.1, group=grpSig)
+
+// ----------------------------------------------------------- حسابات أساسية
+atr    = ta.atr(14)
+volSma = ta.sma(volume, 20)
+relVol = volSma > 0 ? volume / volSma : 1.0
+rngHL  = math.max(high - low, syminfo.mintick)
+deltaEst   = volume * (close - open) / rngHL
+deltaEmaP  = ta.ema(math.abs(deltaEst), 20)
+deltaEmaS  = ta.ema(deltaEst, 20)
+deltaShare = deltaEmaP > 0 ? 100 * deltaEmaS / deltaEmaP : 0.0
+
+// ------------------------------------------------------- اتجاه الفريمات الثلاثة
+f_dirPair() =>
+    eF = ta.ema(close, 9)
+    eS = ta.ema(close, 21)
+    d  = eF > eS and close > eS ? 1 : eF < eS and close < eS ? -1 : 0
+    [d, d[1]]
+
+[c1, p1] = request.security(syminfo.tickerid, tf1, f_dirPair(), lookahead=barmerge.lookahead_off)
+[c2, p2] = request.security(syminfo.tickerid, tf2, f_dirPair(), lookahead=barmerge.lookahead_off)
+[c3, p3] = request.security(syminfo.tickerid, tf3, f_dirPair(), lookahead=barmerge.lookahead_off)
+
+alignCall = (c1 > 0 ? 1 : 0) + (c2 > 0 ? 1 : 0) + (c3 > 0 ? 1 : 0)
+alignPut  = (c1 < 0 ? 1 : 0) + (c2 < 0 ? 1 : 0) + (c3 < 0 ? 1 : 0)
+
+// ------------------------------------------------- مستويات الأمس والأسبوع واليوم
+[pdH, pdL] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_off)
+[pwH, pwL] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead=barmerge.lookahead_off)
+
+newDay = ta.change(time("D")) != 0
+var float dayHi = na
+var float dayLo = na
+if newDay
+    dayHi := high
+    dayLo := low
+else
+    dayHi := math.max(nz(dayHi, high), high)
+    dayLo := math.min(nz(dayLo, low), low)
+
+dayRng   = math.max(dayHi - dayLo, syminfo.mintick)
+posInDay = (close - dayLo) / dayRng
+midRange = posInDay > 0.40 and posInDay < 0.60
+
+// ------------------------------------------------------------- صائد المصائد
+tol = 0.05 * atr
+bullTrap = ((low < pdL - tol and close > pdL) or (low < pwL - tol and close > pwL)) and relVol > trapVolX and deltaEst > 0
+bearTrap = ((high > pdH + tol and close < pdH) or (high > pwH + tol and close < pwH)) and relVol > trapVolX and deltaEst < 0
+trapRecUp = nz(ta.barssince(bullTrap), 99999) <= 6
+trapRecDn = nz(ta.barssince(bearTrap), 99999) <= 6
+
+// -------------------------------------------------------------- قوة الاتجاه
+nearFloor = (close - math.max(pdL, pwL)) >= 0 and (close - math.max(pdL, pwL)) < 1.2 * atr
+nearCeil  = (math.min(pdH, pwH) - close) >= 0 and (math.min(pdH, pwH) - close) < 1.2 * atr
+
+f_score(algn, dSideOk, nearMy, trapMy) =>
+    sA = algn * 10
+    sD = dSideOk ? math.min(25, math.round(math.abs(deltaShare) / 4)) : 0
+    sL = trapMy ? 25 : nearMy ? 20 : midRange ? 0 : 10
+    sV = math.min(15, math.round(relVol * 6))
+    sT = trapMy ? 5 : 0
+    math.min(100, sA + sD + sL + sV + sT)
+
+callScore = f_score(alignCall, deltaShare > 0, nearFloor, trapRecUp)
+putScore  = f_score(alignPut,  deltaShare < 0, nearCeil,  trapRecDn)
+
+// ------------------------------------------------------------- حالة الصفقة
+var float stopP    = na
+var float t1P      = na
+var float t2P      = na
+var float t3P      = na
+var bool  t1Hit    = false
+var bool  t2Hit    = false
+var bool  t3Hit    = false
+var int   lastExit = -99999
+var float pendStop = na
+
+posNow  = strategy.position_size != 0
+posDir  = strategy.position_size > 0 ? 1 : strategy.position_size < 0 ? -1 : 0
+
+// ------------------------------------------------------------------- الدخول
+canEnter = not posNow and (bar_index - lastExit) > coolBars
+
+longTrap  = canEnter and bullTrap and callScore >= minScore and alignCall >= needAlign
+shortTrap = canEnter and bearTrap and putScore >= minScore and alignPut >= needAlign
+brkUp = canEnter and not longTrap and (ta.crossover(close, pdH) or ta.crossover(close, pwH)) and
+     relVol > 1.3 and deltaEst > 0 and callScore >= minScore and alignCall >= needAlign and not midRange
+brkDn = canEnter and not shortTrap and (ta.crossunder(close, pdL) or ta.crossunder(close, pwL)) and
+     relVol > 1.3 and deltaEst < 0 and putScore >= minScore and alignPut >= needAlign and not midRange
+
+if longTrap or brkUp
+    pendStop := longTrap ? low - 0.25 * atr : math.min(low, low[1]) - 0.25 * atr
+    strategy.entry("شراء", strategy.long, comment=longTrap ? "🪤 مصيدة" : "اختراق")
+if shortTrap or brkDn
+    pendStop := shortTrap ? high + 0.25 * atr : math.max(high, high[1]) + 0.25 * atr
+    strategy.entry("بيع", strategy.short, comment=shortTrap ? "🪤 مصيدة" : "كسر")
+
+// تهيئة الصفقة لحظة فتحها
+justOpened = posNow and not posNow[1]
+if justOpened
+    stopP := pendStop
+    t1P   := posDir > 0 ? strategy.position_avg_price + 1.5 * atr : strategy.position_avg_price - 1.5 * atr
+    t2P   := posDir > 0 ? strategy.position_avg_price + 2.6 * atr : strategy.position_avg_price - 2.6 * atr
+    t3P   := posDir > 0 ? strategy.position_avg_price + 4.2 * atr : strategy.position_avg_price - 4.2 * atr
+    t1Hit := false
+    t2Hit := false
+    t3Hit := false
+
+// ------------------------------------------- الإدارة: تأمين، تصعيد، تسلق، خروج
+if posNow and not justOpened
+    if not t1Hit and (posDir > 0 ? high >= t1P : low <= t1P)
+        t1Hit := true
+        stopP := strategy.position_avg_price
+    if t1Hit and not t2Hit and (posDir > 0 ? high >= t2P : low <= t2P)
+        t2Hit := true
+        stopP := t1P
+    if t2Hit and not t3Hit and (posDir > 0 ? high >= t3P : low <= t3P)
+        t3Hit := true
+    if t1Hit
+        trail = posDir > 0 ? close - 2.0 * atr : close + 2.0 * atr
+        stopP := posDir > 0 ? math.max(stopP, trail) : math.min(stopP, trail)
+    if posDir > 0 ? close < stopP : close > stopP
+        strategy.close_all(comment=t1Hit ? "خروج رابح" : "وقف")
+        lastExit := bar_index
+
+// خطا مستويات خفيفان للمرجعية أثناء التقليب
+plot(pdH, "قمة الأمس", color=color.new(#787B86, 60), style=plot.style_linebr, linewidth=1)
+plot(pdL, "قاع الأمس", color=color.new(#787B86, 60), style=plot.style_linebr, linewidth=1)
