@@ -94,9 +94,12 @@ f_dirPair() =>
 alignCall = (c1 > 0 ? 1 : 0) + (c2 > 0 ? 1 : 0) + (c3 > 0 ? 1 : 0)
 alignPut  = (c1 < 0 ? 1 : 0) + (c2 < 0 ? 1 : 0) + (c3 < 0 ? 1 : 0)
 
-// ------------------------------------------------- مستويات الأمس والأسبوع واليوم
-[pdH, pdL] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_off)
-[pwH, pwL] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead=barmerge.lookahead_off)
+// ------------------------------------------------- الحواف التلقائية حسب فريم الشارت
+edgeSec  = timeframe.in_seconds(timeframe.period)
+edgeNear = not timeframe.isintraday ? "M" : edgeSec > 1800 ? "W" : "D"
+edgeWide = not timeframe.isintraday ? "3M" : edgeSec > 1800 ? "M" : "W"
+[pdH, pdL] = request.security(syminfo.tickerid, edgeNear, [high[1], low[1]], lookahead=barmerge.lookahead_off)
+[pwH, pwL] = request.security(syminfo.tickerid, edgeWide, [high[1], low[1]], lookahead=barmerge.lookahead_off)
 
 newDay = ta.change(time("D")) != 0
 var float dayHi = na
@@ -225,5 +228,5 @@ if posNow and not justOpened
         lastExit := bar_index
 
 // خطا مستويات خفيفان للمرجعية أثناء التقليب
-plot(pdH, "قمة الأمس", color=color.new(#787B86, 60), style=plot.style_linebr, linewidth=1)
-plot(pdL, "قاع الأمس", color=color.new(#787B86, 60), style=plot.style_linebr, linewidth=1)
+plot(pdH, "قمة الحافة القريبة", color=color.new(#787B86, 60), style=plot.style_linebr, linewidth=1)
+plot(pdL, "قاع الحافة القريبة", color=color.new(#787B86, 60), style=plot.style_linebr, linewidth=1)

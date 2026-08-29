@@ -1,6 +1,6 @@
 //@version=5
 // ============================================================================
-//  المؤشر — النسخة التجريبية 1.0  (الاسم مؤقت — يتغيّر عند النشر)
+//  المؤشر — النسخة التجريبية 1.5  (الاسم مؤقت — يتغيّر عند النشر)
 // ----------------------------------------------------------------------------
 //  الفلسفة: شارت نظيف. على الشارت فقط: خط الدخول، الوقف المتحرك، الأهداف
 //  (تضيء عند التحقق وتختفي بانتهاء الصفقة)، وعلامات المصيدة/الاستعداد.
@@ -65,7 +65,7 @@ dashPosS = input.string("أعلى يمين", "مكان لوحة القيادة",
 showDash = input.bool(true, "لوحة القيادة",              group=grpDisp)
 showHon  = input.bool(true, "لوحة الصدق (آخر الإشارات)",  group=grpDisp)
 showPrep = input.bool(true, "علامة الاستعداد ⏳",         group=grpDisp)
-showLvls = input.bool(true, "خطا الأمس والأسبوع (خفيفان)", group=grpDisp)
+showLvls = input.bool(true, "خطوط الحواف (خفيفة)", group=grpDisp)
 grpWL = "لوحة المراقبة (أسهم يختارها العميل)"
 showWatch = input.bool(true, "إظهار لوحة المراقبة", group=grpWL)
 watchPosS = input.string("أعلى يسار", "مكانها", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpWL)
@@ -140,9 +140,13 @@ f_tfState() =>
 alignCall = (c1 > 0 ? 1 : 0) + (c2 > 0 ? 1 : 0) + (c3 > 0 ? 1 : 0)
 alignPut  = (c1 < 0 ? 1 : 0) + (c2 < 0 ? 1 : 0) + (c3 < 0 ? 1 : 0)
 
-// ------------------------------------------------- مستويات الأمس والأسبوع واليوم
-[pdH, pdL] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_off)
-[pwH, pwL] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead=barmerge.lookahead_off)
+// ------------------------------------------------- الحواف التلقائية حسب فريم الشارت
+// ١د–٣٠د: الأمس + الأسبوع الماضي · ساعة–٤س: الأسبوع الماضي + الشهر الماضي · يوم فأكبر: الشهر + الربع الماضيان
+edgeSec  = timeframe.in_seconds(timeframe.period)
+edgeNear = not timeframe.isintraday ? "M" : edgeSec > 1800 ? "W" : "D"
+edgeWide = not timeframe.isintraday ? "3M" : edgeSec > 1800 ? "M" : "W"
+[pdH, pdL] = request.security(syminfo.tickerid, edgeNear, [high[1], low[1]], lookahead=barmerge.lookahead_off)
+[pwH, pwL] = request.security(syminfo.tickerid, edgeWide, [high[1], low[1]], lookahead=barmerge.lookahead_off)
 dOpen      = request.security(syminfo.tickerid, "D", open,              lookahead=barmerge.lookahead_off)
 
 newDay = ta.change(time("D")) != 0
@@ -416,11 +420,11 @@ if inTrade and barstate.isconfirmed and openDir == 0
         inTrade  := false
         lastExit := bar_index
 
-// ------------------------------------------------ خطا الأمس والأسبوع (خفيفان)
-plot(showLvls ? pdH : na, "قمة الأمس",   color=color.new(cMut, 55), style=plot.style_linebr, linewidth=1)
-plot(showLvls ? pdL : na, "قاع الأمس",   color=color.new(cMut, 55), style=plot.style_linebr, linewidth=1)
-plot(showLvls ? pwH : na, "قمة الأسبوع", color=color.new(#B8578A, 45), style=plot.style_linebr, linewidth=1)
-plot(showLvls ? pwL : na, "قاع الأسبوع", color=color.new(#B8578A, 45), style=plot.style_linebr, linewidth=1)
+// ------------------------------------------------ خطوط الحواف (تتبع فريم الشارت تلقائياً)
+plot(showLvls ? pdH : na, "قمة الحافة القريبة", color=color.new(cMut, 55), style=plot.style_linebr, linewidth=1)
+plot(showLvls ? pdL : na, "قاع الحافة القريبة", color=color.new(cMut, 55), style=plot.style_linebr, linewidth=1)
+plot(showLvls ? pwH : na, "قمة الحافة الواسعة", color=color.new(#B8578A, 45), style=plot.style_linebr, linewidth=1)
+plot(showLvls ? pwL : na, "قاع الحافة الواسعة", color=color.new(#B8578A, 45), style=plot.style_linebr, linewidth=1)
 
 // ------------------------------------------------------------- لوحة القيادة
 f_pos(s) => s == "أعلى يمين" ? position.top_right : s == "أعلى يسار" ? position.top_left :
