@@ -28,6 +28,11 @@ minScore  = input.int(65, "أدنى قوة للدخول (من 100)", minval=50, 
 needAlign = input.int(2,  "أقل عدد فريمات متوافقة",   minval=1,  maxval=3,   group=grpSig)
 coolBars  = input.int(10, "شموع انتظار بعد كل صفقة",  minval=0,  maxval=200, group=grpSig)
 trapVolX  = input.float(1.5, "مضاعف حجم المصيدة", minval=1.0, step=0.1, group=grpSig)
+entryModeS = input.string("انتظار ارتداد — أدق سعراً", "وضع الدخول",
+     options=["فوري عند إغلاق الشمعة", "انتظار ارتداد — أدق سعراً"], group=grpSig)
+maxCndAtr = input.float(1.8, "أقصى حجم لشمعة الإشارة (ATR)", minval=1.0, maxval=3.0, step=0.1, group=grpSig)
+waitBars  = input.int(5, "شموع انتظار الارتداد", minval=2, maxval=15, group=grpSig)
+retraceMode = entryModeS != "فوري عند إغلاق الشمعة"
 
 // ----------------------------------------------------------- حسابات أساسية
 atr    = ta.atr(14)
@@ -103,12 +108,13 @@ var bool  t2Hit    = false
 var bool  t3Hit    = false
 var int   lastExit = -99999
 var float pendStop = na
+var int   pendUntil = na
 
 posNow  = strategy.position_size != 0
 posDir  = strategy.position_size > 0 ? 1 : strategy.position_size < 0 ? -1 : 0
 
 // ------------------------------------------------------------------- الدخول
-canEnter = not posNow and (bar_index - lastExit) > coolBars
+canEnter = not posNow and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr
 
 longTrap  = canEnter and bullTrap and callScore >= minScore and alignCall >= needAlign
 shortTrap = canEnter and bearTrap and putScore >= minScore and alignPut >= needAlign
@@ -119,10 +125,24 @@ brkDn = canEnter and not shortTrap and (ta.crossunder(close, pdL) or ta.crossund
 
 if longTrap or brkUp
     pendStop := longTrap ? low - 0.25 * atr : math.min(low, low[1]) - 0.25 * atr
-    strategy.entry("شراء", strategy.long, comment=longTrap ? "🪤 مصيدة" : "اختراق")
+    pendUntil := bar_index + waitBars
+    if retraceMode
+        strategy.entry("شراء", strategy.long, limit=math.round_to_mintick((high + low) / 2), comment=longTrap ? "🪤 مصيدة·ارتداد" : "اختراق·ارتداد")
+    else
+        strategy.entry("شراء", strategy.long, comment=longTrap ? "🪤 مصيدة" : "اختراق")
 if shortTrap or brkDn
     pendStop := shortTrap ? high + 0.25 * atr : math.max(high, high[1]) + 0.25 * atr
-    strategy.entry("بيع", strategy.short, comment=shortTrap ? "🪤 مصيدة" : "كسر")
+    pendUntil := bar_index + waitBars
+    if retraceMode
+        strategy.entry("بيع", strategy.short, limit=math.round_to_mintick((high + low) / 2), comment=shortTrap ? "🪤 مصيدة·ارتداد" : "كسر·ارتداد")
+    else
+        strategy.entry("بيع", strategy.short, comment=shortTrap ? "🪤 مصيدة" : "كسر")
+
+// إلغاء أمر معلّق لم يرتد إليه السعر خلال المهلة
+if not posNow and not na(pendUntil) and bar_index > pendUntil
+    strategy.cancel("شراء")
+    strategy.cancel("بيع")
+    pendUntil := na
 
 // تهيئة الصفقة لحظة فتحها
 justOpened = posNow and not posNow[1]

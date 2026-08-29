@@ -28,6 +28,11 @@ minScore  = input.int(65, "أدنى قوة للدخول (من 100)", minval=50, 
 needAlign = input.int(2,  "أقل عدد فريمات متوافقة",   minval=1,  maxval=3,   group=grpSig)
 coolBars  = input.int(10, "شموع انتظار بعد كل صفقة",  minval=0,  maxval=200, group=grpSig)
 trapVolX  = input.float(1.5, "مضاعف حجم المصيدة", minval=1.0, step=0.1, group=grpSig)
+entryModeS = input.string("انتظار ارتداد — أدق سعراً", "وضع الدخول",
+     options=["فوري عند إغلاق الشمعة", "انتظار ارتداد — أدق سعراً"], group=grpSig)
+maxCndAtr = input.float(1.8, "أقصى حجم لشمعة الإشارة (ATR)", minval=1.0, maxval=3.0, step=0.1, group=grpSig)
+waitBars  = input.int(5, "شموع انتظار الارتداد", minval=2, maxval=15, group=grpSig)
+retraceMode = entryModeS != "فوري عند إغلاق الشمعة"
 
 grpDisp = "العرض"
 dashPosS = input.string("أعلى يمين", "مكان لوحة القيادة",
@@ -144,6 +149,14 @@ var bool  t1Hit    = false
 var bool  t2Hit    = false
 var bool  t3Hit    = false
 var int   lastExit = -99999
+var int    pendDir   = 0
+var float  pendLvl   = na
+var float  pendStp   = na
+var string pendWhy   = ""
+var int    pendUntil = 0
+var int    pendSince = 0
+var line   lnPend    = na
+var label  lbPend    = na
 
 var line  lnEntry = na
 var line  lnStop  = na
@@ -180,7 +193,7 @@ if barstate.isconfirmed and bearTrap
     alert("🪤 مصيدة سيولة فوق السقف | " + syminfo.ticker + " — اختراق كاذب وإغلاق تحت المستوى", alert.freq_once_per_bar)
 
 // ------------------------------------------------------------------- الدخول
-canEnter = barstate.isconfirmed and not inTrade and (bar_index - lastExit) > coolBars
+canEnter = barstate.isconfirmed and not inTrade and pendDir == 0 and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr
 
 longTrap  = canEnter and bullTrap and callScore >= minScore and alignCall >= needAlign
 shortTrap = canEnter and bearTrap and putScore >= minScore and alignPut >= needAlign
@@ -195,15 +208,57 @@ sigWhy  = longTrap ? "انعكاس مصيدة على الأرضية" : shortTrap
 sigStop = longTrap ? low - 0.25 * atr : shortTrap ? high + 0.25 * atr :
      brkUp ? math.min(low, low[1]) - 0.25 * atr : brkDn ? math.max(high, high[1]) + 0.25 * atr : na
 
+openDir  = 0
+openEntry = float(na)
+openStop = float(na)
+openWhy  = ""
+
 if sigDir != 0
+    if not retraceMode
+        openDir  := sigDir
+        openEntry := close
+        openStop := sigStop
+        openWhy  := sigWhy
+    else
+        pendDir   := sigDir
+        pendLvl   := math.round_to_mintick((high + low) / 2)
+        pendStp   := sigStop
+        pendWhy   := sigWhy
+        pendUntil := bar_index + waitBars
+        pendSince := bar_index
+        lnPend := line.new(bar_index, pendLvl, bar_index + 1, pendLvl, extend=extend.right, color=color.new(cCyan, 30), style=line.style_dashed, width=1)
+        lbPend := label.new(bar_index + 3, pendLvl, "منطقة دخول " + f_side(sigDir) + " · " + str.tostring(pendLvl, format.mintick), style=label.style_label_left, textcolor=#04222B, color=color.new(cCyan, 15), size=size.small)
+        alert("🎯 إشارة " + f_side(sigDir) + " | " + syminfo.ticker + " — انتظر الارتداد لمنطقة الدخول " + str.tostring(pendLvl, format.mintick) + " | وقف " + str.tostring(sigStop, format.mintick), alert.freq_once_per_bar)
+
+// معالجة إشارة الانتظار: دخول على الارتداد أو إلغاء
+if pendDir != 0 and barstate.isconfirmed and not inTrade and bar_index > pendSince
+    touched = pendDir > 0 ? low <= pendLvl : high >= pendLvl
+    broken  = pendDir > 0 ? close < pendStp : close > pendStp
+    expired = bar_index > pendUntil
+    if touched and not broken
+        openDir  := pendDir
+        openEntry := pendLvl
+        openStop := pendStp
+        openWhy  := pendWhy + " — دخول محسّن على الارتداد"
+        line.delete(lnPend)
+        label.delete(lbPend)
+        pendDir := 0
+    else if broken or expired
+        line.delete(lnPend)
+        label.delete(lbPend)
+        label.new(bar_index, pendDir > 0 ? high : low, "⨯", style=pendDir > 0 ? label.style_label_down : label.style_label_up, color=color.new(cMut, 40), textcolor=cTxt, size=size.tiny)
+        alert("⨯ أُلغيت إشارة " + f_side(pendDir) + " | " + syminfo.ticker + (expired ? " — لم يرتد للسعر خلال المهلة" : " — كُسر مستوى الإبطال قبل الدخول"), alert.freq_once_per_bar)
+        pendDir := 0
+
+if openDir != 0
     inTrade := true
-    tDir    := sigDir
-    entryP  := close
-    stopP   := sigStop
-    stop0   := sigStop
-    t1P     := sigDir > 0 ? close + 1.5 * atr : close - 1.5 * atr
-    t2P     := sigDir > 0 ? close + 2.6 * atr : close - 2.6 * atr
-    t3P     := sigDir > 0 ? close + 4.2 * atr : close - 4.2 * atr
+    tDir    := openDir
+    entryP  := openEntry
+    stopP   := openStop
+    stop0   := openStop
+    t1P     := openDir > 0 ? openEntry + 1.5 * atr : openEntry - 1.5 * atr
+    t2P     := openDir > 0 ? openEntry + 2.6 * atr : openEntry - 2.6 * atr
+    t3P     := openDir > 0 ? openEntry + 4.2 * atr : openEntry - 4.2 * atr
     t1Hit   := false
     t2Hit   := false
     t3Hit   := false
@@ -216,15 +271,15 @@ if sigDir != 0
     lbT2    := label.new(bar_index + 3, t2P, "هدف 2 · " + str.tostring(t2P, format.mintick), style=label.style_label_left, textcolor=cTxt, color=color.new(#2A3245, 20), size=size.small)
     lbT3    := label.new(bar_index + 3, t3P, "هدف 3 ↗ · " + str.tostring(t3P, format.mintick), style=label.style_label_left, textcolor=cGold, color=color.new(#2A3245, 20), size=size.small)
     lbStop  := label.new(bar_index + 3, stopP, "الوقف · " + str.tostring(stopP, format.mintick), style=label.style_label_left, textcolor=#1A0E02, color=cOrng, size=size.small)
-    label.new(bar_index, sigDir > 0 ? low : high, "🎯 دخول " + f_side(sigDir) + " " + str.tostring(entryP, format.mintick),
-         style=sigDir > 0 ? label.style_label_up : label.style_label_down,
-         color=sigDir > 0 ? cUp : cDn, textcolor=sigDir > 0 ? #04211D : #2B0606, size=size.small)
-    alert("🎯 دخول " + f_side(sigDir) + " | " + syminfo.ticker + " فريم " + timeframe.period +
+    label.new(bar_index, openDir > 0 ? low : high, "🎯 دخول " + f_side(openDir) + " " + str.tostring(entryP, format.mintick),
+         style=openDir > 0 ? label.style_label_up : label.style_label_down,
+         color=openDir > 0 ? cUp : cDn, textcolor=openDir > 0 ? #04211D : #2B0606, size=size.small)
+    alert("🎯 دخول " + f_side(openDir) + " | " + syminfo.ticker + " فريم " + timeframe.period +
          " | سعر " + str.tostring(entryP, format.mintick) + " | وقف " + str.tostring(stopP, format.mintick) +
-         " | السبب: " + sigWhy, alert.freq_once_per_bar)
+         " | السبب: " + openWhy, alert.freq_once_per_bar)
 
 // ------------------------------------------- إدارة الصفقة: أهداف تضيء ووقف يتسلق
-if inTrade and barstate.isconfirmed and sigDir == 0
+if inTrade and barstate.isconfirmed and openDir == 0
     if not t1Hit and (tDir > 0 ? high >= t1P : low <= t1P)
         t1Hit := true
         stopP := entryP
