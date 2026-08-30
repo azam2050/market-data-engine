@@ -103,3 +103,14 @@ def test_report_formats_arabic_summary() -> None:
     assert "نجاح 100.0%" in text
     assert "أفضل صفقة" in text and "أسوأ صفقة" in text
     assert "EMPTY" in text and "لا صفقات" in text
+
+
+def test_day_close_mode_flattens_at_session_end() -> None:
+    # cut the scenario before the collapse: the trade would still be open,
+    # so day-close mode must flatten it on the session's last bar
+    bars = _build_scenario()[:-1]
+    carried = run_simulation(bars, "TEST", 5, day_close=False)
+    flat = run_simulation(bars, "TEST", 5, day_close=True)
+    assert carried.total == 0, "overnight mode keeps the trade open past the data"
+    assert flat.total == 1, "day-close mode must book the trade at the last bar"
+    assert flat.trades[0].t1_hit and flat.trades[0].r_mult > 0

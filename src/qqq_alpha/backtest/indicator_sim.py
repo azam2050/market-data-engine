@@ -147,8 +147,15 @@ def _score(align: int, d_side_ok: bool, near_my: bool, trap_my: bool,
     return min(100, s_a + s_d + s_l + s_v + s_t)
 
 
-def run_simulation(bars: list[Bar], symbol: str, frame_min: int) -> SimResult:
-    """Replay the indicator over RTH bars of one symbol/frame."""
+def run_simulation(
+    bars: list[Bar], symbol: str, frame_min: int, day_close: bool = False
+) -> SimResult:
+    """Replay the indicator over RTH bars of one symbol/frame.
+
+    day_close=True mirrors the daily-contracts reality: any open trade is
+    flattened at the session's last bar and pendings die with the day, so an
+    overnight gap can never turn a -1R stop into a -17R disaster.
+    """
     rth = [
         b for b in bars
         if time(9, 30) <= b.ts.astimezone(NY).time() < time(16, 0)
@@ -236,6 +243,21 @@ def run_simulation(bars: list[Bar], symbol: str, frame_min: int) -> SimResult:
 
     for i in range(n):
         new_day = i == 0 or days[i] != days[i - 1]
+        last_of_day = i + 1 == n or days[i + 1] != days[i]
+        if day_close and last_of_day:
+            if in_trade and trade is not None:
+                risk = abs(trade.entry - trade.stop0)
+                d = trade.direction
+                trade.r_mult = (
+                    ((closes[i] - trade.entry) if d > 0 else (trade.entry - closes[i])) / risk
+                    if risk > 0 else 0.0
+                )
+                trade.exit_ts = rth[i].ts
+                res.trades.append(trade)
+                in_trade = False
+                trade = None
+                last_exit = i
+            pend_dir = 0
         if new_day:
             prev_day_hi, prev_day_lo = day_hi, day_lo
             day_hi, day_lo = highs[i], lows[i]

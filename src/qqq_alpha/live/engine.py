@@ -1776,8 +1776,28 @@ class LiveEngine:
                         bars.extend(await client.range_minute_bars(sym, frame, s, e))
                         s = e + timedelta(days=1)
                     # the replay is pure CPU over ~20k bars — off the event loop
-                    results.append(await asyncio.to_thread(run_simulation, bars, sym, frame))
-            await self.notifier.note(format_report(results, months))
+                    results.append(
+                        (
+                            await asyncio.to_thread(run_simulation, bars, sym, frame, True),
+                            await asyncio.to_thread(run_simulation, bars, sym, frame, False),
+                        )
+                    )
+            day_part = format_report([r for r, _ in results], months)
+            ovn = [o for _, o in results]
+            ovn_lines = "\n".join(
+                f"▪️ {r.symbol}: {r.total} صفقة · نجاح {r.win_rate:.0f}%"
+                f" · متوسط {'+' if r.avg_r >= 0 else ''}{r.avg_r:.2f}R"
+                f" · أسوأ {r.worst_r:.1f}R"
+                for r in ovn
+            )
+            await self.notifier.note(
+                "📌 الوضع اليومي — كل صفقة تُغلق قسراً نهاية الجلسة"
+                " (واقع العقود اليومية):\n"
+                + day_part
+                + "\n\n🌙 وللمقارنة، الوضع الممتد (يحمل الصفقة عبر الليل"
+                " ويتعرض للفجوات):\n"
+                + ovn_lines
+            )
         except Exception as exc:  # noqa: BLE001 - report to the operator, never crash the loop
             await self.notifier.note(f"⚠️ تعطل فحص المؤشر: {exc}")
 
