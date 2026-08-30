@@ -145,3 +145,29 @@ def test_fast_profile_reaches_targets_sooner() -> None:
     slow = run_simulation(bars, "TEST", 5, day_close=True)
     assert fast.total == 1 and slow.total == 1
     assert fast.trades[0].t1_hit and slow.trades[0].t1_hit
+
+
+def test_tv_webhook_route_relays_signal() -> None:
+    import asyncio
+    import hashlib
+
+    from fastapi.testclient import TestClient
+
+    from qqq_alpha.config import Settings
+    from qqq_alpha.dashboard.app import create_app
+
+    settings = Settings(telegram_bot_token="tok-123", dashboard_password="x")
+    got: list[str] = []
+
+    async def on_sig(raw: str) -> None:
+        got.append(raw)
+
+    app = create_app(settings, on_tv_signal=on_sig)
+    secret = hashlib.sha256(b"tok-123:tv-webhook").hexdigest()[:24]
+    client = TestClient(app)
+    ok = client.post(f"/tv/{secret}", content="🎯 دخول كول TSLA 352.95")
+    assert ok.status_code == 200 and ok.json() == {"ok": True}
+    assert got == ["🎯 دخول كول TSLA 352.95"]
+    bad = client.post("/tv/wrong-secret", content="x")
+    assert bad.status_code == 404
+    asyncio.set_event_loop(asyncio.new_event_loop())

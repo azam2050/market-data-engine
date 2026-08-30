@@ -8,6 +8,7 @@ reply. Nothing here can place, close, or alter a trade.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
@@ -50,6 +51,7 @@ def create_app(
     on_subscriber_change: Callable[[str, dict, int | None], Awaitable[None]] | None = None,
     channel_roster: Callable[[list[str]], Awaitable[dict]] | None = None,
     on_payment: Callable[[str, str, dict], Awaitable[None]] | None = None,
+    on_tv_signal: Callable[[str], Awaitable[None]] | None = None,
 ) -> FastAPI:
     """Build the dashboard app.
 
@@ -177,6 +179,24 @@ def create_app(
                 "brand_name": settings.brand_name,
             },
         )
+
+    # -------------------------------------------------- TradingView webhook
+    # the indicator's eyes reach the engine here: the operator pastes this
+    # secret URL once into each TradingView alert, and every signal the
+    # indicator fires lands in this process within a second. The secret is
+    # derived from the bot token, so no new environment variable to manage.
+    tv_secret = hashlib.sha256(
+        f"{settings.telegram_bot_token}:tv-webhook".encode()
+    ).hexdigest()[:24]
+
+    @app.post("/tv/{secret}")
+    async def tradingview_signal(secret: str, request: Request):
+        if not settings.telegram_bot_token or secret != tv_secret:
+            return JSONResponse({"ok": False}, status_code=404)
+        raw = (await request.body())[:2000].decode("utf-8", errors="replace").strip()
+        if raw and on_tv_signal is not None:
+            await on_tv_signal(raw)
+        return {"ok": True}
 
     @app.post("/moyasar/webhook")
     async def moyasar_webhook(request: Request):

@@ -1787,6 +1787,16 @@ class LiveEngine:
         months = max(1, min(24, numbers[1])) if len(numbers) > 1 else 12
         return symbols, frame, months, mode, profile
 
+    async def _on_tv_signal(self, raw: str) -> None:
+        """Stage one of the TradingView bridge: prove the wire end to end.
+
+        Every alert the indicator fires arrives here through the secret
+        webhook; for now it is relayed verbatim to the operator's chat so
+        the connection can be trusted before any brain or channel logic
+        hangs off it.
+        """
+        await self.notifier.note("📡 إشارة من TradingView:\n" + raw[:900])
+
     async def _run_indicator_backtest(
         self, symbols: list[str], frame: int, months: int, diagnose: bool = False,
         mode: str = "عادي", profile: str = "متوازن",
@@ -1911,6 +1921,23 @@ class LiveEngine:
                 await self.commands.send(admin, cards_guide_message())
                 for caption, png in self._preview_cards():
                     await self.commands.send_photo(admin, png, caption)
+            return
+        if text.strip().lower() in {"رابط الإشارات", "رابط الاشارات", "الرابط", "tvlink"}:
+            import hashlib as _h
+
+            sec = _h.sha256(
+                f"{self.settings.telegram_bot_token}:tv-webhook".encode()
+            ).hexdigest()[:24]
+            base = (self.settings.public_base_url or "").rstrip("/")
+            if not base:
+                await self.notifier.note("➖ PUBLIC_BASE_URL غير مضبوط في Railway")
+                return
+            await self.notifier.note(
+                "🔗 عنوان استقبال إشارات TradingView (سري — لا تشاركه):\n"
+                f"{base}/tv/{sec}\n\n"
+                "الصقه في خانة Webhook URL داخل نافذة التنبيه لكل سهم، "
+                "وكل إشارة يطلقها المؤشر ستصلني هنا فوراً."
+            )
             return
         if parts and parts[0].strip().lower() in {"تشخيص", "diagnose"}:
             # dissect the year's losing trades: by setup, hour, alignment,
@@ -2250,6 +2277,7 @@ class LiveEngine:
             on_subscriber_change=self._on_subscriber_change,
             channel_roster=self._channel_roster,
             on_payment=self._on_payment,
+            on_tv_signal=self._on_tv_signal,
         )
         config = uvicorn.Config(
             app,

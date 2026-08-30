@@ -93,7 +93,11 @@ wl3 = input.symbol("NASDAQ:NVDA", "السهم ٣", group=grpWL)
 wl4 = input.symbol("NASDAQ:AAPL", "السهم ٤", group=grpWL)
 wl5 = input.symbol("NASDAQ:MSFT", "السهم ٥", group=grpWL)
 wl6 = input.symbol("NASDAQ:MU",   "السهم ٦", group=grpWL)
-wlN = input.int(4, "عدد الأسهم المعروضة", minval=1, maxval=6, group=grpWL)
+wl7 = input.symbol("NASDAQ:GOOG", "السهم ٧", group=grpWL)
+wl8 = input.symbol("NASDAQ:AMZN", "السهم ٨", group=grpWL)
+wl9 = input.symbol("NASDAQ:META", "السهم ٩", group=grpWL)
+wl10 = input.symbol("NASDAQ:AVGO", "السهم ١٠", group=grpWL)
+wlN = input.int(10, "عدد الأسهم المعروضة", minval=1, maxval=10, group=grpWL)
 
 // ------------------------------------------------------------------ الألوان
 cUp   = #26A69A
@@ -556,6 +560,10 @@ f_wlFetch(sym) =>
 [w4c, w4d, w4y] = f_wlFetch(wl4)
 [w5c, w5d, w5y] = f_wlFetch(wl5)
 [w6c, w6d, w6y] = f_wlFetch(wl6)
+[w7c, w7d, w7y] = f_wlFetch(wl7)
+[w8c, w8d, w8y] = f_wlFetch(wl8)
+[w9c, w9d, w9y] = f_wlFetch(wl9)
+[w10c, w10d, w10y] = f_wlFetch(wl10)
 
 f_wlShort(sym) =>
     parts = str.split(sym, ":")
@@ -596,6 +604,14 @@ if showWatch and barstate.islast
         f_wlRow(wtab, 5, wl5, w5c, w5d, w5y)
     if wlN >= 6
         f_wlRow(wtab, 6, wl6, w6c, w6d, w6y)
+    if wlN >= 7
+        f_wlRow(wtab, 7, wl7, w7c, w7d, w7y)
+    if wlN >= 8
+        f_wlRow(wtab, 8, wl8, w8c, w8d, w8y)
+    if wlN >= 9
+        f_wlRow(wtab, 9, wl9, w9c, w9d, w9y)
+    if wlN >= 10
+        f_wlRow(wtab, 10, wl10, w10c, w10d, w10y)
 
 // --------------------------------------------------------------- لوحة الصدق
 var table hon = table.new(dashPosS == "أسفل يمين" ? position.bottom_left : position.bottom_right, 1, 3, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
