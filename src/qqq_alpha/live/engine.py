@@ -1698,8 +1698,8 @@ class LiveEngine:
         await self.commands.send(
             message.chat_id,
             f"✅ تم تسجيل اسمك في TradingView‏: {username}\n"
-            "سيصلك تأكيد تفعيل المؤشر خلال ساعات — التفعيل يدوي من إدارة "
-            "المنصة.",
+            "ستصلك دعوة الوصول داخل TradingView من حسابنا الرسمي MirsadTech "
+            "خلال ساعات — التفعيل يدوي من إدارة المنصة.",
         )
         expires_on = str(row.get("expires_at") or "")[:10]
         name = message.username or message.first_name or message.chat_id
