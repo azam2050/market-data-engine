@@ -1755,6 +1755,38 @@ class LiveEngine:
             # nudge every day for the rest of the window
             self.memory.mark_reminded(row["chat_id"], now)
 
+    @staticmethod
+    def _parse_backtest_args(parts: list[str]) -> tuple[list[str], int, int, str, str]:
+        """Order-free parsing: Arabic/Latin bidi reordering must never matter.
+
+        Digits are frame then months, a Latin token is the symbol, keywords
+        set mode/profile wherever they appear, unknown Arabic is ignored.
+        """
+        mode = "عادي"
+        profile = "متوازن"
+        symbols = ["TSLA", "AAPL", "MSFT", "NVDA", "QQQ", "AMZN", "GOOG", "MU"]
+        numbers: list[int] = []
+        for token in parts[1:]:
+            tk = token.strip()
+            if not tk:
+                continue
+            if tk in {"جودة", "جوده", "الجودة", "الجوده", "quality"}:
+                mode = "جودة"
+            elif tk in {"نخبة", "نخبه", "النخبة", "النخبه", "elite"}:
+                mode = "نخبة"
+            elif tk in {"سريع", "السريع", "fast"}:
+                profile = "سريع"
+            elif tk in {"الكل", "كله", "كل", "all"}:
+                pass  # the default list already covers it
+            elif tk.isdigit():
+                numbers.append(int(tk))
+            elif tk.isascii():
+                symbols = [tk.upper()]
+            # unknown Arabic tokens are ignored on purpose
+        frame = max(1, min(60, numbers[0])) if numbers else 5
+        months = max(1, min(24, numbers[1])) if len(numbers) > 1 else 12
+        return symbols, frame, months, mode, profile
+
     async def _run_indicator_backtest(
         self, symbols: list[str], frame: int, months: int, diagnose: bool = False,
         mode: str = "عادي", profile: str = "متوازن",
@@ -1883,15 +1915,7 @@ class LiveEngine:
         if parts and parts[0].strip().lower() in {"تشخيص", "diagnose"}:
             # dissect the year's losing trades: by setup, hour, alignment,
             # and signal strength — the evidence a quality mode is built on
-            symbols = ["TSLA", "AAPL", "MSFT", "NVDA", "QQQ", "AMZN", "GOOG", "MU"]
-            frame = 5
-            months = 12
-            if len(parts) >= 2 and parts[1].strip() not in {"الكل", "all"}:
-                symbols = [parts[1].strip().upper()]
-            if len(parts) >= 3 and parts[2].isdigit():
-                frame = max(1, min(60, int(parts[2])))
-            if len(parts) >= 4 and parts[3].isdigit():
-                months = max(1, min(24, int(parts[3])))
+            symbols, frame, months, _, _ = self._parse_backtest_args(parts)
             await self.notifier.note(
                 f"🔎 بدأ التشريح: {'، '.join(symbols)} · فريم {frame} د · {months} شهراً"
             )
@@ -1904,32 +1928,7 @@ class LiveEngine:
             # operator asks from Telegram instead of hunting TradingView tabs.
             # Syntax: "باكتست NVDA" | "باكتست NVDA 15" | "باكتست NVDA 5 6"
             # | "باكتست الكل" for the whole launch list on 5m.
-            mode = "عادي"
-            profile = "متوازن"
-            args = []
-            for token in parts[1:]:
-                tk = token.strip()
-                if tk in {"جودة", "جوده", "الجودة", "الجوده", "quality"}:
-                    mode = "جودة"
-                elif tk in {"نخبة", "نخبه", "النخبة", "النخبه", "elite"}:
-                    mode = "نخبة"
-                elif tk in {"سريع", "السريع", "fast"}:
-                    profile = "سريع"
-                elif tk in {"كله", "كل"}:
-                    args.append("الكل")
-                elif any("\u0600" <= ch <= "\u06FF" for ch in tk) and tk not in {"الكل"}:
-                    continue  # عربي غير معروف — تجاهله بدل اعتباره رمز سهم
-                else:
-                    args.append(tk)
-            symbols = ["TSLA", "AAPL", "MSFT", "NVDA", "QQQ", "AMZN", "GOOG", "MU"]
-            frame = 5
-            months = 12
-            if args and args[0] not in {"الكل", "all"}:
-                symbols = [args[0].upper()]
-            if len(args) >= 2 and args[1].isdigit():
-                frame = max(1, min(60, int(args[1])))
-            if len(args) >= 3 and args[2].isdigit():
-                months = max(1, min(24, int(args[2])))
+            symbols, frame, months, mode, profile = self._parse_backtest_args(parts)
             await self.notifier.note(
                 f"🧪 بدأ الفحص ({mode} · {profile}): {'، '.join(symbols)}"
                 f" · فريم {frame} د · {months} شهراً"
