@@ -183,6 +183,10 @@ class LiveEngine:
         self._command_task: asyncio.Task | None = None
         self._dashboard_task: asyncio.Task | None = None
         self._watchdog_task: asyncio.Task | None = None
+        # the TradingView bridge is built lazily on the first webhook and
+        # kept for the life of the process: its per-symbol open-trade state
+        # is what lets a target alert quote the contract its entry picked
+        self._tv_bridge = None
         # the door to a real broker. Disarmed unless EXECUTION_ENABLED is on
         # *and* a broker is configured, and it journals every intent either
         # way — so the order file fills with what would have been sent long
@@ -1788,14 +1792,41 @@ class LiveEngine:
         return symbols, frame, months, mode, profile
 
     async def _on_tv_signal(self, raw: str) -> None:
-        """Stage one of the TradingView bridge: prove the wire end to end.
+        """Stage two of the TradingView bridge: alerts become contract cards.
 
         Every alert the indicator fires arrives here through the secret
-        webhook; for now it is relayed verbatim to the operator's chat so
-        the connection can be trusted before any brain or channel logic
-        hangs off it.
+        webhook. The bridge parses it, picks a real option contract for
+        entries (QQQ same-day, stocks nearest weekly Friday, 🌙 next
+        expiry) and posts the card to the private channel; targets and
+        exits become follow-ups quoting the live contract price. The
+        bridge instance lives across signals so follow-ups find the trade
+        their entry opened.
         """
-        await self.notifier.note("📡 إشارة من TradingView:\n" + raw[:900])
+        if self._tv_bridge is None:
+            from qqq_alpha.live.tvbridge import TvBridge
+
+            async def channel_send(text: str) -> bool:
+                target = str(self.settings.telegram_private_channel_id or "")
+                if not target or self.commands is None:
+                    return False
+                return await self.commands.send(target, text)
+
+            async def chain_fetch(symbol, expiry, want):
+                async with MassiveClient(self.settings) as client:
+                    return await client.option_chain(symbol, expiry, want)
+
+            self._tv_bridge = TvBridge(
+                admin_send=self.notifier.note,
+                channel_send=channel_send,
+                chain_fetch=chain_fetch,
+            )
+        try:
+            await self._tv_bridge.handle(raw)
+        except Exception as exc:  # noqa: BLE001 - the webhook must never 500 back at TradingView
+            log.exception("tv bridge failed on signal")
+            await self.notifier.note(
+                f"⚠️ تعطل جسر TradingView على إشارة: {exc}\n{raw[:300]}"
+            )
 
     async def _run_indicator_backtest(
         self, symbols: list[str], frame: int, months: int, diagnose: bool = False,
