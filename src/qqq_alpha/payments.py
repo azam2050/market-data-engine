@@ -36,6 +36,31 @@ PRODUCT_TAG = "oqood_channel"
 
 MOYASAR_API = "https://api.moyasar.com/v1"
 
+# the three monthly plans. Codes are wire format — they ride pay links and
+# payment metadata, so they never change; labels and prices are display.
+PLAN_LABELS: dict[str, str] = {
+    "indicator": "📊 المؤشر",
+    "channel": "⭐️ القناة الخاصة",
+    "vip": "👑 VIP — القناة والمؤشر معاً",
+}
+DEFAULT_PLAN = "vip"
+
+
+def plan_price_sar(settings: Settings, plan: str) -> int:
+    return {
+        "indicator": settings.price_indicator_sar,
+        "channel": settings.price_channel_sar,
+        "vip": settings.price_vip_sar,
+    }.get(plan, settings.price_vip_sar)
+
+
+def plan_includes_channel(plan: str) -> bool:
+    return plan in ("channel", "vip")
+
+
+def plan_includes_indicator(plan: str) -> bool:
+    return plan in ("indicator", "vip")
+
 
 def payments_configured(settings: Settings) -> bool:
     return bool(
@@ -63,16 +88,16 @@ def verify_chat_signature(settings: Settings, chat_id: str, signature: str) -> b
     return bool(chat_id) and hmac.compare_digest(sign_chat(settings, chat_id), signature)
 
 
-def pay_link(settings: Settings, chat_id: str) -> str | None:
-    """The personal payment URL for one subscriber, or None while dark."""
+def pay_link(settings: Settings, chat_id: str, plan: str = DEFAULT_PLAN) -> str | None:
+    """The personal payment URL for one subscriber and plan, or None while dark."""
     if not payments_configured(settings):
         return None
     base = settings.public_base_url.rstrip("/")
-    return f"{base}/pay?u={chat_id}&t={sign_chat(settings, chat_id)}"
+    return f"{base}/pay?u={chat_id}&t={sign_chat(settings, chat_id)}&p={plan}"
 
 
-def expected_amount_halalas(settings: Settings) -> int:
-    return settings.subscription_price_sar * 100
+def expected_amount_halalas(settings: Settings, plan: str) -> int:
+    return plan_price_sar(settings, plan) * 100
 
 
 async def fetch_payment(
@@ -109,13 +134,20 @@ def payment_problems(settings: Settings, payment: dict[str, Any]) -> list[str]:
     problems: list[str] = []
     if payment.get("status") != "paid":
         problems.append(f"الحالة {payment.get('status')!r} وليست paid")
-    if int(payment.get("amount") or 0) != expected_amount_halalas(settings):
-        problems.append(
-            f"المبلغ {payment.get('amount')} هللة ≠ المطلوب {expected_amount_halalas(settings)}"
-        )
+    meta = payment.get("metadata") or {}
+    plan = str(meta.get("plan") or "")
+    if plan not in PLAN_LABELS:
+        problems.append(f"باقة غير معروفة {plan!r}")
+    else:
+        # the amount must match the CLAIMED plan's price: paying the
+        # indicator's price cannot buy the VIP bundle
+        expected = expected_amount_halalas(settings, plan)
+        if int(payment.get("amount") or 0) != expected:
+            problems.append(
+                f"المبلغ {payment.get('amount')} هللة ≠ المطلوب {expected} لباقة {plan}"
+            )
     if (payment.get("currency") or "").upper() != "SAR":
         problems.append(f"العملة {payment.get('currency')!r} وليست SAR")
-    meta = payment.get("metadata") or {}
     if meta.get("product") != PRODUCT_TAG:
         problems.append("وسم المنتج غير مطابق")
     chat_id = str(meta.get("telegram_id") or "")

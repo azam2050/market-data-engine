@@ -127,7 +127,7 @@ def create_app(
     # nothing it is told: the payment is re-fetched from Moyasar with the
     # secret key before a single day is granted.
     @app.get("/pay")
-    def pay(request: Request, u: str = "", t: str = ""):
+    def pay(request: Request, u: str = "", t: str = "", p: str = ""):
         base = settings.public_base_url.rstrip("/")
         if not pay_gateway.payments_configured(settings):
             return templates.TemplateResponse(
@@ -149,16 +149,20 @@ def create_app(
                     "brand_name": settings.brand_name,
                 },
             )
+        plan = p if p in pay_gateway.PLAN_LABELS else pay_gateway.DEFAULT_PLAN
+        plan_label = pay_gateway.PLAN_LABELS[plan]
         return templates.TemplateResponse(
             request,
             "pay.html",
             {
                 "brand_name": settings.brand_name,
                 "brand_logo_url": settings.brand_logo_url,
-                "price": settings.subscription_price_sar,
+                "price": pay_gateway.plan_price_sar(settings, plan),
                 "days": settings.subscription_days,
-                "amount_halalas": pay_gateway.expected_amount_halalas(settings),
-                "description": f"اشتراك شهري — {settings.brand_name}",
+                "plan": plan,
+                "plan_label": plan_label,
+                "amount_halalas": pay_gateway.expected_amount_halalas(settings, plan),
+                "description": f"اشتراك شهري {plan_label} — {settings.brand_name}",
                 "publishable_key": settings.moyasar_publishable_key,
                 "callback_url": f"{base}/pay/done",
                 "product": pay_gateway.PRODUCT_TAG,
@@ -239,17 +243,20 @@ def create_app(
             return {"ok": True, "activated": False}
 
         now = datetime.now(UTC)
+        plan = str(meta.get("plan") or "")
         memory = Memory(settings.data_dir / "memory.db")
         if not memory.record_payment(
             payment_id, chat_id, int(payment.get("amount") or 0),
-            str(payment.get("currency") or "SAR"), now,
+            str(payment.get("currency") or "SAR"), now, plan=plan,
         ):
             return {"ok": True, "duplicate": True}
         if memory.subscriber(chat_id) is None:
             # paid without ever /starting: legal, rare — register on the spot
             # with a zero-length window for the extension to build on
             memory.add_subscriber(chat_id, "", "", joined_at=now, expires_at=now)
-        row = memory.extend_subscriber(chat_id, settings.subscription_days, now)
+        row = memory.extend_subscriber(
+            chat_id, settings.subscription_days, now, plan=plan
+        )
         memory.clear_reminder(chat_id)
         if on_payment is not None:
             await on_payment(
@@ -259,6 +266,7 @@ def create_app(
                     "payment_id": payment_id,
                     "row": row or {},
                     "amount": int(payment.get("amount") or 0),
+                    "plan": plan,
                 },
             )
         return {"ok": True, "activated": True}

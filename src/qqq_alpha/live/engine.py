@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
@@ -1484,7 +1485,7 @@ class LiveEngine:
         await self.commands.send(
             request.user_id,
             welcome_pitch_message(
-                self.settings.trial_days, self.settings.subscription_price_sar
+                self.settings.trial_days, self.settings.price_indicator_sar
             ),
         )
         delivered = await self.commands.send_with_buttons(
@@ -1590,6 +1591,9 @@ class LiveEngine:
             ),
         )
         await self.commands.send(press.user_id, cards_guide_message())
+        from qqq_alpha.live.telegram import tv_username_prompt
+
+        await self.commands.send(press.user_id, tv_username_prompt())
         active = len(self.memory.active_subscriber_ids(now))
         await self.notifier.note(
             f"👤 مشترك جديد أقرّ بالشروط وانضم: {name} — النشطون الآن: {active}"
@@ -1629,7 +1633,7 @@ class LiveEngine:
             await self.commands.send(
                 message.chat_id,
                 welcome_pitch_message(
-                    self.settings.trial_days, self.settings.subscription_price_sar
+                    self.settings.trial_days, self.settings.price_indicator_sar
                 ),
             )
             delivered = await self.commands.send_with_buttons(
@@ -1649,6 +1653,9 @@ class LiveEngine:
             await self._send_pay_offer(message.chat_id)
             return
 
+        if await self._maybe_capture_tv_username(message, row):
+            return
+
         expires = datetime.fromisoformat(row["expires_at"])
         if row["status"] == "trial" and expires > now:
             days_left = (expires - now).days
@@ -1663,30 +1670,80 @@ class LiveEngine:
         else:
             await self._send_farewell(message.chat_id)
 
-    _PAY_WORDS = ("اشتراك", "اشترك", "دفع", "/pay", "/subscribe")
+    _TV_USERNAME = re.compile(r"^[A-Za-z0-9_.\-]{3,30}$")
+
+    async def _maybe_capture_tv_username(self, message, row: dict) -> bool:
+        """«مؤشر Username» from a subscriber books their TradingView name.
+
+        Granting access on TradingView itself is a manual click by the
+        operator, so the capture ends in two messages: a confirmation to the
+        subscriber and a grant order to the operator. Returns True when the
+        message was this command (even a malformed one — the reply explains
+        the format instead of falling through to the status message).
+        """
+        parts = message.text.strip().split()
+        if not parts or parts[0] not in ("مؤشر", "المؤشر", "/tv", "tv"):
+            return False
+        if self.commands is None:
+            return True
+        username = parts[1].lstrip("@") if len(parts) > 1 else ""
+        if not self._TV_USERNAME.match(username):
+            await self.commands.send(
+                message.chat_id,
+                "أرسل الكلمة «مؤشر» ثم اسم المستخدم الخاص بك في TradingView "
+                "بالحروف الإنجليزية — مثال:\n\nمؤشر Ahmed_Trader",
+            )
+            return True
+        self.memory.set_tv_username(message.chat_id, username)
+        await self.commands.send(
+            message.chat_id,
+            f"✅ تم تسجيل اسمك في TradingView‏: {username}\n"
+            "سيصلك تأكيد تفعيل المؤشر خلال ساعات — التفعيل يدوي من إدارة "
+            "المنصة.",
+        )
+        expires_on = str(row.get("expires_at") or "")[:10]
+        name = message.username or message.first_name or message.chat_id
+        await self.notifier.note(
+            f"🖥️ امنح صلاحية المؤشر في TradingView إلى: {username}\n"
+            f"(المشترك {name} — نافذته حتى {expires_on})\n"
+            "أرسل «المؤشرات» لقائمة المنح والإزالة كاملة."
+        )
+        return True
+
+    _PAY_WORDS = ("اشتراك", "اشترك", "دفع", "الباقات", "باقات", "/pay", "/subscribe")
 
     @classmethod
     def _wants_pay_link_text(cls, text: str) -> bool:
         first = text.strip().split()[0].lower() if text.strip() else ""
         return first in cls._PAY_WORDS
 
-    def _pay_link(self, chat_id: str) -> str:
+    def _pay_link(self, chat_id: str, plan: str = "vip") -> str:
         """The subscriber's personal payment URL, or "" while payments are
         dark — messages simply omit the line instead of pointing at a 404."""
         from qqq_alpha.payments import pay_link
 
-        return pay_link(self.settings, str(chat_id)) or ""
+        return pay_link(self.settings, str(chat_id), plan) or ""
+
+    def _plan_buttons(self, chat_id: str) -> list[tuple[str, str]]:
+        """One inline button per plan, each carrying its own signed pay URL.
+        Empty while payments are dark."""
+        from qqq_alpha.payments import PLAN_LABELS, plan_price_sar
+
+        buttons: list[tuple[str, str]] = []
+        for code in ("indicator", "channel", "vip"):
+            link = self._pay_link(chat_id, code)
+            if link:
+                price = plan_price_sar(self.settings, code)
+                buttons.append((f"{PLAN_LABELS[code]} — {price} ريال", link))
+        return buttons
 
     async def _send_farewell(self, chat_id: str) -> None:
-        """The end-of-trial goodbye: pay and public-channel doors as buttons."""
-        from qqq_alpha.live.telegram import PAY_BUTTON, farewell_message
+        """The end-of-trial goodbye: the plan menu and the public-channel door."""
+        from qqq_alpha.live.telegram import farewell_message
 
         if self.commands is None:
             return
-        buttons: list[tuple[str, str]] = []
-        pay = self._pay_link(chat_id)
-        if pay:
-            buttons.append((PAY_BUTTON, pay))
+        buttons = self._plan_buttons(chat_id)
         if self.settings.post_trial_channel_url:
             buttons.append(("📢 القناة العامة المجانية", self.settings.post_trial_channel_url))
         if buttons:
@@ -1697,23 +1754,26 @@ class LiveEngine:
             await self.commands.send(chat_id, farewell_message(False))
 
     async def _send_pay_offer(self, chat_id: str) -> bool:
-        """The pay offer as a card-like message with a real ادفع الآن button."""
-        from qqq_alpha.live.telegram import PAY_BUTTON, pay_offer_message
+        """The three-plan menu, each plan a button with its own pay URL."""
+        from qqq_alpha.live.telegram import plans_offer_message
 
         if self.commands is None:
             return False
-        link = self._pay_link(chat_id)
-        if not link:
+        buttons = self._plan_buttons(chat_id)
+        if not buttons:
             await self.commands.send(
                 chat_id, "الدفع غير مفعّل بعد — سيصلك إشعار عند إتاحته."
             )
             return False
         return await self.commands.send_with_buttons(
             chat_id,
-            pay_offer_message(
-                self.settings.subscription_price_sar, self.settings.subscription_days
+            plans_offer_message(
+                self.settings.price_indicator_sar,
+                self.settings.price_channel_sar,
+                self.settings.price_vip_sar,
+                self.settings.subscription_days,
             ),
-            [(PAY_BUTTON, link)],
+            buttons,
         )
 
     async def _expire_subscribers(self) -> None:
@@ -1738,21 +1798,24 @@ class LiveEngine:
                 # explains it and points at the follow-up channel
                 await self.commands.kick(private, row["chat_id"])
             await self._send_farewell(row["chat_id"])
+            if row.get("tv_username"):
+                # channel removal is automatic; TradingView access is a manual
+                # click, so the operator gets an explicit revoke order
+                await self.notifier.note(
+                    "🖥️ أزل صلاحية المؤشر في TradingView من: "
+                    f"{row['tv_username']} (انتهت فترته)"
+                )
         if due:
             await self.notifier.note(f"⏳ انتهت الفترة التجريبية لـ {len(due)} مشترك")
 
         for row in self.memory.trials_needing_reminder(now):
             expires_on = str(row.get("expires_at") or "")[:10]
-            link = self._pay_link(row["chat_id"])
+            buttons = self._plan_buttons(row["chat_id"])
             text = renewal_reminder_message(
-                expires_on, self.settings.subscription_price_sar, bool(link)
+                expires_on, self.settings.price_indicator_sar, bool(buttons)
             )
-            if link:
-                from qqq_alpha.live.telegram import PAY_BUTTON
-
-                await self.commands.send_with_buttons(
-                    row["chat_id"], text, [(PAY_BUTTON, link)]
-                )
+            if buttons:
+                await self.commands.send_with_buttons(row["chat_id"], text, buttons)
             else:
                 await self.commands.send(row["chat_id"], text)
             # marked regardless of delivery: a blocked bot must not retry the
@@ -1925,6 +1988,27 @@ class LiveEngine:
                 f" | منتهي: {counts.get('expired', 0)}"
             )
             return
+        if parts and parts[0].strip().lower() in {"المؤشرات", "المواشرات", "مؤشرات", "tvusers"}:
+            # the daily TradingView list: who should hold indicator access
+            # right now, and whose access must be clicked away
+            roster = self.memory.indicator_roster(datetime.now(UTC))
+            lines = ["🖥️ قائمة صلاحيات المؤشر في TradingView:"]
+            if roster["grant"]:
+                lines.append("\n✅ يجب أن تكون صلاحيتهم مفعّلة:")
+                for row in roster["grant"]:
+                    who = row.get("first_name") or row.get("username") or row["chat_id"]
+                    plan = row.get("plan") or "تجربة"
+                    exp = str(row.get("expires_at") or "")[:10]
+                    lines.append(f"  • {row['tv_username']} — {who} ({plan}، حتى {exp})")
+            if roster["revoke"]:
+                lines.append("\n⛔ أزل صلاحيتهم:")
+                for row in roster["revoke"]:
+                    who = row.get("first_name") or row.get("username") or row["chat_id"]
+                    lines.append(f"  • {row['tv_username']} — {who}")
+            if not roster["grant"] and not roster["revoke"]:
+                lines.append("لا أسماء مسجلة بعد.")
+            await self.notifier.note("\n".join(lines))
+            return
         if parts and parts[0].strip().lower() in {"معاينة", "معاينه", "preview"}:
             # the operator sees the consent gate exactly as a subscriber
             # would — real buttons, zero side effects
@@ -1941,7 +2025,7 @@ class LiveEngine:
                 await self.commands.send(
                     admin,
                     welcome_pitch_message(
-                        self.settings.trial_days, self.settings.subscription_price_sar
+                        self.settings.trial_days, self.settings.price_indicator_sar
                     ),
                 )
                 await self.commands.send_with_buttons(
@@ -2058,7 +2142,8 @@ class LiveEngine:
             await self.notifier.note(
                 "✅ وصلتني رسالتك — استقبال الرسائل شغال.\n"
                 'الأوامر: "موافق <رقم>" / "رفض <رقم>" لقرارات الدروس، '
-                '"مشتركين" لعدد المشتركين، "معاينة" لتجربة رسالة الإقرار بأزرارها، '
+                '"مشتركين" لعدد المشتركين، "المؤشرات" لقائمة صلاحيات TradingView، '
+                '"معاينة" لتجربة رسالة الإقرار بأزرارها، '
                 '"فحص" للتأكد أن البطاقات تصل إلى القناة الخاصة.'
             )
             return
@@ -2260,16 +2345,24 @@ class LiveEngine:
         if action != "activated":
             return
 
+        from qqq_alpha.payments import (
+            PLAN_LABELS,
+            plan_includes_channel,
+            plan_includes_indicator,
+        )
+
         row = info.get("row") or {}
         expires = str(row.get("expires_at") or "")[:10]
         amount_sar = int(info.get("amount") or 0) // 100
+        plan = str(info.get("plan") or "vip")
+        plan_label = PLAN_LABELS.get(plan, plan)
+        private = self.settings.telegram_private_channel_id
         if self.commands is not None:
             message = (
-                "✅ تم تفعيل اشتراكك — شكرًا لك 🤍\n"
+                f"✅ تم تفعيل اشتراكك — {plan_label} — شكرًا لك 🤍\n"
                 f"اشتراكك فعال حتى {expires}."
             )
-            private = self.settings.telegram_private_channel_id
-            if private:
+            if private and plan_includes_channel(plan):
                 link = await self.commands.create_invite_link(
                     private, name=f"paid-{chat_id}"
                 )
@@ -2279,10 +2372,34 @@ class LiveEngine:
                         f"دخولك (صالح لشخص واحد):\n{link}"
                     )
             await self.commands.send(chat_id, message)
+            if plan_includes_indicator(plan) and not row.get("tv_username"):
+                from qqq_alpha.live.telegram import tv_username_prompt
+
+                await self.commands.send(chat_id, tv_username_prompt())
+            if not plan_includes_channel(plan) and private:
+                # they chose the indicator-only plan: the trial's channel
+                # access ends here, politely and immediately
+                await self.commands.kick(private, chat_id)
+                await self.commands.send(
+                    chat_id,
+                    "باقتك الحالية تشمل المؤشر فقط، لذا انتهى وصولك للقناة "
+                    "الخاصة. للجمع بينهما راسلنا بكلمة «الباقات» في أي وقت.",
+                )
         name = row.get("first_name") or row.get("username") or chat_id
         await self.notifier.note(
-            f"💳 دفعة مؤكدة: {name} — {amount_sar} ريال، اشتراكه فعال حتى {expires}"
+            f"💳 دفعة مؤكدة: {name} — {plan_label} — {amount_sar} ريال، "
+            f"فعال حتى {expires}"
         )
+        if plan_includes_indicator(plan) and row.get("tv_username"):
+            await self.notifier.note(
+                "🖥️ تأكد من منح صلاحية المؤشر في TradingView إلى: "
+                f"{row['tv_username']} — أرسل «المؤشرات» للقائمة الكاملة."
+            )
+        elif not plan_includes_indicator(plan) and row.get("tv_username"):
+            await self.notifier.note(
+                "🖥️ باقته الجديدة بلا مؤشر — أزل صلاحية TradingView من: "
+                f"{row['tv_username']}"
+            )
 
     async def _run_dashboard(self) -> None:
         """Serve the admin dashboard for the life of the session.

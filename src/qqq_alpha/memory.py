@@ -288,6 +288,17 @@ class Memory:
             # when the two-days-left renewal reminder went out — one per
             # trial window, so the funnel nudges without nagging
             conn.execute("ALTER TABLE subscribers ADD COLUMN reminded_at TEXT")
+        with suppress(sqlite3.OperationalError):
+            # which monthly plan the last payment bought: indicator, channel,
+            # or vip. NULL means a trial, which covers both products at once
+            conn.execute("ALTER TABLE subscribers ADD COLUMN plan TEXT")
+        with suppress(sqlite3.OperationalError):
+            # the TradingView username the operator grants indicator access
+            # to — access itself is a manual click on TradingView's site, so
+            # this is the name on the daily grant/revoke list
+            conn.execute("ALTER TABLE subscribers ADD COLUMN tv_username TEXT")
+        with suppress(sqlite3.OperationalError):
+            conn.execute("ALTER TABLE payments ADD COLUMN plan TEXT")
 
     @staticmethod
     def _purge_infeasible_missed(conn: sqlite3.Connection) -> None:
@@ -775,6 +786,7 @@ class Memory:
         amount: int,
         currency: str,
         when: datetime,
+        plan: str = "",
     ) -> bool:
         """Book one gateway payment. False means it was already booked —
         the caller must then do nothing, because whatever this payment buys
@@ -782,8 +794,12 @@ class Memory:
         with closing(self._connect()) as conn:
             cursor = conn.execute(
                 "INSERT OR IGNORE INTO payments"
-                " (payment_id, chat_id, amount, currency, paid_at) VALUES (?,?,?,?,?)",
-                (str(payment_id), str(chat_id), int(amount), currency, when.isoformat()),
+                " (payment_id, chat_id, amount, currency, paid_at, plan)"
+                " VALUES (?,?,?,?,?,?)",
+                (
+                    str(payment_id), str(chat_id), int(amount), currency,
+                    when.isoformat(), plan or None,
+                ),
             )
             conn.commit()
             return cursor.rowcount > 0
@@ -827,13 +843,15 @@ class Memory:
             conn.commit()
 
     def extend_subscriber(
-        self, chat_id: str, days: int, now: datetime
+        self, chat_id: str, days: int, now: datetime, plan: str = ""
     ) -> dict[str, Any] | None:
-        """Grant more free days. Returns the updated row, or None if unknown.
+        """Grant more days. Returns the updated row, or None if unknown.
 
         Extends from the later of the current expiry and now, so topping up a
-        live trial adds to what is left, while reviving a lapsed one starts a
-        fresh window instead of quietly spending the days in the past.
+        live window adds to what is left, while reviving a lapsed one starts a
+        fresh window instead of quietly spending the days in the past. When a
+        ``plan`` is given (a paid extension) it replaces the stored plan — the
+        subscriber's access follows the latest thing they actually bought.
         """
         row = self.subscriber(chat_id)
         if row is None or days <= 0:
@@ -842,11 +860,54 @@ class Memory:
         base = max(current, now) if current else now
         with closing(self._connect()) as conn:
             conn.execute(
-                "UPDATE subscribers SET expires_at = ?, status = 'trial' WHERE chat_id = ?",
-                ((base + timedelta(days=days)).isoformat(), str(chat_id)),
+                "UPDATE subscribers SET expires_at = ?, status = 'trial'"
+                + (", plan = ?" if plan else "")
+                + " WHERE chat_id = ?",
+                ((base + timedelta(days=days)).isoformat(),)
+                + ((plan,) if plan else ())
+                + (str(chat_id),),
             )
             conn.commit()
         return self.subscriber(chat_id)
+
+    def set_tv_username(self, chat_id: str, username: str) -> bool:
+        """Attach the subscriber's TradingView username. False if unknown chat."""
+        if self.subscriber(chat_id) is None:
+            return False
+        with closing(self._connect()) as conn:
+            conn.execute(
+                "UPDATE subscribers SET tv_username = ? WHERE chat_id = ?",
+                (username.strip().lstrip("@"), str(chat_id)),
+            )
+            conn.commit()
+        return True
+
+    def indicator_roster(self, now: datetime) -> dict[str, list[dict[str, Any]]]:
+        """The daily grant/revoke list for the TradingView indicator.
+
+        ``grant``: everyone whose window is live and whose plan includes the
+        indicator (trials — plan NULL — include everything). ``revoke``:
+        everyone with a TradingView username on file who no longer qualifies,
+        either expired or paid for a plan without the indicator. Access on
+        TradingView itself is a manual click, so names, not chat ids.
+        """
+        with closing(self._connect()) as conn:
+            rows = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT * FROM subscribers WHERE tv_username IS NOT NULL"
+                    " AND tv_username != '' ORDER BY expires_at"
+                ).fetchall()
+            ]
+        grant: list[dict[str, Any]] = []
+        revoke: list[dict[str, Any]] = []
+        for row in rows:
+            expires = _as_aware(row["expires_at"])
+            active = row["status"] == "trial" and expires is not None and expires > now
+            plan = row.get("plan") or ""
+            includes = plan in ("", "indicator", "vip")
+            (grant if active and includes else revoke).append(row)
+        return {"grant": grant, "revoke": revoke}
 
     def remove_subscriber(self, chat_id: str) -> dict[str, Any] | None:
         """Delete a subscriber outright. Returns the row that was removed.

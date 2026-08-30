@@ -45,12 +45,12 @@
     <div class="monogram">📊</div>
     {% endif %}
     <h1>{{ brand_name }}</h1>
-    <p>اشتراك القناة الخاصة — دراسات الحالة كاملة والتقارير والمنهج التعليمي</p>
+    <p>{{ plan_label }} — اشتراك شهري بدون تجديد تلقائي</p>
   </div>
 
   <div class="card">
     <div class="price">
-      <span class="label">اشتراك شهري ({{ days }} يومًا)</span>
+      <span class="label">{{ plan_label }} · شهري ({{ days }} يومًا)</span>
       <span class="amount">{{ price }} <small>ريال</small></span>
     </div>
     <ul class="perks">
@@ -73,6 +73,7 @@
     methods: ['creditcard', 'applepay'],
     metadata: {
       product: {{ product | tojson }},
+      plan: {{ plan | tojson }},
       telegram_id: {{ chat_id | tojson }},
       sig: {{ signature | tojson }}
     },

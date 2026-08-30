@@ -974,9 +974,11 @@ def welcome_pitch_message(trial_days: int, price_sar: int) -> str:
         "بالأخضر والخاسر بالأحمر\n\n"
         "(القناة العامة تعرض دراستي حالة أسبوعياً فقط كنموذج — المشترك "
         "يشاهد كل شيء.)\n\n"
-        f"🎁 باقتك: فترة اطلاع مجانية {_days_ar(trial_days)}، كاملة المزايا — "
-        "بدون بطاقة وبدون أي التزام. وبعدها الاشتراك "
-        f"{price_sar} ريال شهرياً لمن أحب الاستمرار.\n\n"
+        "🖥️ وإلى جانب القناة: مؤشر TradingView الخاص بنا — نفس المنهجية "
+        "على شاشتك مباشرة، بأهدافه ووقفه ولوحة نتائجه الصادقة.\n\n"
+        f"🎁 فترة اطلاع مجانية {_days_ar(trial_days)} تشمل الاثنين معاً — "
+        "القناة والمؤشر، كاملة المزايا، بدون بطاقة وبدون أي التزام. "
+        f"وبعدها لمن أحب الاستمرار باقات شهرية تبدأ من {price_sar} ريال.\n\n"
         "وقبل الدخول، اطّلع على الإقرار في الرسالة التالية 👇"
     )
 
@@ -1071,32 +1073,49 @@ def trial_status_message(days_left: int) -> str:
 PAY_BUTTON = "💳 ادفع الآن"
 
 
-def pay_offer_message(price_sar: int, days: int) -> str:
-    """The text above the pay button — the button itself carries the URL,
-    so the message stays clean instead of hosting a raw link."""
+def plans_offer_message(ind_sar: int, ch_sar: int, vip_sar: int, days: int) -> str:
+    """The three-plan menu above the plan buttons — each button carries its
+    own signed pay URL, so the message stays clean of raw links."""
     return (
-        "💳 اشتراك القناة الخاصة\n\n"
-        f"📦 الباقة: شهرية — {price_sar} ريال ({_days_ar(days)})\n"
+        "💳 الباقات الشهرية — اختر ما يناسبك:\n\n"
+        f"📊 المؤشر — {ind_sar} ريال\n"
+        "مؤشر TradingView على شاشتك: الإشارات والأهداف والوقف ولوحة "
+        "النتائج الصادقة\n\n"
+        f"⭐️ القناة الخاصة — {ch_sar} ريال\n"
+        "دراسات الحالة كاملة بالعقود المختارة والمتابعة أولاً بأول\n\n"
+        f"👑 VIP — {vip_sar} ريال\n"
+        "الاثنان معاً — القناة والمؤشر بسعر واحد\n\n"
+        f"📦 كل باقة شهرية ({_days_ar(days)}) — بدون تجديد تلقائي\n"
         "⚡ التفعيل تلقائي فور الدفع — يصلك التأكيد هنا خلال لحظات\n"
         "🔒 دفع آمن عبر بوابة مرخصة من البنك المركزي السعودي\n\n"
-        "اضغط الزر لإكمال الدفع 👇"
+        "اضغط باقتك 👇"
     )
 
 
-def renewal_reminder_message(expires_on: str, price_sar: int, with_button: bool) -> str:
-    """The two-days-left nudge — sent once per trial window. The pay URL
-    itself rides an inline button, never the text."""
+def renewal_reminder_message(expires_on: str, from_sar: int, with_button: bool) -> str:
+    """The two-days-left nudge — sent once per trial window. The pay URLs
+    ride inline buttons, never the text."""
     lines = [
         f"⏳ تنبيه ودّي: تنتهي فترة اطلاعك المجانية بتاريخ {expires_on}.",
     ]
     if with_button:
         lines.append(
-            f"\nللاستمرار بلا انقطاع ({price_sar} ريال شهرياً) اضغط الزر — "
+            f"\nللاستمرار بلا انقطاع اختر باقتك (تبدأ من {from_sar} ريال شهرياً) — "
             "التفعيل تلقائي فور الدفع 👇"
         )
     else:
         lines.append("\nتفاصيل الاستمرار ستصلك قبل انتهاء الفترة.")
     return "\n".join(lines)
+
+
+def tv_username_prompt() -> str:
+    """How a subscriber activates the indicator half of their access."""
+    return (
+        "🖥️ لتفعيل مؤشر TradingView على حسابك:\n"
+        "أرسل هنا كلمة «مؤشر» ثم اسم المستخدم الخاص بك في TradingView — "
+        "مثال:\n\nمؤشر Ahmed_Trader\n\n"
+        "وسيصلك تأكيد التفعيل خلال ساعات (التفعيل يدوي من إدارة المنصة)."
+    )
 
 
 def farewell_message(has_buttons: bool) -> str:

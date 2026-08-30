@@ -139,12 +139,15 @@ class Settings(BaseSettings):
 
     # subscribers — anyone who /starts the bot gets the signals for a free
     # trial, then is pointed at the follow-up channel and cut off. Zero days
-    # disables sign-ups entirely (operator-only bot).
-    trial_days: int = 30
+    # disables sign-ups entirely (operator-only bot). The trial covers both
+    # products at once: the private channel AND the TradingView indicator.
+    trial_days: int = 7
     post_trial_channel_url: str = ""
-    # the monthly price quoted in the welcome pitch — advertising only until
-    # the payment gateway lands; changing the env var updates every message
-    subscription_price_sar: int = 199
+    # the three monthly plans, priced independently so Railway can reprice
+    # without a deploy. Codes: indicator | channel | vip (both products).
+    price_indicator_sar: int = 149
+    price_channel_sar: int = 249
+    price_vip_sar: int = 299
     # Moyasar direct integration. Keys live ONLY in Railway env vars — the
     # payment page renders the publishable key, the secret key never leaves
     # the server (used solely to re-verify a payment before activating it).

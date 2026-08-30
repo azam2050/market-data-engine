@@ -770,7 +770,7 @@ async def test_start_shows_pitch_and_terms_but_registers_nothing(settings, tmp_p
     assert engine.commands.sent and engine.commands.sent[0][0] == "555"
     pitch = engine.commands.sent[0][1]
     assert "QQQ" in pitch and "30" in pitch  # specialization + trial length
-    assert "199" in pitch  # the subscription price is stated up front
+    assert "149" in pitch  # the entry-plan price is stated up front
     # the terms travel separately, with the consent buttons attached
     assert engine.commands.buttoned and "إقرار وإخلاء مسؤولية" in engine.commands.buttoned[0][1]
     # the app language is measured at the top of the funnel
