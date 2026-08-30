@@ -46,6 +46,7 @@ useTf2 = tfMode == "يدوي (الثلاثة أدناه)" ? tf2 : aT2
 useTf3 = tfMode == "يدوي (الثلاثة أدناه)" ? tf3 : aT3
 
 grpSig = "الإشارة (نفس إعدادات المؤشر)"
+qMode = input.bool(true, "⭐ وضع الجودة السريع — 3/3 + قبل ٢ ظهراً + أهداف قريبة", group=grpSig)
 minScore  = input.int(65, "أدنى قوة للدخول (من 100)", minval=50, maxval=90,  group=grpSig)
 needAlign = input.int(2,  "أقل عدد فريمات متوافقة",   minval=1,  maxval=3,   group=grpSig)
 coolBars  = input.int(10, "شموع انتظار بعد كل صفقة",  minval=0,  maxval=200, group=grpSig)
@@ -56,6 +57,11 @@ maxCndAtr = input.float(1.8, "أقصى حجم لشمعة الإشارة (ATR)", 
 waitBars  = input.int(5, "شموع انتظار الارتداد", minval=2, maxval=15, group=grpSig)
 trailAtr  = input.float(2.5, "مسافة الوقف المتحرك (ATR)", minval=1.5, maxval=4.0, step=0.1, group=grpSig)
 retraceMode = entryModeS != "فوري عند إغلاق الشمعة"
+needAlignEff = qMode ? 3 : needAlign
+t1x = qMode ? 0.9 : 1.5
+t2x = qMode ? 1.6 : 2.6
+t3x = qMode ? 2.8 : 4.2
+trailEff = qMode ? 1.8 : trailAtr
 
 grpEnd = "نهاية الجلسة (حماية عقود اليوم)"
 endGuard = input.bool(true, "تفعيل حارس نهاية الجلسة", group=grpEnd)
@@ -171,16 +177,17 @@ posDir  = strategy.position_size > 0 ? 1 : strategy.position_size < 0 ? -1 : 0
 minsLeft  = timeframe.isintraday ? math.max(0.0, (time_close("D") - time_close) / 60000.0) : na
 lateBlock = endGuard and timeframe.isintraday and not na(minsLeft) and minsLeft <= hardMin and endModeS == "منع الإشارات تماماً"
 
-canEnter = not posNow and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr and not lateBlock
+qBlock = qMode and timeframe.isintraday and not na(minsLeft) and minsLeft <= 120
+canEnter = not posNow and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr and not lateBlock and not qBlock
 
-longTrap  = canEnter and bullTrap and callScore >= minScore and alignCall >= needAlign
-shortTrap = canEnter and bearTrap and putScore >= minScore and alignPut >= needAlign
-longBnc  = canEnter and not longTrap and bullBounce and callScore >= minScore and alignCall >= needAlign
-shortBnc = canEnter and not shortTrap and bearBounce and putScore >= minScore and alignPut >= needAlign
+longTrap  = canEnter and bullTrap and callScore >= minScore and alignCall >= needAlignEff
+shortTrap = canEnter and bearTrap and putScore >= minScore and alignPut >= needAlignEff
+longBnc  = canEnter and not longTrap and not qMode and bullBounce and callScore >= minScore and alignCall >= needAlignEff
+shortBnc = canEnter and not shortTrap and bearBounce and putScore >= minScore and alignPut >= needAlignEff
 brkUp = canEnter and not longTrap and not longBnc and (ta.crossover(close, pdH) or ta.crossover(close, pwH)) and
-     relVol > 1.3 and deltaEst > 0 and callScore >= minScore and alignCall >= needAlign and not midRange
+     relVol > 1.3 and deltaEst > 0 and callScore >= minScore and alignCall >= needAlignEff and not midRange
 brkDn = canEnter and not shortTrap and not shortBnc and (ta.crossunder(close, pdL) or ta.crossunder(close, pwL)) and
-     relVol > 1.3 and deltaEst < 0 and putScore >= minScore and alignPut >= needAlign and not midRange
+     relVol > 1.3 and deltaEst < 0 and putScore >= minScore and alignPut >= needAlignEff and not midRange
 
 if longTrap or longBnc or brkUp
     pendStop := longTrap ? low - 0.25 * atr : math.min(low, low[1]) - 0.25 * atr
@@ -208,9 +215,9 @@ justOpened = posNow and not posNow[1]
 if justOpened
     entryBar := bar_index
     stopP := pendStop
-    t1P   := posDir > 0 ? strategy.position_avg_price + 1.5 * atr : strategy.position_avg_price - 1.5 * atr
-    t2P   := posDir > 0 ? strategy.position_avg_price + 2.6 * atr : strategy.position_avg_price - 2.6 * atr
-    t3P   := posDir > 0 ? strategy.position_avg_price + 4.2 * atr : strategy.position_avg_price - 4.2 * atr
+    t1P   := posDir > 0 ? strategy.position_avg_price + t1x * atr : strategy.position_avg_price - t1x * atr
+    t2P   := posDir > 0 ? strategy.position_avg_price + t2x * atr : strategy.position_avg_price - t2x * atr
+    t3P   := posDir > 0 ? strategy.position_avg_price + t3x * atr : strategy.position_avg_price - t3x * atr
     t1Hit := false
     t2Hit := false
     t3Hit := false
@@ -226,7 +233,7 @@ if posNow and not justOpened
     if t2Hit and not t3Hit and (posDir > 0 ? high >= t3P : low <= t3P)
         t3Hit := true
     if t1Hit
-        chandS  = posDir > 0 ? close - trailAtr * atr : close + trailAtr * atr
+        chandS  = posDir > 0 ? close - trailEff * atr : close + trailEff * atr
         okPivL  = not na(lastPivL) and lastPivLBar > entryBar
         okPivH  = not na(lastPivH) and lastPivHBar > entryBar
         structS = posDir > 0 ? (okPivL ? lastPivL - 0.25 * atr : chandS) : (okPivH ? lastPivH + 0.25 * atr : chandS)

@@ -1909,12 +1909,16 @@ class LiveEngine:
             args = []
             for token in parts[1:]:
                 tk = token.strip()
-                if tk in {"جودة", "quality"}:
+                if tk in {"جودة", "جوده", "الجودة", "الجوده", "quality"}:
                     mode = "جودة"
-                elif tk in {"نخبة", "elite"}:
+                elif tk in {"نخبة", "نخبه", "النخبة", "النخبه", "elite"}:
                     mode = "نخبة"
-                elif tk in {"سريع", "fast"}:
+                elif tk in {"سريع", "السريع", "fast"}:
                     profile = "سريع"
+                elif tk in {"كله", "كل"}:
+                    args.append("الكل")
+                elif any("\u0600" <= ch <= "\u06FF" for ch in tk) and tk not in {"الكل"}:
+                    continue  # عربي غير معروف — تجاهله بدل اعتباره رمز سهم
                 else:
                     args.append(tk)
             symbols = ["TSLA", "AAPL", "MSFT", "NVDA", "QQQ", "AMZN", "GOOG", "MU"]

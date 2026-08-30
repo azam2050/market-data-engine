@@ -1,6 +1,6 @@
 //@version=5
 // ============================================================================
-//  المؤشر — النسخة التجريبية 1.7  (الاسم مؤقت — يتغيّر عند النشر)
+//  المؤشر — النسخة التجريبية 1.8  (الاسم مؤقت — يتغيّر عند النشر)
 // ----------------------------------------------------------------------------
 //  الفلسفة: شارت نظيف. على الشارت فقط: خط الدخول، الوقف المتحرك، الأهداف
 //  (تضيء عند التحقق وتختفي بانتهاء الصفقة)، وعلامات المصيدة/الاستعداد.
@@ -48,6 +48,7 @@ useTf2 = tfMode == "يدوي (الثلاثة أدناه)" ? tf2 : aT2
 useTf3 = tfMode == "يدوي (الثلاثة أدناه)" ? tf3 : aT3
 
 grpSig = "الإشارة"
+qMode = input.bool(true, "⭐ وضع الجودة السريع — 3/3 + قبل ٢ ظهراً + أهداف قريبة (مُثبت على ١٢ شهراً)", group=grpSig)
 minScore  = input.int(65, "أدنى قوة للدخول (من 100)", minval=50, maxval=90,  group=grpSig)
 needAlign = input.int(2,  "أقل عدد فريمات متوافقة",   minval=1,  maxval=3,   group=grpSig)
 coolBars  = input.int(10, "شموع انتظار بعد كل صفقة",  minval=0,  maxval=200, group=grpSig)
@@ -58,6 +59,13 @@ maxCndAtr = input.float(1.8, "أقصى حجم لشمعة الإشارة (ATR)", 
 waitBars  = input.int(5, "شموع انتظار الارتداد", minval=2, maxval=15, group=grpSig)
 trailAtr  = input.float(2.5, "مسافة الوقف المتحرك (ATR)", minval=1.5, maxval=4.0, step=0.1, group=grpSig)
 retraceMode = entryModeS != "فوري عند إغلاق الشمعة"
+// وصفة الجودة السريعة (من تشريح ١٥٠ صفقة عبر ١٢ شهراً): توافق كامل 3/3،
+// لا دخول بعد ٢ ظهراً بتوقيت السوق، بدون ارتداد الأرضية، وأهداف سكالب قريبة
+needAlignEff = qMode ? 3 : needAlign
+t1x = qMode ? 0.9 : 1.5
+t2x = qMode ? 1.6 : 2.6
+t3x = qMode ? 2.8 : 4.2
+trailEff = qMode ? 1.8 : trailAtr
 
 grpDisp = "العرض"
 dashPosS = input.string("أعلى يمين", "مكان لوحة القيادة",
@@ -291,16 +299,17 @@ lateBlock = lastWin and endModeS == "منع الإشارات تماماً"
 lateNext  = lastWin and not lateBlock
 lateWarn  = endGuard and timeframe.isintraday and not na(minsLeft) and minsLeft <= warnMin and not lastWin
 
-canEnter = barstate.isconfirmed and not inTrade and pendDir == 0 and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr and not lateBlock
+qBlock = qMode and timeframe.isintraday and not na(minsLeft) and minsLeft <= 120
+canEnter = barstate.isconfirmed and not inTrade and pendDir == 0 and (bar_index - lastExit) > coolBars and (high - low) <= maxCndAtr * atr and not lateBlock and not qBlock
 
-longTrap  = canEnter and bullTrap and callScore >= minScore and alignCall >= needAlign
-shortTrap = canEnter and bearTrap and putScore >= minScore and alignPut >= needAlign
-longBnc  = canEnter and not longTrap and bullBounce and callScore >= minScore and alignCall >= needAlign
-shortBnc = canEnter and not shortTrap and bearBounce and putScore >= minScore and alignPut >= needAlign
+longTrap  = canEnter and bullTrap and callScore >= minScore and alignCall >= needAlignEff
+shortTrap = canEnter and bearTrap and putScore >= minScore and alignPut >= needAlignEff
+longBnc  = canEnter and not longTrap and not qMode and bullBounce and callScore >= minScore and alignCall >= needAlignEff
+shortBnc = canEnter and not shortTrap and bearBounce and putScore >= minScore and alignPut >= needAlignEff
 brkUp = canEnter and not longTrap and not longBnc and (ta.crossover(close, pdH) or ta.crossover(close, pwH)) and
-     relVol > 1.3 and deltaEst > 0 and callScore >= minScore and alignCall >= needAlign and not midRange
+     relVol > 1.3 and deltaEst > 0 and callScore >= minScore and alignCall >= needAlignEff and not midRange
 brkDn = canEnter and not shortTrap and not shortBnc and (ta.crossunder(close, pdL) or ta.crossunder(close, pwL)) and
-     relVol > 1.3 and deltaEst < 0 and putScore >= minScore and alignPut >= needAlign and not midRange
+     relVol > 1.3 and deltaEst < 0 and putScore >= minScore and alignPut >= needAlignEff and not midRange
 
 sigDir  = longTrap ? 1 : shortTrap ? -1 : longBnc ? 1 : shortBnc ? -1 : brkUp ? 1 : brkDn ? -1 : 0
 sigWhy  = longTrap ? "انعكاس مصيدة على الأرضية" : shortTrap ? "انعكاس مصيدة على السقف" :
@@ -360,9 +369,9 @@ if openDir != 0
     entryP  := openEntry
     stopP   := openStop
     stop0   := openStop
-    t1P     := openDir > 0 ? openEntry + 1.5 * atr : openEntry - 1.5 * atr
-    t2P     := openDir > 0 ? openEntry + 2.6 * atr : openEntry - 2.6 * atr
-    t3P     := openDir > 0 ? openEntry + 4.2 * atr : openEntry - 4.2 * atr
+    t1P     := openDir > 0 ? openEntry + t1x * atr : openEntry - t1x * atr
+    t2P     := openDir > 0 ? openEntry + t2x * atr : openEntry - t2x * atr
+    t3P     := openDir > 0 ? openEntry + t3x * atr : openEntry - t3x * atr
     t1Hit   := false
     t2Hit   := false
     t3Hit   := false
@@ -405,7 +414,7 @@ if inTrade and barstate.isconfirmed and openDir == 0
         label.set_text(lbT3, "هدف 3 ✓ ممتد · " + str.tostring(t3P, format.mintick))
         alert("🔺 الهدف الممتد تحقق | " + syminfo.ticker, alert.freq_once_per_bar)
     if t1Hit
-        chandS  = tDir > 0 ? close - trailAtr * atr : close + trailAtr * atr
+        chandS  = tDir > 0 ? close - trailEff * atr : close + trailEff * atr
         okPivL  = not na(lastPivL) and lastPivLBar > entryBar
         okPivH  = not na(lastPivH) and lastPivHBar > entryBar
         structS = tDir > 0 ? (okPivL ? lastPivL - 0.25 * atr : chandS) : (okPivH ? lastPivH + 0.25 * atr : chandS)
