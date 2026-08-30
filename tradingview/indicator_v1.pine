@@ -256,6 +256,8 @@ var resArr  = array.new_int()
 var int   winsAll = 0
 var int   lossAll = 0
 var float sumR    = 0.0
+var float bestR   = na
+var float worstR  = na
 
 // ------------------------------------------------------ علامات استعداد ومصيدة
 prepZoneL = nearFloor and verdict != "بوت"
@@ -428,6 +430,8 @@ if inTrade and barstate.isconfirmed and openDir == 0
         winsAll += win ? 1 : 0
         lossAll += win ? 0 : 1
         sumR    += rMult
+        bestR   := na(bestR) ? rMult : math.max(bestR, rMult)
+        worstR  := na(worstR) ? rMult : math.min(worstR, rMult)
         line.delete(lnEntry)
         line.delete(lnStop)
         line.delete(lnT1)
@@ -585,7 +589,7 @@ if showWatch and barstate.islast
         f_wlRow(wtab, 6, wl6, w6c, w6d, w6y)
 
 // --------------------------------------------------------------- لوحة الصدق
-var table hon = table.new(dashPosS == "أسفل يمين" ? position.bottom_left : position.bottom_right, 1, 2, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+var table hon = table.new(dashPosS == "أسفل يمين" ? position.bottom_left : position.bottom_right, 1, 3, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
 if showHon and barstate.islast
     n20 = array.size(resArr)
     w20 = 0
@@ -597,3 +601,4 @@ if showHon and barstate.islast
     avR = tot > 0 ? sumR / tot : 0.0
     table.cell(hon, 0, 0, "لوحة الصدق — " + syminfo.ticker + " · " + f_tfName(timeframe.period), text_color=cTxt, bgcolor=cHead, text_size=size.small)
     table.cell(hon, 0, 1, "آخر " + str.tostring(n20) + ": " + str.tostring(w20) + "✓ " + str.tostring(n20 - w20) + "✗   |   الكل: " + str.tostring(tot) + " إشارة · نجاح " + str.tostring(wr, "#.#") + "% · متوسط " + (avR >= 0 ? "+" : "") + str.tostring(avR, "#.##") + "R", text_color=cMut, text_size=size.small)
+    table.cell(hon, 0, 2, tot > 0 ? "أفضل صفقة +" + str.tostring(bestR, "#.#") + "R · أسوأ صفقة " + str.tostring(worstR, "#.#") + "R" : "لا صفقات بعد", text_color=cMut, text_size=size.small)
