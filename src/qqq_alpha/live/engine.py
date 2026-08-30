@@ -1756,10 +1756,14 @@ class LiveEngine:
             self.memory.mark_reminded(row["chat_id"], now)
 
     async def _run_indicator_backtest(
-        self, symbols: list[str], frame: int, months: int
+        self, symbols: list[str], frame: int, months: int, diagnose: bool = False
     ) -> None:
         """Fetch a year of bars per symbol and replay the indicator's twin."""
-        from qqq_alpha.backtest.indicator_sim import format_report, run_simulation
+        from qqq_alpha.backtest.indicator_sim import (
+            format_diagnosis,
+            format_report,
+            run_simulation,
+        )
 
         try:
             end = datetime.now(UTC).date()
@@ -1782,6 +1786,11 @@ class LiveEngine:
                             await asyncio.to_thread(run_simulation, bars, sym, frame, False),
                         )
                     )
+            if diagnose:
+                await self.notifier.note(
+                    format_diagnosis([r for r, _ in results], months)
+                )
+                return
             day_part = format_report([r for r, _ in results], months)
             ovn = [o for _, o in results]
             ovn_lines = "\n".join(
@@ -1859,6 +1868,25 @@ class LiveEngine:
                 await self.commands.send(admin, cards_guide_message())
                 for caption, png in self._preview_cards():
                     await self.commands.send_photo(admin, png, caption)
+            return
+        if parts and parts[0].strip().lower() in {"تشخيص", "diagnose"}:
+            # dissect the year's losing trades: by setup, hour, alignment,
+            # and signal strength — the evidence a quality mode is built on
+            symbols = ["TSLA", "AAPL", "MSFT", "NVDA", "QQQ", "AMZN", "GOOG", "MU"]
+            frame = 5
+            months = 12
+            if len(parts) >= 2 and parts[1].strip() not in {"الكل", "all"}:
+                symbols = [parts[1].strip().upper()]
+            if len(parts) >= 3 and parts[2].isdigit():
+                frame = max(1, min(60, int(parts[2])))
+            if len(parts) >= 4 and parts[3].isdigit():
+                months = max(1, min(24, int(parts[3])))
+            await self.notifier.note(
+                f"🔎 بدأ التشريح: {'، '.join(symbols)} · فريم {frame} د · {months} شهراً"
+            )
+            asyncio.create_task(
+                self._run_indicator_backtest(symbols, frame, months, diagnose=True)
+            )
             return
         if parts and parts[0].strip().lower() in {"باكتست", "backtest", "فحص المؤشر"}:
             # the indicator's Python twin over our own year of bars — the

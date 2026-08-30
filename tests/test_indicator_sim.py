@@ -114,3 +114,15 @@ def test_day_close_mode_flattens_at_session_end() -> None:
     assert carried.total == 0, "overnight mode keeps the trade open past the data"
     assert flat.total == 1, "day-close mode must book the trade at the last bar"
     assert flat.trades[0].t1_hit and flat.trades[0].r_mult > 0
+
+
+def test_diagnosis_slices_by_setup_hour_align_and_score() -> None:
+    from qqq_alpha.backtest.indicator_sim import format_diagnosis
+
+    res = run_simulation(_build_scenario(), "TEST", 5, day_close=True)
+    text = format_diagnosis([res], months=12)
+    assert "حسب نوع الدخول" in text
+    assert "حسب وقت الدخول" in text
+    assert "توافق" in text
+    assert "حسب قوة الإشارة" in text
+    assert "أسوأ ثلاث صفقات" in text

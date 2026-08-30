@@ -47,6 +47,10 @@ class SimTrade:
     r_mult: float = 0.0
     t1_hit: bool = False
     kind: str = ""
+    score: int = 0
+    align: int = 0
+    rel_vol: float = 0.0
+    hour_ny: int = 0
 
 
 @dataclass
@@ -240,6 +244,8 @@ def run_simulation(
     pend_lvl = pend_stp = 0.0
     pend_until = pend_since = -1
     pend_kind = ""
+    pend_score = pend_align = 0
+    pend_relvol = 0.0
 
     for i in range(n):
         new_day = i == 0 or days[i] != days[i - 1]
@@ -371,7 +377,10 @@ def run_simulation(
             broken = closes[i] < pend_stp if pend_dir > 0 else closes[i] > pend_stp
             if touched and not broken:
                 trade = SimTrade(direction=pend_dir, entry=pend_lvl, stop0=pend_stp,
-                                 entry_ts=rth[i].ts, kind=pend_kind)
+                                 entry_ts=rth[i].ts, kind=pend_kind,
+                                 score=pend_score, align=pend_align,
+                                 rel_vol=pend_relvol,
+                                 hour_ny=rth[i].ts.astimezone(NY).hour)
                 in_trade = True
                 entry_bar = i
                 stop_p = pend_stp
@@ -424,6 +433,9 @@ def run_simulation(
         pend_until = i + WAIT_BARS
         pend_since = i
         pend_kind = kind + (" 🌙" if mins_left[i] <= END_GUARD_MIN else "")
+        pend_score = call_score if sig_dir > 0 else put_score
+        pend_align = align_call if sig_dir > 0 else align_put
+        pend_relvol = rel_vol
 
     return res
 
@@ -449,4 +461,63 @@ def format_report(results: list[SimResult], months: int) -> str:
         "\nℹ️ نفس عقل المؤشر حرفياً: دخول ارتدادي، وقف يتأمن عند الهدف الأول،"
         " تسلق بنيوي، وR بسعر الخروج الفعلي."
     )
+    return "\n".join(lines)
+
+
+def _slice_line(label: str, trades: list[SimTrade]) -> str:
+    n = len(trades)
+    if n == 0:
+        return f"   {label}: —"
+    wins = sum(1 for t in trades if t.t1_hit)
+    avg = sum(t.r_mult for t in trades) / n
+    return (
+        f"   {label}: {n} صفقة · نجاح {100.0 * wins / n:.0f}%"
+        f" · متوسط {'+' if avg >= 0 else ''}{avg:.2f}R"
+    )
+
+
+def format_diagnosis(results: list[SimResult], months: int) -> str:
+    """Where the losses actually live: by setup, hour, alignment, and score.
+
+    This is the operator's question "why does it fail?" answered with the
+    year's own trades — the raw material for a data-driven quality mode.
+    """
+    trades = [t for r in results for t in r.trades]
+    if not trades:
+        return "🔎 لا صفقات كافية للتشخيص"
+    lines = [f"🔎 تشريح صفقات {months} شهراً — {len(trades)} صفقة (الوضع اليومي)"]
+
+    lines.append("\n🎯 حسب نوع الدخول:")
+    base_kind = lambda t: t.kind.replace(" 🌙", "")  # noqa: E731
+    for kind in sorted({base_kind(t) for t in trades}):
+        lines.append(_slice_line(kind, [t for t in trades if base_kind(t) == kind]))
+
+    lines.append("\n🕐 حسب وقت الدخول (بتوقيت السوق):")
+    hours = [
+        ("الافتتاح 9–10", {9}),
+        ("الصباح 10–12", {10, 11}),
+        ("الظهيرة 12–14", {12, 13}),
+        ("العصر 14–16", {14, 15}),
+    ]
+    for label, hs in hours:
+        lines.append(_slice_line(label, [t for t in trades if t.hour_ny in hs]))
+
+    lines.append("\n🧭 حسب توافق الفريمات:")
+    for a in (2, 3):
+        lines.append(_slice_line(f"توافق {a}/3", [t for t in trades if t.align == a]))
+
+    lines.append("\n💪 حسب قوة الإشارة:")
+    for label, lo, hi in (("65–74", 65, 74), ("75–84", 75, 84), ("85+", 85, 200)):
+        lines.append(_slice_line(label, [t for t in trades if lo <= t.score <= hi]))
+
+    lines.append("\n🌙 صفقات آخر الجلسة:")
+    lines.append(_slice_line("🌙", [t for t in trades if "🌙" in t.kind]))
+
+    worst = sorted(trades, key=lambda t: t.r_mult)[:3]
+    lines.append("\n📉 أسوأ ثلاث صفقات:")
+    for t in worst:
+        lines.append(
+            f"   {t.entry_ts.astimezone(NY):%Y-%m-%d %H:%M} · {t.kind}"
+            f" · قوة {t.score} · {t.r_mult:.1f}R"
+        )
     return "\n".join(lines)
