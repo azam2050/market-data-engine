@@ -152,13 +152,18 @@ def _score(align: int, d_side_ok: bool, near_my: bool, trap_my: bool,
 
 
 def run_simulation(
-    bars: list[Bar], symbol: str, frame_min: int, day_close: bool = False
+    bars: list[Bar], symbol: str, frame_min: int, day_close: bool = False,
+    mode: str = "عادي",
 ) -> SimResult:
     """Replay the indicator over RTH bars of one symbol/frame.
 
     day_close=True mirrors the daily-contracts reality: any open trade is
     flattened at the session's last bar and pendings die with the day, so an
     overnight gap can never turn a -1R stop into a -17R disaster.
+
+    mode: "عادي" takes every qualifying signal; "جودة" applies the rules the
+    year's diagnosis proved (full 3/3 alignment, nothing after 14:00 NY,
+    no floor-bounce longs); "نخبة" takes only 85+ signals — rare and lethal.
     """
     rth = [
         b for b in bars
@@ -181,6 +186,7 @@ def run_simulation(
         (16 * 60) - (t.hour * 60 + t.minute)
         for t in (b.ts.astimezone(NY).time() for b in rth)
     ]
+    hours_ny = [b.ts.astimezone(NY).hour for b in rth]
 
     tr = [highs[0] - lows[0]] + [
         max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
@@ -400,22 +406,27 @@ def run_simulation(
         if not can_enter:
             continue
 
+        if mode == "جودة" and hours_ny[i] >= 14:
+            continue
+        need_align = 3 if mode == "جودة" else NEED_ALIGN
+        min_score = 85 if mode == "نخبة" else MIN_SCORE
+
         prev_close = closes[i - 1]
-        long_trap = bull_trap and call_score >= MIN_SCORE and align_call >= NEED_ALIGN
-        short_trap = bear_trap and put_score >= MIN_SCORE and align_put >= NEED_ALIGN
-        long_bnc = not long_trap and bull_bounce and call_score >= MIN_SCORE and align_call >= NEED_ALIGN
-        short_bnc = not short_trap and bear_bounce and put_score >= MIN_SCORE and align_put >= NEED_ALIGN
+        long_trap = bull_trap and call_score >= min_score and align_call >= need_align
+        short_trap = bear_trap and put_score >= min_score and align_put >= need_align
+        long_bnc = (mode != "جودة") and not long_trap and bull_bounce and call_score >= min_score and align_call >= need_align
+        short_bnc = not short_trap and bear_bounce and put_score >= min_score and align_put >= need_align
         brk_up = (
             not long_trap and not long_bnc and have_edges
             and ((prev_close <= pd_h[i] < closes[i]) or (prev_close <= pw_h[i] < closes[i]))
-            and rel_vol > 1.3 and delta > 0 and call_score >= MIN_SCORE
-            and align_call >= NEED_ALIGN and not mid_range
+            and rel_vol > 1.3 and delta > 0 and call_score >= min_score
+            and align_call >= need_align and not mid_range
         )
         brk_dn = (
             not short_trap and not short_bnc and have_edges
             and ((prev_close >= pd_l[i] > closes[i]) or (prev_close >= pw_l[i] > closes[i]))
-            and rel_vol > 1.3 and delta < 0 and put_score >= MIN_SCORE
-            and align_put >= NEED_ALIGN and not mid_range
+            and rel_vol > 1.3 and delta < 0 and put_score >= min_score
+            and align_put >= need_align and not mid_range
         )
 
         sig_dir = 1 if (long_trap or long_bnc or brk_up) else -1 if (short_trap or short_bnc or brk_dn) else 0

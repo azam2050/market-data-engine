@@ -1756,7 +1756,8 @@ class LiveEngine:
             self.memory.mark_reminded(row["chat_id"], now)
 
     async def _run_indicator_backtest(
-        self, symbols: list[str], frame: int, months: int, diagnose: bool = False
+        self, symbols: list[str], frame: int, months: int, diagnose: bool = False,
+        mode: str = "عادي",
     ) -> None:
         """Fetch a year of bars per symbol and replay the indicator's twin."""
         from qqq_alpha.backtest.indicator_sim import (
@@ -1782,8 +1783,12 @@ class LiveEngine:
                     # the replay is pure CPU over ~20k bars — off the event loop
                     results.append(
                         (
-                            await asyncio.to_thread(run_simulation, bars, sym, frame, True),
-                            await asyncio.to_thread(run_simulation, bars, sym, frame, False),
+                            await asyncio.to_thread(
+                                run_simulation, bars, sym, frame, True, mode
+                            ),
+                            await asyncio.to_thread(
+                                run_simulation, bars, sym, frame, False, mode
+                            ),
                         )
                     )
             if diagnose:
@@ -1792,6 +1797,11 @@ class LiveEngine:
                 )
                 return
             day_part = format_report([r for r, _ in results], months)
+            if mode != "عادي":
+                await self.notifier.note(
+                    f"⭐ وضع {mode} — الوضع اليومي (إغلاق نهاية الجلسة):\n" + day_part
+                )
+                return
             ovn = [o for _, o in results]
             ovn_lines = "\n".join(
                 f"▪️ {r.symbol}: {r.total} صفقة · نجاح {r.win_rate:.0f}%"
@@ -1893,20 +1903,31 @@ class LiveEngine:
             # operator asks from Telegram instead of hunting TradingView tabs.
             # Syntax: "باكتست NVDA" | "باكتست NVDA 15" | "باكتست NVDA 5 6"
             # | "باكتست الكل" for the whole launch list on 5m.
+            mode = "عادي"
+            args = []
+            for token in parts[1:]:
+                tk = token.strip()
+                if tk in {"جودة", "quality"}:
+                    mode = "جودة"
+                elif tk in {"نخبة", "elite"}:
+                    mode = "نخبة"
+                else:
+                    args.append(tk)
             symbols = ["TSLA", "AAPL", "MSFT", "NVDA", "QQQ", "AMZN", "GOOG", "MU"]
             frame = 5
             months = 12
-            if len(parts) >= 2 and parts[1].strip() not in {"الكل", "all"}:
-                symbols = [parts[1].strip().upper()]
-            if len(parts) >= 3 and parts[2].isdigit():
-                frame = max(1, min(60, int(parts[2])))
-            if len(parts) >= 4 and parts[3].isdigit():
-                months = max(1, min(24, int(parts[3])))
+            if args and args[0] not in {"الكل", "all"}:
+                symbols = [args[0].upper()]
+            if len(args) >= 2 and args[1].isdigit():
+                frame = max(1, min(60, int(args[1])))
+            if len(args) >= 3 and args[2].isdigit():
+                months = max(1, min(24, int(args[2])))
             await self.notifier.note(
-                f"🧪 بدأ الفحص: {'، '.join(symbols)} · فريم {frame} د · {months} شهراً — "
-                "أرسل النتيجة أول ما تخلص (دقيقة تقريباً لكل سهم)"
+                f"🧪 بدأ الفحص ({mode}): {'، '.join(symbols)} · فريم {frame} د · {months} شهراً"
             )
-            asyncio.create_task(self._run_indicator_backtest(symbols, frame, months))
+            asyncio.create_task(
+                self._run_indicator_backtest(symbols, frame, months, mode=mode)
+            )
             return
         if parts and parts[0].strip().lower() in {"فحص", "فحص القنوات", "check"}:
             # the definitive answer to "is the bot posting to the channel or

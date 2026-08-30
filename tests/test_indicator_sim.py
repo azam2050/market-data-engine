@@ -126,3 +126,14 @@ def test_diagnosis_slices_by_setup_hour_align_and_score() -> None:
     assert "توافق" in text
     assert "حسب قوة الإشارة" in text
     assert "أسوأ ثلاث صفقات" in text
+
+
+def test_quality_and_elite_modes_filter_entries() -> None:
+    bars = _build_scenario()
+    normal = run_simulation(bars, "TEST", 5, day_close=True)
+    quality = run_simulation(bars, "TEST", 5, day_close=True, mode="جودة")
+    elite = run_simulation(bars, "TEST", 5, day_close=True, mode="نخبة")
+    # the breakout fires at ~12:50 NY with full 3/3 alignment: quality keeps it
+    assert normal.total == 1 and quality.total == 1
+    # its score sits below 85, so the elite mode must refuse it
+    assert elite.total == 0
