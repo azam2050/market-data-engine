@@ -1755,6 +1755,32 @@ class LiveEngine:
             # nudge every day for the rest of the window
             self.memory.mark_reminded(row["chat_id"], now)
 
+    async def _run_indicator_backtest(
+        self, symbols: list[str], frame: int, months: int
+    ) -> None:
+        """Fetch a year of bars per symbol and replay the indicator's twin."""
+        from qqq_alpha.backtest.indicator_sim import format_report, run_simulation
+
+        try:
+            end = datetime.now(UTC).date()
+            start = end - timedelta(days=round(months * 30.4))
+            # keep each aggregates request under the provider's 50k-row cap
+            chunk_days = 20 if frame < 5 else 90
+            results = []
+            async with MassiveClient(self.settings) as client:
+                for sym in symbols:
+                    bars: list = []
+                    s = start
+                    while s <= end:
+                        e = min(s + timedelta(days=chunk_days - 1), end)
+                        bars.extend(await client.range_minute_bars(sym, frame, s, e))
+                        s = e + timedelta(days=1)
+                    # the replay is pure CPU over ~20k bars — off the event loop
+                    results.append(await asyncio.to_thread(run_simulation, bars, sym, frame))
+            await self.notifier.note(format_report(results, months))
+        except Exception as exc:  # noqa: BLE001 - report to the operator, never crash the loop
+            await self.notifier.note(f"⚠️ تعطل فحص المؤشر: {exc}")
+
     async def _handle_command(self, text: str) -> None:
         parts = text.strip().split()
         if parts and parts[0].strip().lower() in {"دفع", "رابط", "paylink"}:
@@ -1813,6 +1839,26 @@ class LiveEngine:
                 await self.commands.send(admin, cards_guide_message())
                 for caption, png in self._preview_cards():
                     await self.commands.send_photo(admin, png, caption)
+            return
+        if parts and parts[0].strip().lower() in {"باكتست", "backtest", "فحص المؤشر"}:
+            # the indicator's Python twin over our own year of bars — the
+            # operator asks from Telegram instead of hunting TradingView tabs.
+            # Syntax: "باكتست NVDA" | "باكتست NVDA 15" | "باكتست NVDA 5 6"
+            # | "باكتست الكل" for the whole launch list on 5m.
+            symbols = ["TSLA", "AAPL", "MSFT", "NVDA", "QQQ", "AMZN", "GOOG", "MU"]
+            frame = 5
+            months = 12
+            if len(parts) >= 2 and parts[1].strip() not in {"الكل", "all"}:
+                symbols = [parts[1].strip().upper()]
+            if len(parts) >= 3 and parts[2].isdigit():
+                frame = max(1, min(60, int(parts[2])))
+            if len(parts) >= 4 and parts[3].isdigit():
+                months = max(1, min(24, int(parts[3])))
+            await self.notifier.note(
+                f"🧪 بدأ الفحص: {'، '.join(symbols)} · فريم {frame} د · {months} شهراً — "
+                "أرسل النتيجة أول ما تخلص (دقيقة تقريباً لكل سهم)"
+            )
+            asyncio.create_task(self._run_indicator_backtest(symbols, frame, months))
             return
         if parts and parts[0].strip().lower() in {"فحص", "فحص القنوات", "check"}:
             # the definitive answer to "is the bot posting to the channel or

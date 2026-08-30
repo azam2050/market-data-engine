@@ -165,6 +165,34 @@ class MassiveClient:
             for row in payload.get("results") or []
         ]
 
+    async def range_minute_bars(
+        self, symbol: str, minutes: int, start: date, end: date
+    ) -> list[Bar]:
+        """N-minute bars across a date span in one request (up to 50k rows).
+
+        Includes extended hours — the provider offers no RTH-only switch, so
+        callers that need the regular session must filter by timestamp.
+        """
+        payload = await self._get(
+            f"/v2/aggs/ticker/{symbol}/range/{minutes}/minute/"
+            f"{start.isoformat()}/{end.isoformat()}",
+            {"adjusted": "true", "sort": "asc", "limit": 50_000},
+        )
+        return [
+            Bar(
+                symbol=symbol,
+                ts=_ms_to_dt(row.get("t")),
+                open=float(row["o"]),
+                high=float(row["h"]),
+                low=float(row["l"]),
+                close=float(row["c"]),
+                volume=int(row.get("v") or 0),
+                vwap=float(row["vw"]) if row.get("vw") is not None else None,
+                transactions=int(row["n"]) if row.get("n") is not None else None,
+            )
+            for row in payload.get("results") or []
+        ]
+
     async def session(self, symbol: str, day: date) -> TradingSession:
         """One trading day, cleaned and ready to use.
 
