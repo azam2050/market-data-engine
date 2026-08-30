@@ -137,3 +137,11 @@ def test_quality_and_elite_modes_filter_entries() -> None:
     assert normal.total == 1 and quality.total == 1
     # its score sits below 85, so the elite mode must refuse it
     assert elite.total == 0
+
+
+def test_fast_profile_reaches_targets_sooner() -> None:
+    bars = _build_scenario()
+    fast = run_simulation(bars, "TEST", 5, day_close=True, profile="سريع")
+    slow = run_simulation(bars, "TEST", 5, day_close=True)
+    assert fast.total == 1 and slow.total == 1
+    assert fast.trades[0].t1_hit and slow.trades[0].t1_hit

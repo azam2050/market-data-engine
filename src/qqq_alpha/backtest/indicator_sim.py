@@ -153,7 +153,7 @@ def _score(align: int, d_side_ok: bool, near_my: bool, trap_my: bool,
 
 def run_simulation(
     bars: list[Bar], symbol: str, frame_min: int, day_close: bool = False,
-    mode: str = "عادي",
+    mode: str = "عادي", profile: str = "متوازن",
 ) -> SimResult:
     """Replay the indicator over RTH bars of one symbol/frame.
 
@@ -164,7 +164,15 @@ def run_simulation(
     mode: "عادي" takes every qualifying signal; "جودة" applies the rules the
     year's diagnosis proved (full 3/3 alignment, nothing after 14:00 NY,
     no floor-bounce longs); "نخبة" takes only 85+ signals — rare and lethal.
+
+    profile: "متوازن" keeps the wave targets (1.5/2.6/4.2 ATR); "سريع" is the
+    scalper geometry (0.9/1.6/2.8 ATR with a tighter trail) — closer targets
+    get touched far more often, which is the honest mechanics behind every
+    "90% indicator" on the market. We publish the trade-off instead of hiding it.
     """
+    t1x, t2x, t3x, trail_x = (
+        (0.9, 1.6, 2.8, 1.8) if profile == "سريع" else (1.5, 2.6, 4.2, TRAIL_ATR)
+    )
     rth = [
         b for b in bars
         if time(9, 30) <= b.ts.astimezone(NY).time() < time(16, 0)
@@ -361,7 +369,7 @@ def run_simulation(
             if t2h and not t3h and (highs[i] >= t3p if d > 0 else lows[i] <= t3p):
                 t3h = True
             if t1h:
-                chand = closes[i] - TRAIL_ATR * a if d > 0 else closes[i] + TRAIL_ATR * a
+                chand = closes[i] - trail_x * a if d > 0 else closes[i] + trail_x * a
                 if d > 0:
                     struct = last_piv_l - 0.25 * a if (last_piv_l is not None and last_piv_l_bar > entry_bar) else chand
                     stop_p = max(stop_p, max(chand, struct))
@@ -390,9 +398,9 @@ def run_simulation(
                 in_trade = True
                 entry_bar = i
                 stop_p = pend_stp
-                t1p = pend_lvl + 1.5 * a if pend_dir > 0 else pend_lvl - 1.5 * a
-                t2p = pend_lvl + 2.6 * a if pend_dir > 0 else pend_lvl - 2.6 * a
-                t3p = pend_lvl + 4.2 * a if pend_dir > 0 else pend_lvl - 4.2 * a
+                t1p = pend_lvl + t1x * a if pend_dir > 0 else pend_lvl - t1x * a
+                t2p = pend_lvl + t2x * a if pend_dir > 0 else pend_lvl - t2x * a
+                t3p = pend_lvl + t3x * a if pend_dir > 0 else pend_lvl - t3x * a
                 t1h = t2h = t3h = False
                 pend_dir = 0
             elif broken or i > pend_until:

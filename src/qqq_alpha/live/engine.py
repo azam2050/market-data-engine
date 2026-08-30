@@ -1757,7 +1757,7 @@ class LiveEngine:
 
     async def _run_indicator_backtest(
         self, symbols: list[str], frame: int, months: int, diagnose: bool = False,
-        mode: str = "عادي",
+        mode: str = "عادي", profile: str = "متوازن",
     ) -> None:
         """Fetch a year of bars per symbol and replay the indicator's twin."""
         from qqq_alpha.backtest.indicator_sim import (
@@ -1784,10 +1784,10 @@ class LiveEngine:
                     results.append(
                         (
                             await asyncio.to_thread(
-                                run_simulation, bars, sym, frame, True, mode
+                                run_simulation, bars, sym, frame, True, mode, profile
                             ),
                             await asyncio.to_thread(
-                                run_simulation, bars, sym, frame, False, mode
+                                run_simulation, bars, sym, frame, False, mode, profile
                             ),
                         )
                     )
@@ -1797,9 +1797,10 @@ class LiveEngine:
                 )
                 return
             day_part = format_report([r for r, _ in results], months)
-            if mode != "عادي":
+            if mode != "عادي" or profile != "متوازن":
                 await self.notifier.note(
-                    f"⭐ وضع {mode} — الوضع اليومي (إغلاق نهاية الجلسة):\n" + day_part
+                    f"⭐ وضع {mode} · أهداف {profile} — الوضع اليومي"
+                    " (إغلاق نهاية الجلسة):\n" + day_part
                 )
                 return
             ovn = [o for _, o in results]
@@ -1904,6 +1905,7 @@ class LiveEngine:
             # Syntax: "باكتست NVDA" | "باكتست NVDA 15" | "باكتست NVDA 5 6"
             # | "باكتست الكل" for the whole launch list on 5m.
             mode = "عادي"
+            profile = "متوازن"
             args = []
             for token in parts[1:]:
                 tk = token.strip()
@@ -1911,6 +1913,8 @@ class LiveEngine:
                     mode = "جودة"
                 elif tk in {"نخبة", "elite"}:
                     mode = "نخبة"
+                elif tk in {"سريع", "fast"}:
+                    profile = "سريع"
                 else:
                     args.append(tk)
             symbols = ["TSLA", "AAPL", "MSFT", "NVDA", "QQQ", "AMZN", "GOOG", "MU"]
@@ -1923,10 +1927,13 @@ class LiveEngine:
             if len(args) >= 3 and args[2].isdigit():
                 months = max(1, min(24, int(args[2])))
             await self.notifier.note(
-                f"🧪 بدأ الفحص ({mode}): {'، '.join(symbols)} · فريم {frame} د · {months} شهراً"
+                f"🧪 بدأ الفحص ({mode} · {profile}): {'، '.join(symbols)}"
+                f" · فريم {frame} د · {months} شهراً"
             )
             asyncio.create_task(
-                self._run_indicator_backtest(symbols, frame, months, mode=mode)
+                self._run_indicator_backtest(
+                    symbols, frame, months, mode=mode, profile=profile
+                )
             )
             return
         if parts and parts[0].strip().lower() in {"فحص", "فحص القنوات", "check"}:
