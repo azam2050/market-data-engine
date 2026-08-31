@@ -1,6 +1,6 @@
 //@version=5
 // ============================================================================
-//  مرصاد | Mirsad — النسخة 1.8
+//  مرصاد | Mirsad — النسخة 1.9 (لوحة العقد + سطر الإجراء)
 // ----------------------------------------------------------------------------
 //  الفلسفة: شارت نظيف. على الشارت فقط: خط الدخول، الوقف المتحرك، الأهداف
 //  (تضيء عند التحقق وتختفي بانتهاء الصفقة)، وعلامات المصيدة/الاستعداد.
@@ -98,6 +98,13 @@ wl8 = input.symbol("NASDAQ:AMZN", "السهم ٨", group=grpWL)
 wl9 = input.symbol("NASDAQ:META", "السهم ٩", group=grpWL)
 wl10 = input.symbol("NASDAQ:AVGO", "السهم ١٠", group=grpWL)
 wlN = input.int(10, "عدد الأسهم المعروضة", minval=1, maxval=10, group=grpWL)
+
+grpOpt = "لوحة العقد (جديد 1.9)"
+showOpt = input.bool(true, "إظهار لوحة العقد", group=grpOpt)
+optPosS = input.string("أسفل يمين", "مكانها", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpOpt)
+optLev  = input.float(10.0, "الرافعة التقديرية للعقد (٪ العقد لكل ١٪ سهم)", minval=3, maxval=30, step=1, group=grpOpt)
+optSym  = input.symbol("", "رمز العقد الحي (اختياري — يتطلب بيانات OPRA)", group=grpOpt)
+optPrem = input.float(0.0, "سعر دخولك في العقد (لنسبة حية من دخولك)", minval=0.0, step=0.01, group=grpOpt)
 
 // ------------------------------------------------------------------ الألوان
 cUp   = #26A69A
@@ -523,7 +530,7 @@ if showDash and barstate.islast
     table.cell(dash, 1, 7, (deltaShare >= 0 ? "شراء " : "بيع ") + str.tostring(math.abs(math.round(deltaShare))) + "%", text_color=deltaShare >= 0 ? cUp : cDn, text_size=size.small)
     table.cell(dash, 2, 7, "حجم ×" + str.tostring(relVol, "#.#"), text_color=cMut, text_size=size.small)
     vCol  = verdict == "كول" ? cUp : verdict == "بوت" ? cDn : cMut
-    stTxt = inTrade ? "صفقة نشطة 🎯 " + f_side(tDir) : lateBlock ? "⏸ قرب الإغلاق — لا إشارات جديدة" : lateNext ? "🌙 آخر الجلسة — الإشارات لعقد الغد" : "الحكم: " + verdict + " · الثقة " + confTxt + (lateWarn ? " · ⚡" : "")
+    stTxt = inTrade ? (t2Hit ? "💰 الإجراء: احجز الربح — الوقف عند هدف ١" : t1Hit ? "🛡️ الإجراء: مؤمّنة — خلّ الوقف يتسلق" : "🎯 الإجراء: صفقة نشطة — التزم بالوقف") : lateBlock ? "⏸ قرب الإغلاق — لا إشارات جديدة" : lateNext ? "🌙 آخر الجلسة — الإشارات لعقد الغد" : "الحكم: " + verdict + " · الثقة " + confTxt + (lateWarn ? " · ⚡" : "")
     hitsN = (t1Hit ? 1 : 0) + (t2Hit ? 1 : 0) + (t3Hit ? 1 : 0)
     table.cell(dash, 0, 8, stTxt, text_color=vCol, bgcolor=color.new(vCol, 85), text_size=size.small)
     table.cell(dash, 1, 8, "", bgcolor=color.new(vCol, 85))
@@ -627,3 +634,47 @@ if showHon and barstate.islast
     table.cell(hon, 0, 0, "لوحة الصدق — " + syminfo.ticker + " · " + f_tfName(timeframe.period), text_color=cTxt, bgcolor=cHead, text_size=size.small)
     table.cell(hon, 0, 1, "آخر " + str.tostring(n20) + ": " + str.tostring(w20) + "✓ " + str.tostring(n20 - w20) + "✗   |   الكل: " + str.tostring(tot) + " إشارة · نجاح " + str.tostring(wr, "#.#") + "% · متوسط " + (avR >= 0 ? "+" : "") + str.tostring(avR, "#.##") + "R", text_color=cMut, text_size=size.small)
     table.cell(hon, 0, 2, tot > 0 ? "أفضل صفقة +" + str.tostring(bestR, "#.#") + "R · أسوأ صفقة " + str.tostring(worstR, "#.#") + "R" : "لا صفقات بعد", text_color=cMut, text_size=size.small)
+
+// --------------------------------------------------------------- لوحة العقد
+// تتكلم بلغة العقد لا لغة السهم: العقد المقترح يُحسب آلياً (سترايك قريب
+// خارج السعر + الانتهاء الصحيح: يومي للصناديق، جمعة الأسبوع للأسهم)،
+// وأهداف الصفقة تُترجم إلى نسب أرباح تقريبية للعقد عبر رافعة تقديرية —
+// وتُوسم "تقديري" بصدق. ولمن يملك بيانات OPRA: ضع رمز العقد وسعر دخولك
+// في الإعدادات فتتحول اللوحة إلى سعر حي ونسبة حية من دخولك أنت.
+f_step(p) => p < 50 ? 0.5 : p < 200 ? 1.0 : p < 500 ? 2.5 : 5.0
+isFund  = syminfo.ticker == "QQQ" or syminfo.ticker == "SPY" or syminfo.ticker == "SPX"
+expTxt  = isFund ? (lateNext ? "غداً (0DTE)" : "اليوم (0DTE)") : "جمعة الأسبوع"
+optDir  = inTrade ? tDir : verdict == "كول" ? 1 : verdict == "بوت" ? -1 : 0
+optBase = inTrade ? entryP : close
+optStep = f_step(optBase)
+optStrk = optDir > 0 ? math.ceil(optBase / optStep) * optStep : math.floor(optBase / optStep) * optStep
+optCP   = optDir > 0 ? "C" : "P"
+
+// نسبة العقد التقريبية لكل هدف: حركة الهدف كنسبة من السهم × الرافعة
+f_optPct(tgt) =>
+    optBase > 0 and not na(tgt) ? math.abs(tgt - optBase) / optBase * 100.0 * optLev : na
+o1 = inTrade ? f_optPct(t1P) : f_optPct(optDir > 0 ? close + 0.9 * atr : close - 0.9 * atr)
+o2 = inTrade ? f_optPct(t2P) : f_optPct(optDir > 0 ? close + 1.6 * atr : close - 1.6 * atr)
+o3 = inTrade ? f_optPct(t3P) : f_optPct(optDir > 0 ? close + 2.8 * atr : close - 2.8 * atr)
+f_pctTxt(p) => na(p) ? "—" : "‏+" + str.tostring(p, "#") + "%"
+
+// السعر الحي للعقد إن وُجد اشتراك بيانات الأوبشن ورمز العقد
+optSymEff = optSym == "" ? syminfo.tickerid : optSym
+optLiveRaw = request.security(optSymEff, timeframe.period, close, lookahead=barmerge.lookahead_off)
+optLive = optSym != "" ? optLiveRaw : na
+optLivePct = not na(optLive) and optPrem > 0 ? 100.0 * (optLive - optPrem) / optPrem : na
+
+var table optab = table.new(f_pos(optPosS), 2, 5, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+if showOpt and barstate.islast
+    hasDir = optDir != 0
+    oCol = optDir > 0 ? cUp : optDir < 0 ? cDn : cMut
+    table.cell(optab, 0, 0, "لوحة العقد" + (na(optLive) ? " — تقديري" : " — حي"), text_color=cTxt, bgcolor=cHead, text_size=size.small)
+    table.cell(optab, 1, 0, inTrade ? "صفقة نشطة" : "ترقّب", text_color=oCol, bgcolor=cHead, text_size=size.small)
+    table.cell(optab, 0, 1, "العقد المقترح", text_color=cMut, text_size=size.small)
+    table.cell(optab, 1, 1, hasDir ? syminfo.ticker + " " + str.tostring(optStrk, format.mintick) + optCP + " · " + expTxt : "بانتظار حكم واضح", text_color=oCol, text_size=size.small)
+    table.cell(optab, 0, 2, "أهداف العقد ≈", text_color=cMut, text_size=size.small)
+    table.cell(optab, 1, 2, hasDir ? f_pctTxt(o1) + " · " + f_pctTxt(o2) + " · " + f_pctTxt(o3) : "—", text_color=hasDir ? cGold : cMut, text_size=size.small)
+    table.cell(optab, 0, 3, na(optLive) ? "للسعر الحي" : "سعر العقد الحي", text_color=cMut, text_size=size.small)
+    table.cell(optab, 1, 3, na(optLive) ? "ضع رمز العقد في الإعدادات" : str.tostring(optLive, format.mintick) + (na(optLivePct) ? "" : " · " + (optLivePct >= 0 ? "‏+" : "‏") + str.tostring(optLivePct, "#.#") + "% من دخولك"), text_color=na(optLive) ? cMut : optLivePct >= 0 ? cUp : cDn, text_size=size.small)
+    table.cell(optab, 0, 4, "", text_size=size.tiny)
+    table.cell(optab, 1, 4, "النسب تقديرية وتتأثر بالوقت والتذبذب", text_color=cMut, text_size=size.tiny)
