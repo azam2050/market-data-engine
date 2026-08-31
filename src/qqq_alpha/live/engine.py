@@ -2059,12 +2059,15 @@ class LiveEngine:
         if parts and parts[0].strip().lower() in {"تشخيص", "diagnose"}:
             # dissect the year's losing trades: by setup, hour, alignment,
             # and signal strength — the evidence a quality mode is built on
-            symbols, frame, months, _, _ = self._parse_backtest_args(parts)
+            symbols, frame, months, mode, profile = self._parse_backtest_args(parts)
             await self.notifier.note(
-                f"🔎 بدأ التشريح: {'، '.join(symbols)} · فريم {frame} د · {months} شهراً"
+                f"🔎 بدأ التشريح ({mode} · {profile}): {'، '.join(symbols)}"
+                f" · فريم {frame} د · {months} شهراً"
             )
             asyncio.create_task(
-                self._run_indicator_backtest(symbols, frame, months, diagnose=True)
+                self._run_indicator_backtest(
+                    symbols, frame, months, diagnose=True, mode=mode, profile=profile
+                )
             )
             return
         if parts and parts[0].strip().lower() in {"باكتست", "backtest", "فحص المؤشر"}:
