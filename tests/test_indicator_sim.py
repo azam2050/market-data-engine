@@ -171,3 +171,59 @@ def test_tv_webhook_route_relays_signal() -> None:
     bad = client.post("/tv/wrong-secret", content="x")
     assert bad.status_code == 404
     asyncio.set_event_loop(asyncio.new_event_loop())
+
+
+def _build_wave_scenario() -> list[Bar]:
+    """Two quiet uptrend weeks, then Monday: trend, a three-bar pullback
+    under EMA9, a green resumption close back above it, a rally through the
+    first target, and a collapse — the operator's whiteboard wave."""
+    bars: list[Bar] = []
+    price = 100.0
+    for week in range(2):
+        for day_off in range(5):
+            t = _day_start(datetime(2025, 6, 2, tzinfo=NY) + timedelta(days=week * 7 + day_off))
+            for _ in range(78):
+                o = price
+                c = price + 0.02
+                bars.append(_bar(t, o, max(o, c) + 0.25, min(o, c) - 0.25, c, 1000))
+                price = c
+                t += timedelta(minutes=5)
+
+    t = _day_start(datetime(2025, 6, 16, tzinfo=NY))
+    for _ in range(40):  # the trend leg continues into Monday
+        o = price
+        c = price + 0.02
+        bars.append(_bar(t, o, max(o, c) + 0.25, min(o, c) - 0.25, c, 1000))
+        price = c
+        t += timedelta(minutes=5)
+    for _ in range(3):  # the pullback: three closes under the chart EMA9
+        o = price
+        c = price - 0.18
+        bars.append(_bar(t, o, o + 0.05, c - 0.05, c, 900))
+        price = c
+        t += timedelta(minutes=5)
+    o = price  # the green resumption bar closes back above EMA9
+    c = price + 0.50
+    bars.append(_bar(t, o, c + 0.05, o - 0.05, c, 1100))
+    price = c
+    t += timedelta(minutes=5)
+    for _ in range(10):  # the wave pays
+        o = price
+        c = price + 0.35
+        bars.append(_bar(t, o, c + 0.05, o - 0.05, c, 1000))
+        price = c
+        t += timedelta(minutes=5)
+    bars.append(_bar(t, price, price + 0.05, price - 3.5, price - 3.4, 3000))
+    return bars
+
+
+def test_wave_mode_buys_the_pullback_with_the_trend() -> None:
+    bars = _build_wave_scenario()
+    wave = run_simulation(bars, "TEST", 5, day_close=True, mode="موجة")
+    assert wave.total >= 1, "the wave engine must catch the pullback resumption"
+    trade = wave.trades[0]
+    assert trade.kind == "موجة" and trade.direction == 1
+    assert trade.t1_hit and trade.r_mult > 0
+    # the same tape offers the selective engine nothing: no traps, no volume
+    quality = run_simulation(bars, "TEST", 5, day_close=True, mode="جودة")
+    assert quality.total == 0, "quality mode stays out — the wave engine is the point"

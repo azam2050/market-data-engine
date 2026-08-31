@@ -164,6 +164,12 @@ def run_simulation(
     mode: "عادي" takes every qualifying signal; "جودة" applies the rules the
     year's diagnosis proved (full 3/3 alignment, nothing after 14:00 NY,
     no floor-bounce longs); "نخبة" takes only 85+ signals — rare and lethal.
+    "موجة" is the operator's wave-rider (drawn on his whiteboard after the
+    first live day): the ×4 frame sets the trend, and every pullback on the
+    chart frame — two-plus closes below EMA9, then a green close back above
+    it — buys the bottom of the wave WITH that trend, never against it. No
+    score gate, short cooldown, more trades; the stop sits under the
+    pullback's own low, so each wave risks the swing that formed it.
 
     profile: "متوازن" keeps the wave targets (1.5/2.6/4.2 ATR); "سريع" is the
     scalper geometry (0.9/1.6/2.8 ATR with a tighter trail) — closer targets
@@ -260,6 +266,10 @@ def run_simulation(
     pend_kind = ""
     pend_score = pend_align = 0
     pend_relvol = 0.0
+
+    # wave mode: consecutive closes below/above the chart-frame EMA9
+    below_run = 0
+    above_run = 0
 
     for i in range(n):
         new_day = i == 0 or days[i] != days[i - 1]
@@ -405,6 +415,50 @@ def run_simulation(
                 pend_dir = 0
             elif broken or i > pend_until:
                 pend_dir = 0
+
+        # -------------------------------------------------------- wave mode
+        if mode == "موجة":
+            ema9 = f1.ema_f  # includes this bar — the chart-frame EMA9
+            if new_day:
+                below_run = above_run = 0
+            can_wave = (
+                not in_trade and (i - last_exit) > 3 and i >= 30
+                and (highs[i] - lows[i]) <= MAX_CND_ATR * a
+                and mins_left[i] > END_GUARD_MIN and ema9 is not None
+            )
+            wave_dir = 0
+            if can_wave:
+                if c3 > 0 and below_run >= 2 and closes[i] > ema9 and closes[i] > opens[i]:
+                    wave_dir = 1
+                elif c3 < 0 and above_run >= 2 and closes[i] < ema9 and closes[i] < opens[i]:
+                    wave_dir = -1
+            if wave_dir != 0:
+                lo_win = min(lows[max(0, i - 3): i + 1])
+                hi_win = max(highs[max(0, i - 3): i + 1])
+                stop = lo_win - 0.25 * a if wave_dir > 0 else hi_win + 0.25 * a
+                trade = SimTrade(
+                    direction=wave_dir, entry=closes[i], stop0=stop,
+                    entry_ts=rth[i].ts, kind="موجة",
+                    score=call_score if wave_dir > 0 else put_score,
+                    align=align_call if wave_dir > 0 else align_put,
+                    rel_vol=rel_vol, hour_ny=hours_ny[i],
+                )
+                in_trade = True
+                entry_bar = i
+                stop_p = stop
+                t1p = closes[i] + t1x * a if wave_dir > 0 else closes[i] - t1x * a
+                t2p = closes[i] + t2x * a if wave_dir > 0 else closes[i] - t2x * a
+                t3p = closes[i] + t3x * a if wave_dir > 0 else closes[i] - t3x * a
+                t1h = t2h = t3h = False
+                below_run = above_run = 0
+            elif ema9 is not None:
+                if closes[i] < ema9:
+                    below_run += 1
+                    above_run = 0
+                elif closes[i] > ema9:
+                    above_run += 1
+                    below_run = 0
+            continue  # the wave engine replaces the normal signal engine
 
         # ------------------------------------------------------ new signals
         can_enter = (

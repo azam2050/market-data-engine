@@ -1841,6 +1841,8 @@ class LiveEngine:
                 mode = "جودة"
             elif tk in {"نخبة", "نخبه", "النخبة", "النخبه", "elite"}:
                 mode = "نخبة"
+            elif tk in {"موجة", "موجه", "الموجة", "الموجه", "wave", "swing"}:
+                mode = "موجة"
             elif tk in {"سريع", "السريع", "fast"}:
                 profile = "سريع"
             elif tk in {"الكل", "كله", "كل", "all"}:
