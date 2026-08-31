@@ -74,6 +74,7 @@ showDash = input.bool(true, "لوحة القيادة",              group=grpDis
 showHon  = input.bool(true, "لوحة الصدق (آخر الإشارات)",  group=grpDisp)
 showPrep = input.bool(true, "علامة الاستعداد ⏳",         group=grpDisp)
 showLvls = input.bool(true, "خطوط الحواف (خفيفة)", group=grpDisp)
+keepTrail = input.bool(true, "إبقاء آثار الصفقات الماضية (للمراجعة)", group=grpDisp)
 sigSizeS = input.string("عادي", "حجم علامات الإشارة", options=["صغير", "عادي", "كبير"], group=grpDisp)
 szMark = sigSizeS == "كبير" ? size.normal : sigSizeS == "صغير" ? size.tiny : size.small
 szSig  = sigSizeS == "كبير" ? size.large  : sigSizeS == "صغير" ? size.small : size.normal
@@ -452,7 +453,14 @@ if inTrade and barstate.isconfirmed and openDir == 0
         sumR    += rMult
         bestR   := na(bestR) ? rMult : math.max(bestR, rMult)
         worstR  := na(worstR) ? rMult : math.min(worstR, rMult)
-        line.delete(lnEntry)
+        // آثار المراجعة: خط الدخول يتجمد مكانه، وخط النتيجة يصل الدخول
+        // بالخروج بلون الحصيلة — فيبقى تاريخ المؤشر مقروءاً على الشارت
+        if keepTrail
+            line.set_extend(lnEntry, extend.none)
+            line.set_x2(lnEntry, bar_index)
+            line.new(entryBar, entryP, bar_index, close, color=win ? color.new(cUp, 35) : color.new(cDn, 30), width=2)
+        else
+            line.delete(lnEntry)
         line.delete(lnStop)
         line.delete(lnT1)
         line.delete(lnT2)
