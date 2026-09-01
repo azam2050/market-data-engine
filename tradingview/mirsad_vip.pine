@@ -1,91 +1,82 @@
 //@version=5
 // ============================================================================
-//  مرصاد VIP | لوحة العقود المؤسسية — Institutional Option Signal Dashboard
+//  مرصاد VIP — لوحة العقود المؤسسية
 // ----------------------------------------------------------------------------
-//  المحرك (كل شرط يُحسم على إغلاق الشمعة فقط — لا إعادة رسم نهائياً):
+//  مذهب هذا المؤشر:
 //
-//  الدخول المبكر: لا ننتظر الفريمات العالية تكمل انقلابها — ندخل عندما
-//  يصنع الفريم الصغير كسر بنية BOS أو تغيير طابع CHoCH بينما السعر جالس
-//  على منطقة قرار كبرى: دعم/مقاومة بنيوية، أو منطقة فيبوناتشي 0.618–0.786
-//  لآخر موجة كبرى، أو حافة الأمس.
+//  ١) العقد ليس سهماً. من يفتح فريم الدقيقة يريد عقداً حارقاً: دخول، ربح
+//     سريع، خروج — لأن الوقت نفسه يأكل قيمة عقده. ومن يفتح الساعة يريد أن
+//     يركب موجة يومين. فلكل فريم أهدافه ووقفه وإدارته، لا رقم واحد للجميع.
 //
-//  وايكوف: سبرينق التجميع (كسر كاذب للدعم بامتصاص حجم = كول) وأبثراست
-//  التوزيع (اختراق كاذب للمقاومة بامتصاص = بوت) + منطق الجهد مقابل
-//  النتيجة (حجم ضخم بجسم صغير = امتصاص مؤسسي).
+//  ٢) الانتظار سلاح ذو حدين. في سوق هادئ يعود السعر فتدخل بسعر ممتاز؛ وفي
+//     سوق مندفع لا يعود أبداً فتفوتك أحلى صفقة. لذلك يُنشر أمران معاً: حد
+//     تحت للارتداد، واختراق فوق للاندفاع، وأولهما تنفيذاً يلغي الآخر.
 //
-//  السيولة والبرايس أكشن: مسح السيولة (ذيل يتجاوز قمة/قاع متأرجح حديث
-//  ويغلق داخلاً)، دبابيس الرفض، والابتلاع.
+//  ٣) عقد اليوم يموت الليلة. قبل الإغلاق بمدة محددة لا نشتريه أصلاً؛ الإشارة
+//     حينها تُحوَّل لعقد الغد ويُكتب على اللوحة أنها مخاطرة فجوة.
 //
-//  سكور الجودة 0–100: حجم 20 + نمط شموع 20 + التقاء فيبو/مستوى 20 +
-//  BOS/CHoCH 20 + زخم RSI وانفراجاته 20. لا دخول تحت العتبة.
+//  ٤) لا يُقال "تحت المراقبة" لسهم هو داخل صفقة. شاشة المراقبة تُشغّل محرك
+//     الصفقة كاملاً لكل رمز بفريمه، فتقول الحقيقة: يراقب، أم معلق، أم دخل
+//     الآن، أم في صفقة وأهدافه تتحقق.
 //
-//  الإدارة: وقف بنيوي (خلف آخر قاع/قمة متأرجحة ± ATR)، وأربعة أهداف
-//  TP1–TP4 بنسب عقد تقديرية، تأمين عند TP1، تصعيد عند TP2، تتبع بعدها.
+//  ٥) كل نتيجة تُحسب صافية بعد تكلفة العقد. صفقة تخرج عند سعر دخولها خسارة
+//     لا تعادل.
 // ============================================================================
 indicator("مرصاد VIP | لوحة العقود", shorttitle="مرصاد VIP", overlay=true,
-     max_lines_count=100, max_labels_count=150, max_boxes_count=30)
+     max_lines_count=200, max_labels_count=300, max_boxes_count=80)
 
-// ---------------------------------------------------------------- المدخلات
-grpQ = "عقل الجودة"
-aggro   = input.string("متوازن", "شخصية المؤشر", options=["هادئ", "متوازن", "نشط"], group=grpQ)
-minQ    = input.int(40, "أدنى سكور جودة للدخول (0-100)", minval=0, maxval=100, group=grpQ)
-volX    = input.float(1.2, "مضاعف الحجم المؤسسي", minval=1.0, maxval=3.0, step=0.1, group=grpQ)
-qualityMode  = input.bool(true,  "وضع الجودة — منع الدخول في التذبذب وداخل السحابة", group=grpQ)
-reversalMode = input.bool(false, "وضع الانعكاس — دخول عكسي عند التشبع الحاد", group=grpQ)
-adxMin  = input.int(18, "أدنى قوة اتجاه ADX (لوضع الجودة)", minval=10, maxval=40, group=grpQ)
-revLo   = input.int(25, "تشبع بيعي للانعكاس (RSI)",  minval=10, maxval=35, group=grpQ)
-revHi   = input.int(75, "تشبع شرائي للانعكاس (RSI)", minval=65, maxval=90, group=grpQ)
-grpC = "السحابة التكيفية"
-cloudFastLen = input.int(21, "السحابة السريعة (HMA)", minval=5,  maxval=100, group=grpC)
-cloudSlowLen = input.int(55, "السحابة البطيئة (EMA)", minval=20, maxval=200, group=grpC)
-showCloud    = input.bool(true, "إظهار السحابة", group=grpC)
-grpB = "الاختبار الحي"
-btDays  = input.int(30, "احسب الأداء على آخر (يوم)", minval=1, maxval=365, group=grpB)
-// كل حساب هنا على سعر السهم. لكنك تشتري عقداً، وللعقد فرق بين البيع
-// والشراء يُدفع مرتين — عند الدخول وعند الخروج. من لا يطرحه من نتيجته
-// يقرأ أرباحاً لم تدخل جيبه. هذا الرقم يُطرح من كل صفقة قبل عدّها.
-costR   = input.float(0.15, "تكلفة العقد ذهاباً وإياباً (R)", minval=0.0, maxval=0.6, step=0.05, group=grpB)
-btPosS  = input.string("أسفل يمين", "مكان جدول الاختبار", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpB)
-grpE = "طريقة الدخول"
-entryMode = input.string("حد — انتظر ارتداد", "أسلوب التنفيذ", options=["حد — انتظر ارتداد", "سوق — افتتاح الشمعة التالية"], group=grpE)
-retrX     = input.float(0.5, "عمق الارتداد المطلوب (من مدى شمعة الشرارة)", minval=0.1, maxval=0.9, step=0.05, group=grpE)
-pExpire   = input.int(3, "صلاحية الأمر المعلق (شموع)", minval=1, maxval=12, group=grpE)
-maxChase  = input.float(0.5, "أقصى مطاردة مسموحة (ATR)", minval=0.1, maxval=2.0, step=0.1, group=grpE)
-// الوقف البنيوي قد يقع أحياناً على بُعد شعرة من سعر التنفيذ. حين تقترب
-// المسافة من الصفر تصير قسمة النتيجة عليها بلا معنى: صفقة تافهة تُسجَّل
-// بمئة R وتفسد كل متوسط بعدها. لا صفقة بمخاطرة أقل من هذا الحد.
-minRiskX  = input.float(0.5, "أدنى مسافة وقف (ATR)", minval=0.2, maxval=2.0, step=0.1, group=grpE)
-// الصفقة اليومية لا تُترك للّيل. العقد الذي يقترحه المؤشر ينتهي اليوم أو
-// هذا الأسبوع، والسعر يقفز بين الإغلاق والافتتاح قفزة لا وقف يحميها —
-// هكذا تولد خسارة بعشرين ضعف المخاطرة من صفقة كانت مضبوطة.
-flatEod = input.bool(true, "أغلق كل شيء قبل نهاية الجلسة", group=grpE)
-grpM = "إدارة الصفقة"
-tp1x = input.float(0.8, "TP1 (ATR)", minval=0.3, maxval=2.0, step=0.1, group=grpM)
-tp2x = input.float(1.5, "TP2 (ATR)", minval=0.8, maxval=3.0, step=0.1, group=grpM)
-tp3x = input.float(2.5, "TP3 (ATR)", minval=1.5, maxval=5.0, step=0.1, group=grpM)
-tp4x = input.float(3.5, "TP4 (ATR)", minval=2.0, maxval=8.0, step=0.1, group=grpM)
-trailX = input.float(1.8, "الوقف المتحرك بعد TP2 (ATR)", minval=1.0, maxval=4.0, step=0.1, group=grpM)
-coolN  = input.int(6, "شموع انتظار بعد كل صفقة", minval=0, maxval=100, group=grpM)
-grpO = "لوحة العقد"
-optLev  = input.float(10.0, "الرافعة التقديرية (٪ العقد لكل ١٪ سهم)", minval=3, maxval=30, step=1, group=grpO)
-grpW = "شاشة المراقبة — أسماء أخرى بفريم كل واحد"
-showWatch = input.bool(true, "إظهار شاشة المراقبة", group=grpW)
-wPosS = input.string("أسفل يسار", "مكان الشاشة", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpW)
-w1s = input.symbol("NASDAQ:AAPL", "١ الرمز", group=grpW)
-w1t = input.timeframe("60", "١ الفريم", group=grpW)
-w2s = input.symbol("NASDAQ:NVDA", "٢ الرمز", group=grpW)
-w2t = input.timeframe("30", "٢ الفريم", group=grpW)
-w3s = input.symbol("NASDAQ:QQQ", "٣ الرمز", group=grpW)
-w3t = input.timeframe("5", "٣ الفريم", group=grpW)
-w4s = input.symbol("NASDAQ:TSLA", "٤ الرمز", group=grpW)
-w4t = input.timeframe("15", "٤ الفريم", group=grpW)
-w5s = input.symbol("AMEX:SPY", "٥ الرمز", group=grpW)
-w5t = input.timeframe("5", "٥ الفريم", group=grpW)
-grpD = "العرض"
-keepTrail = input.bool(true, "إبقاء آثار الصفقات الماضية (للمراجعة)", group=grpD)
-dashPosS  = input.string("أعلى يمين", "مكان اللوحة", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpD)
+// ============================ المدخلات ======================================
+gP = "شخصية الفريم"
+profSel = input.string("تلقائي", "الشخصية", options=["تلقائي", "حارق", "سريع", "نصف يوم", "يوم", "أسبوع"], group=gP, tooltip="تلقائي يقرأ فريم الشارت ويختار الأهداف والوقف المناسبين له")
 
-// ------------------------------------------------------------------ الألوان
+gQ = "عقل الجودة"
+aggro   = input.string("متوازن", "حدة الدخول", options=["هادئ", "متوازن", "نشط"], group=gQ)
+minQ    = input.int(40, "أدنى سكور جودة", minval=0, maxval=100, group=gQ)
+volX    = input.float(1.2, "مضاعف الحجم المؤسسي", minval=1.0, maxval=3.0, step=0.1, group=gQ)
+adxMin  = input.int(18, "أدنى قوة اتجاه ADX", minval=10, maxval=40, group=gQ)
+qualityMode = input.bool(true, "امنع الدخول في سوق ميت", group=gQ)
+
+gE = "طريقة الدخول"
+useBracket = input.bool(true, "أمران معاً: حد للارتداد واختراق للاندفاع", group=gE, tooltip="أطفئه لتعود لأمر الحد وحده — وقارن الجدولين")
+retrX      = input.float(0.5, "عمق الارتداد (من مدى شمعة الشرارة)", minval=0.1, maxval=0.9, step=0.05, group=gE)
+brkX       = input.float(0.10, "مسافة أمر الاختراق (ATR)", minval=0.02, maxval=0.5, step=0.02, group=gE)
+pExpire    = input.int(3, "صلاحية الأمرين (شموع)", minval=1, maxval=12, group=gE)
+minRiskX   = input.float(0.5, "أدنى مسافة وقف (ATR)", minval=0.2, maxval=2.0, step=0.1, group=gE)
+
+gO = "العقود اليومية"
+dteCut  = input.int(90, "امنع عقد اليوم قبل الإغلاق بـ (دقيقة)", minval=0, maxval=240, group=gO, tooltip="بعد هذا الوقت يتحول العقد المقترح إلى عقد الغد وتُوسم الإشارة بمخاطرة الفجوة")
+flat0dte = input.bool(true, "أغلق صفقات عقد اليوم قبل الجرس", group=gO)
+optLev   = input.float(10.0, "الرافعة التقديرية (٪ العقد لكل ١٪ سهم)", minval=3, maxval=30, step=1, group=gO)
+
+gB = "الاختبار الحي"
+btDays = input.int(30, "نافذة الحساب (يوم)", minval=1, maxval=365, group=gB)
+costR  = input.float(0.15, "تكلفة العقد ذهاباً وإياباً (R)", minval=0.0, maxval=0.6, step=0.05, group=gB)
+btPosS = input.string("أسفل يمين", "مكان الجدول", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=gB)
+
+gW = "شاشة المراقبة"
+showWatch = input.bool(true, "إظهار الشاشة", group=gW)
+wCount    = input.int(3, "عدد الرموز", minval=1, maxval=5, group=gW, tooltip="كل رمز إضافي يجلب بيانات رمز إضافي ويزيد وقت التحميل — ابدأ بثلاثة")
+wPosS = input.string("أسفل يسار", "مكان الشاشة", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=gW)
+w1s = input.symbol("NASDAQ:AAPL", "١ الرمز", group=gW)
+w1t = input.timeframe("60", "١ الفريم", group=gW)
+w2s = input.symbol("NASDAQ:NVDA", "٢ الرمز", group=gW)
+w2t = input.timeframe("30", "٢ الفريم", group=gW)
+w3s = input.symbol("NASDAQ:QQQ", "٣ الرمز", group=gW)
+w3t = input.timeframe("5", "٣ الفريم", group=gW)
+w4s = input.symbol("NASDAQ:TSLA", "٤ الرمز", group=gW)
+w4t = input.timeframe("15", "٤ الفريم", group=gW)
+w5s = input.symbol("AMEX:SPY", "٥ الرمز", group=gW)
+w5t = input.timeframe("5", "٥ الفريم", group=gW)
+
+gS = "العرض"
+showPlan  = input.bool(true, "صندوق الخطة القادمة", group=gS)
+showZones = input.bool(true, "مناطق التجميع", group=gS)
+showEarly = input.bool(true, "الإشارة التمهيدية (على الشمعة المتكوّنة)", group=gS, tooltip="تظهر قبل إغلاق الشمعة وقد تختفي — ولا تُحتسب في السجل أبداً")
+showCloud = input.bool(true, "السحابة", group=gS)
+keepTrail = input.bool(true, "آثار الصفقات الماضية", group=gS)
+dashPosS  = input.string("أعلى يمين", "مكان اللوحة", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=gS)
+
+// ============================ الألوان =======================================
 cUp   = #26A69A
 cDn   = #EF5350
 cGold = #E3B34D
@@ -96,29 +87,43 @@ cYel  = #E8C547
 cPanl = color.new(#151A24, 4)
 cHead = color.new(#232B3D, 0)
 
-// ----------------------------------------------------------- حسابات أساسية
-atr    = ta.atr(14)
-rngHL  = math.max(high - low, syminfo.mintick)
+// ==================== شخصية الفريم: لكل فريم نيّة مختلفة ====================
+tfMin = timeframe.in_seconds(timeframe.period) / 60.0
+autoProf = not timeframe.isintraday ? "أسبوع" : tfMin <= 1 ? "حارق" : tfMin <= 5 ? "سريع" :
+     tfMin <= 30 ? "نصف يوم" : tfMin <= 60 ? "يوم" : "أسبوع"
+prof = profSel == "تلقائي" ? autoProf : profSel
+// الهدف الأول قريب على الفريم الصغير لأن الوقت يأكل العقد، وبعيد على الكبير
+tp1x = prof == "حارق" ? 0.5 : prof == "سريع" ? 0.8 : prof == "نصف يوم" ? 1.2 : prof == "يوم" ? 1.8 : 2.5
+tp2x = prof == "حارق" ? 0.9 : prof == "سريع" ? 1.5 : prof == "نصف يوم" ? 2.0 : prof == "يوم" ? 3.0 : 4.0
+tp3x = prof == "حارق" ? 1.4 : prof == "سريع" ? 2.5 : prof == "نصف يوم" ? 3.2 : prof == "يوم" ? 4.5 : 6.0
+tp4x = prof == "حارق" ? 2.0 : prof == "سريع" ? 3.5 : prof == "نصف يوم" ? 4.5 : prof == "يوم" ? 6.0 : 8.0
+stopX  = prof == "حارق" ? 0.5 : prof == "سريع" ? 0.7 : prof == "نصف يوم" ? 1.0 : prof == "يوم" ? 1.3 : 1.8
+trailX = prof == "حارق" ? 0.8 : prof == "سريع" ? 1.2 : prof == "نصف يوم" ? 1.6 : prof == "يوم" ? 2.2 : 3.0
+// الحارق يخرج كاملاً عند الهدف الثاني: لا وقت لمطاردة أهداف بعيدة
+maxT  = prof == "حارق" ? 2 : prof == "سريع" ? 3 : 4
+coolN = prof == "حارق" ? 3 : prof == "سريع" ? 6 : prof == "نصف يوم" ? 6 : 8
+
+// ============================ حسابات أساسية =================================
+atr   = ta.atr(14)
+rngHL = math.max(high - low, syminfo.mintick)
+body  = math.abs(close - open)
 hasVol = not na(volume) and ta.sma(volume, 20) > 0
 volMA  = hasVol ? ta.sma(volume, 20) : na
-volSpike = hasVol ? volume > volX * volMA : math.abs(close - open) > 0.7 * atr
-// الجهد مقابل النتيجة: حجم ضخم بجسم صغير = امتصاص مؤسسي صامت
-absorption = hasVol and volume > 1.5 * volMA and math.abs(close - open) < 0.5 * atr
+volSpike = hasVol ? volume > volX * volMA : body > 0.7 * atr
+absorption = hasVol and volume > 1.5 * volMA and body < 0.5 * atr
 rsi = ta.rsi(close, 14)
 [diPlus, diMinus, adx] = ta.dmi(14, 14)
 
-// ------------------------------------------------- السحابة التكيفية
-// شريط بين متوسط هال السريع ومتوسط أسي بطيء: السعر خارجه = مشهد واضح،
-// وداخله = منطقة ضبابية تُصنع فيها أغلب الإشارات الكاذبة
-cloudFast = ta.hma(close, cloudFastLen)
-cloudSlow = ta.ema(close, cloudSlowLen)
+cloudFast = ta.hma(close, 21)
+cloudSlow = ta.ema(close, 55)
+ema9      = ta.ema(close, 9)
 inCloud   = close <= math.max(cloudFast, cloudSlow) and close >= math.min(cloudFast, cloudSlow)
 cloudDir  = cloudFast > cloudSlow ? 1 : -1
-pCloudF = plot(showCloud ? cloudFast : na, "السحابة السريعة", color=color.new(cloudDir > 0 ? #26A69A : #EF5350, 55), linewidth=1)
-pCloudS = plot(showCloud ? cloudSlow : na, "السحابة البطيئة", color=color.new(#787B86, 65), linewidth=1)
-fill(pCloudF, pCloudS, color=color.new(cloudDir > 0 ? #26A69A : #EF5350, 90))
+pF = plot(showCloud ? cloudFast : na, "السحابة السريعة", color=color.new(cloudDir > 0 ? cUp : cDn, 55), linewidth=1)
+pS = plot(showCloud ? cloudSlow : na, "السحابة البطيئة", color=color.new(cMut, 65), linewidth=1)
+fill(pF, pS, color=color.new(cloudDir > 0 ? cUp : cDn, 90))
 
-// ------------------------------------ البنية: بايفوتات صغرى (3,3) وكبرى (10,10)
+// ============================ البنية ========================================
 pv3H = ta.pivothigh(high, 3, 3)
 pv3L = ta.pivotlow(low, 3, 3)
 var float sw3H = na
@@ -140,7 +145,6 @@ if not na(pv10L)
     majL := pv10L
     majLB := bar_index - 10
 
-// اتجاه البنية الحالي — يميّز BOS (مع البنية) عن CHoCH (انقلاب الطابع)
 var int structDir = 0
 bosUp = not na(sw3H) and close > sw3H and close[1] <= sw3H
 bosDn = not na(sw3L) and close < sw3L and close[1] >= sw3L
@@ -151,7 +155,6 @@ if bosUp
 if bosDn
     structDir := -1
 
-// ---------------------------- مناطق القرار الكبرى: فيبو 0.618–0.786 + الحواف
 [pdH, pdL] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_off)
 impUp = not na(majH) and not na(majL) and majHB > majLB and majH > majL
 impDn = not na(majH) and not na(majL) and majLB > majHB and majH > majL
@@ -163,7 +166,50 @@ nearRes = (not na(majH) and math.abs(close - majH) < 1.0 * atr) or (not na(pdH) 
 atZoneUp = (inFib and impUp) or nearSup
 atZoneDn = (inFib and impDn) or nearRes
 
-// -------------------------------- وايكوف: السبرينق والأبثراست + مسح السيولة
+// ==================== مناطق التجميع: أثر المؤسسة الصامت ====================
+// مدى ضيق + حجم مرتفع + إغلاقات متداخلة، خمس شموع فأكثر. عندما تُكسر بحجم
+// فالكسر حقيقي؛ وبلا حجم فهو فخ يُتجاهل.
+tight = rngHL < 0.7 * atr
+heavy = hasVol and volume > 1.3 * volMA
+accBar = tight and heavy
+var int   accRun  = 0
+var float accHi   = na
+var float accLo   = na
+var int   accStart = 0
+var box   accBox  = na
+var float zoneHi  = na
+var float zoneLo  = na
+var int   zoneDir = 0
+var int   zoneBar = -999
+accRun := accBar ? accRun + 1 : 0
+if accBar
+    if accRun == 1
+        accHi := high
+        accLo := low
+        accStart := bar_index
+    else
+        accHi := math.max(accHi, high)
+        accLo := math.min(accLo, low)
+if accRun == 5 and showZones
+    accBox := box.new(accStart, accHi, bar_index, accLo, border_color=color.new(cCyan, 40), bgcolor=color.new(cCyan, 90))
+if accRun > 5
+    if showZones and not na(accBox)
+        box.set_right(accBox, bar_index)
+        box.set_top(accBox, accHi)
+        box.set_bottom(accBox, accLo)
+    zoneHi := accHi
+    zoneLo := accLo
+zoneUp = not na(zoneHi) and close > zoneHi and close[1] <= zoneHi and volSpike
+zoneDn = not na(zoneLo) and close < zoneLo and close[1] >= zoneLo and volSpike
+if zoneUp or zoneDn
+    zoneDir := zoneUp ? 1 : -1
+    zoneBar := bar_index
+    zoneHi := na
+    zoneLo := na
+if bar_index - zoneBar > 10
+    zoneDir := 0
+
+// ==================== وايكوف والسيولة والشموع ==============================
 tol = 0.05 * atr
 supLvl = not na(majL) and not na(pdL) ? math.max(majL, pdL) : not na(majL) ? majL : pdL
 resLvl = not na(majH) and not na(pdH) ? math.min(majH, pdH) : not na(majH) ? majH : pdH
@@ -172,25 +218,25 @@ upthrust = not na(resLvl) and high > resLvl + tol and close < resLvl and close <
 sweepUp  = not na(sw3L) and low < sw3L - tol and close > sw3L and close > open
 sweepDn  = not na(sw3H) and high > sw3H + tol and close < sw3H and close < open
 
-// ------------------------------------------- البرايس أكشن: الأنماط الشمعية
-body   = math.abs(close - open)
 upWick = high - math.max(close, open)
 dnWick = math.min(close, open) - low
 bullPin = dnWick > 2.0 * body and upWick < body and close >= open
 bearPin = upWick > 2.0 * body and dnWick < body and close <= open
 bullEng = close > open and close[1] < open[1] and close >= open[1] and open <= close[1] and body > 0.4 * atr
 bearEng = close < open and close[1] > open[1] and close <= open[1] and open >= close[1] and body > 0.4 * atr
-paUp = bullPin or bullEng
-paDn = bearPin or bearEng
+thrustUp = close > open and close[1] > open[1] and close[2] > open[2] and body > body[1] and body[1] > body[2]
+thrustDn = close < open and close[1] < open[1] and close[2] < open[2] and body > body[1] and body[1] > body[2]
+insideBrkUp = high[1] <= high[2] and low[1] >= low[2] and close > high[1]
+insideBrkDn = high[1] <= high[2] and low[1] >= low[2] and close < low[1]
+paUp = bullPin or bullEng or thrustUp or insideBrkUp
+paDn = bearPin or bearEng or thrustDn or insideBrkDn
 
-// ------------------------------------------------- الزخم: RSI وانفراجاته
-// زخم مع الاتجاه (للاستمرار) أو انفراج/تشبع (للانعكاس) — كلاهما زخم صالح
 divBull = not na(pv3L) and rsi < 45 and rsi > rsi[3]
 divBear = not na(pv3H) and rsi > 55 and rsi < rsi[3]
 momUp = (rsi > 50 and rsi > rsi[1]) or divBull or rsi < 32
 momDn = (rsi < 50 and rsi < rsi[1]) or divBear or rsi > 68
 
-// ------------------------------------- مصفوفة الفريمات الخمسة
+// ============================ الفريمات والميل ===============================
 f_dir() =>
     eF = ta.ema(close, 9)
     eS = ta.ema(close, 21)
@@ -200,17 +246,11 @@ d03 = request.security(syminfo.tickerid, "3",  f_dir(), lookahead=barmerge.looka
 d05 = request.security(syminfo.tickerid, "5",  f_dir(), lookahead=barmerge.lookahead_off)
 d15 = request.security(syminfo.tickerid, "15", f_dir(), lookahead=barmerge.lookahead_off)
 d60 = request.security(syminfo.tickerid, "60", f_dir(), lookahead=barmerge.lookahead_off)
-
-// ------------------------------------------------- ميل السوق القائد (bias)
-// إجماع 5د/15د/60د + ميل السحابة. اثنان فأكثر في جهة = هذه جهة اليوم.
 biasSum = (d05 > 0 ? 1 : d05 < 0 ? -1 : 0) + (d15 > 0 ? 1 : d15 < 0 ? -1 : 0) +
      (d60 > 0 ? 1 : d60 < 0 ? -1 : 0) + cloudDir
 bias = biasSum >= 2 ? 1 : biasSum <= -2 ? -1 : 0
 
-// ----------------------------------------- محرك الاستمرار: ارتداد ثم استئناف
-// هذا هو مصدر الدخول اليومي: في اتجاه واضح، السعر يرجع للسحابة/EMA9
-// (تصحيح)، ثم أول شمعة تستأنف الاتجاه هي الدخول. يتكرر عدة مرات كل يوم.
-ema9 = ta.ema(close, 9)
+// محرك الاستمرار: تصحيح إلى السحابة ثم أول شمعة تستأنف
 pbUp = math.max(cloudFast, ema9)
 pbDn = math.min(cloudFast, ema9)
 var bool armUp = false
@@ -232,9 +272,7 @@ if contUp
 if contDn
     armDn := false
 
-// --------------------------------------------- سكور الجودة 0–100 (خمسة أخماس)
-// خمسة أسئلة: هل الفريمات معي؟ هل هناك حجم؟ هل هناك نموذج/شرارة؟
-// هل أنا عند منطقة أو مع السحابة؟ هل الزخم معي؟
+// ============================ سكور الجودة ===================================
 f_q(sideUp) =>
     q = 0
     q := q + ((sideUp ? bias > 0 : bias < 0) ? 20 : 0)
@@ -242,14 +280,13 @@ f_q(sideUp) =>
     q := q + ((sideUp ? (paUp or contUp or spring or sweepUp) : (paDn or contDn or upthrust or sweepDn)) ? 20 : 0)
     q := q + ((sideUp ? (atZoneUp or cloudDir > 0) : (atZoneDn or cloudDir < 0)) ? 20 : 0)
     q := q + ((sideUp ? momUp : momDn) ? 20 : 0)
-    q
+    q := q + ((sideUp ? zoneDir > 0 : zoneDir < 0) ? 10 : 0)
+    math.min(100, q)
 qUp = f_q(true)
 qDn = f_q(false)
 lead      = qUp >= qDn ? 1 : -1
 leadScore = math.max(qUp, qDn)
 
-// ------------------------------- تشخيص السكون: ما الذي ينقص للدخول الآن؟
-// أهم سطر في اللوحة — يمنع أن يكون صمت المؤشر لغزاً
 f_miss(sideUp) =>
     m = ""
     m := m + ((sideUp ? bias > 0 : bias < 0) ? "" : "فريمات · ")
@@ -259,7 +296,24 @@ f_miss(sideUp) =>
     m := m + ((sideUp ? momUp : momDn) ? "" : "زخم")
     m
 
-// ------------------------------------------------------------- حالة الصفقة
+// ==================== العقد اليومي والجرس ==================================
+isFund = syminfo.ticker == "QQQ" or syminfo.ticker == "SPY" or syminfo.ticker == "SPX" or syminfo.ticker == "IWM"
+sessEnd = timeframe.isintraday ? time_close("D") : na
+minsLeft = na(sessEnd) ? na : (sessEnd - time) / 60000.0
+lateSession = not na(minsLeft) and minsLeft <= dteCut
+atBell = timeframe.isintraday and session.islastbar_regular
+// عقد اليوم قبل النافذة، وعقد الغد بعدها — وهي حينها مخاطرة فجوة صريحة
+expiryTxt = not isFund ? "جمعة الأسبوع" : lateSession ? "الغد ⚠️" : "اليوم 0DTE"
+gapRisk = isFund and lateSession
+
+// ============================ قياس الاندفاع =================================
+// الاندفاع يقرر أي البابين نتوقع: العائد يرتد، والمندفع لا يعود
+impulse = (body / math.max(atr, syminfo.mintick)) +
+     (hasVol ? math.min(2.0, volume / math.max(volMA, 1)) : 1.0) +
+     (adx >= 25 and adx > adx[1] ? 1.0 : 0.0)
+strongImp = impulse >= 3.4
+
+// ============================ حالة الصفقة ==================================
 var bool  inTrade = false
 var int   tDir    = 0
 var float entryP  = na
@@ -269,19 +323,18 @@ var float tp1 = na
 var float tp2 = na
 var float tp3 = na
 var float tp4 = na
-var bool  h1 = false
-var bool  h2 = false
-var bool  h3 = false
-var bool  h4 = false
+var int   hits = 0
+var bool  was0dte = false
 var int   entryBar = 0
 var int   lastExit = -99999
 var line  lnEntry = na
 var line  lnStop  = na
-var resArr = array.new_int()
 var int   winsAll = 0
 var int   lossAll = 0
 var float sumR    = 0.0
-// عدادات الاختبار الحي — تُحتسب فقط للصفقات المغلقة داخل نافذة الأيام
+var float sumRnet = 0.0
+var int   lossRun = 0
+var int   maxLossRun = 0
 var int   btTot = 0
 var int   btWin = 0
 var int   btCallTot = 0
@@ -290,100 +343,85 @@ var int   btPutTot  = 0
 var int   btPutWin  = 0
 var float btGross = 0.0
 var float btLoss  = 0.0
-// الصدق يكتمل بثلاثة أرقام كان ينقصها: المحصلة الكلية بعد التكلفة،
-// وأطول سلسلة خسائر متتالية (هي التي تكسر المتداول لا المتوسط)،
-// والمتوسط الخام لمقارنته بالصافي فيظهر حجم ما يأكله فرق السعر
-var float sumRnet = 0.0
-var int   lossRun = 0
-var int   maxLossRun = 0
-var int tradesToday = 0
-var int missedToday = 0
+var int   tradesToday = 0
+var int   missedToday = 0
+var int   missedCnt   = 0
 if ta.change(time("D")) != 0
     tradesToday := 0
     missedToday := 0
 f_side(d) => d > 0 ? "كول" : "بوت"
 
-// -------------------------------------------------- الأمر المعلق (لا مطاردة)
-// الإشارة تُحسم على إغلاق الشمعة، فلا يمكن أن يكون التنفيذ على ذلك الإغلاق
-// نفسه — هذا كذب على النفس. التنفيذ الواقعي إما بسعر افتتاح الشمعة التالية
-// (سوق)، أو — وهو الأفضل — أمر حد ينتظر ارتداد السعر داخل شمعة الشرارة.
-// إن طار السعر ولم يرتد خلال مدة الصلاحية: تُلغى الفرصة ولا نطاردها.
+// ============================ الأمران المعلقان ==============================
 var int    pDir   = 0
 var float  pLimit = na
-var float  pPlanStop = na
-var float  pRef   = na
+var float  pBreak = na
+var float  pStop  = na
 var int    pBar   = 0
 var string pWhy   = ""
-var line   lnPend = na
-var int    missedCnt = 0
-useLimit = entryMode == "حد — انتظر ارتداد"
+var bool   pStrong = false
+var line   lnLim  = na
+var line   lnBrk  = na
 
-// ------------------------------------------------------------------- الدخول
-// الشرارة: سبرينق / أبثراست / مسح سيولة / CHoCH مبكر عند منطقة قرار
-trigUp = contUp or spring or sweepUp or chochUp or (bosUp and (volSpike or bias > 0))
-trigDn = contDn or upthrust or sweepDn or chochDn or (bosDn and (volSpike or bias < 0))
-// شخصية المؤشر: هادئ = أقل صفقات وأنقى · نشط = دخول يومي أكثر
+trigUp = contUp or spring or sweepUp or chochUp or zoneUp or (bosUp and (volSpike or bias > 0))
+trigDn = contDn or upthrust or sweepDn or chochDn or zoneDn or (bosDn and (volSpike or bias < 0))
 minQeff = math.max(0, math.min(100, minQ + (aggro == "هادئ" ? 20 : aggro == "نشط" ? -20 : 0)))
 coolEff = aggro == "هادئ" ? coolN * 2 : aggro == "نشط" ? math.max(1, coolN / 2) : coolN
-canEnter = barstate.isconfirmed and not inTrade and pDir == 0 and (bar_index - lastExit) > coolEff and bar_index > 60
-// وضع الجودة: يمنع الدخول العشوائي في سوق ميت — ولا يمنع الاستمرار مع
-// اتجاه واضح ولا الارتداد من منطقة قرار كبرى
 qGateUp = not qualityMode or contUp or atZoneUp or (adx >= adxMin and cloudDir >= 0)
 qGateDn = not qualityMode or contDn or atZoneDn or (adx >= adxMin and cloudDir <= 0)
-// وضع الانعكاس: دخول عكسي عند التشبع الحاد مع دليل امتصاص أو مسح سيولة
-revUp = reversalMode and rsi <= revLo and (spring or sweepUp or bullPin) and qUp >= minQeff - 20
-revDn = reversalMode and rsi >= revHi and (upthrust or sweepDn or bearPin) and qDn >= minQeff - 20
-longSig  = canEnter and ((trigUp and qUp >= minQeff and qGateUp) or revUp)
-shortSig = canEnter and not longSig and ((trigDn and qDn >= minQeff and qGateDn) or revDn)
+canEnter = barstate.isconfirmed and not inTrade and pDir == 0 and (bar_index - lastExit) > coolEff and bar_index > 60
+longSig  = canEnter and trigUp and qUp >= minQeff and qGateUp
+shortSig = canEnter and not longSig and trigDn and qDn >= minQeff and qGateDn
 sigDir = longSig ? 1 : shortSig ? -1 : 0
-sigWhy = longSig ? (revUp and not trigUp ? "انعكاس من تشبع بيعي حاد" : contUp ? "استئناف بعد تصحيح مع الاتجاه" : spring ? "سبرينق وايكوف على الدعم" : chochUp ? "انقلاب طابع CHoCH" : sweepUp ? "مسح سيولة تحت قاع متأرجح" : "كسر بنية BOS") :
-     shortSig ? (revDn and not trigDn ? "انعكاس من تشبع شرائي حاد" : contDn ? "استئناف بعد تصحيح مع الاتجاه" : upthrust ? "أبثراست وايكوف على المقاومة" : chochDn ? "انقلاب طابع CHoCH" : sweepDn ? "مسح سيولة فوق قمة متأرجحة" : "كسر بنية BOS") : ""
+sigWhy = sigDir == 0 ? "" :
+     (sigDir > 0 ? (zoneUp ? "كسر منطقة تجميع بحجم" : contUp ? "استئناف بعد تصحيح مع الاتجاه" : spring ? "سبرينق وايكوف على الدعم" : chochUp ? "انقلاب طابع CHoCH" : sweepUp ? "مسح سيولة تحت قاع" : "كسر بنية BOS")
+     : (zoneDn ? "كسر منطقة توزيع بحجم" : contDn ? "استئناف بعد تصحيح مع الاتجاه" : upthrust ? "أبثراست وايكوف على المقاومة" : chochDn ? "انقلاب طابع CHoCH" : sweepDn ? "مسح سيولة فوق قمة" : "كسر بنية BOS"))
 
-// ١) الشرارة تُسلّح أمراً معلقاً — ولا تدخل شيئاً
 if sigDir != 0
     pDir   := sigDir
     pBar   := bar_index
-    pRef   := close
     pWhy   := sigWhy
-    pPlanStop := sigDir > 0 ? (not na(sw3L) and close - sw3L < 3 * atr ? sw3L - 0.25 * atr : low - 0.5 * atr)
-         : (not na(sw3H) and sw3H - close < 3 * atr ? sw3H + 0.25 * atr : high + 0.5 * atr)
-    pLimit := useLimit ? (sigDir > 0 ? high - retrX * rngHL : low + retrX * rngHL) : na
-    // ادفع الوقف بعيداً بما يكفي عن سعر التنفيذ المنتظر
-    pRefEntry = useLimit ? pLimit : close
-    pPlanStop := sigDir > 0 ? math.min(pPlanStop, pRefEntry - minRiskX * atr)
-         : math.max(pPlanStop, pRefEntry + minRiskX * atr)
-    if useLimit
-        lnPend := line.new(bar_index, pLimit, bar_index + pExpire, pLimit, color=cYel, style=line.style_dashed, width=1)
-        label.new(bar_index, sigDir > 0 ? low : high, "⏳ " + f_side(sigDir) + " معلق " + str.tostring(pLimit, format.mintick),
-             style=sigDir > 0 ? label.style_label_up : label.style_label_down,
-             color=color.new(cYel, 25), textcolor=#20180A, size=size.small)
-        alert("⏳ أمر معلق " + f_side(sigDir) + " | " + syminfo.ticker + " فريم " + timeframe.period +
-             " | حد " + str.tostring(pLimit, format.mintick) + " | وقف " + str.tostring(pPlanStop, format.mintick) +
-             " | صالح " + str.tostring(pExpire) + " شموع | السبب: " + pWhy, alert.freq_once_per_bar)
+    pStrong := strongImp
+    // المندفع: اختراق قريب ووقف واسع خلف الشمعة كاملة، لأننا ندفع سعراً أعلى
+    // الهادئ: حد أعمق ووقف أضيق، لأننا ندخل بسعر أفضل
+    dLim = strongImp ? retrX * 0.6 : retrX
+    dBrk = strongImp ? brkX * 0.6 : brkX
+    pLimit := sigDir > 0 ? high - dLim * rngHL : low + dLim * rngHL
+    pBreak := sigDir > 0 ? high + dBrk * atr : low - dBrk * atr
+    base = sigDir > 0 ? math.min(low, pLimit) : math.max(high, pLimit)
+    pStop := sigDir > 0 ? base - stopX * atr : base + stopX * atr
+    if showPlan
+        lnLim := line.new(bar_index, pLimit, bar_index + pExpire, pLimit, color=color.new(cYel, 20), style=line.style_dashed, width=1)
+        lnBrk := useBracket ? line.new(bar_index, pBreak, bar_index + pExpire, pBreak, color=color.new(cCyan, 30), style=line.style_dotted, width=1) : na
+    label.new(bar_index, sigDir > 0 ? low : high,
+         "⏳ " + f_side(sigDir) + (useBracket ? "  حد " + str.tostring(pLimit, format.mintick) + " · اختراق " + str.tostring(pBreak, format.mintick) : "  حد " + str.tostring(pLimit, format.mintick)),
+         style=sigDir > 0 ? label.style_label_up : label.style_label_down,
+         color=color.new(cYel, 25), textcolor=#20180A, size=size.small)
+    alert("⏳ أمر معلق " + f_side(sigDir) + " | " + syminfo.ticker + " فريم " + timeframe.period +
+         " | حد " + str.tostring(pLimit, format.mintick) +
+         (useBracket ? " | اختراق " + str.tostring(pBreak, format.mintick) : "") +
+         " | وقف " + str.tostring(pStop, format.mintick) +
+         " | " + (strongImp ? "زخم عالٍ" : "سوق هادئ") + " | السبب: " + pWhy, alert.freq_once_per_bar)
 
-// ٢) التنفيذ يقع على شمعة لاحقة بسعر يمكن الحصول عليه فعلاً
-// آخر شمعة في الجلسة النظامية: بعدها فجوة لا وقف فيها
-eodNow = flatEod and timeframe.isintraday and session.islastbar_regular
+// ============================ التنفيذ ======================================
 fillNow = false
 float fillP = na
 int   fDir  = 0
+bool  byBrk = false
 if pDir != 0 and not inTrade and barstate.isconfirmed and bar_index > pBar
-    if useLimit
-        if pDir > 0 ? low <= pLimit : high >= pLimit
-            fillNow := true
-            fillP := pDir > 0 ? math.min(open, pLimit) : math.max(open, pLimit)
-    else if bar_index == pBar + 1
-        // سوق: ندخل على الافتتاح ما لم يكن السعر قد طار بعيداً عن الشرارة
-        if math.abs(open - pRef) <= maxChase * atr and (pDir > 0 ? open > pPlanStop : open < pPlanStop)
-            fillNow := true
-            fillP := open
-    if fillNow
+    hitLim = pDir > 0 ? low <= pLimit : high >= pLimit
+    hitBrk = useBracket and (pDir > 0 ? high >= pBreak : low <= pBreak)
+    // إن لمس الاثنان في شمعة واحدة نأخذ الأسوأ: لا نمنح أنفسنا أفضل احتمال
+    if hitLim or hitBrk
+        fillNow := true
+        byBrk := hitBrk
+        fillP := byBrk ? pBreak : (pDir > 0 ? math.min(open, pLimit) : math.max(open, pLimit))
         fDir := pDir
-    else if bar_index - pBar >= pExpire or (pDir > 0 ? close < pPlanStop : close > pPlanStop) or eodNow
+    else if bar_index - pBar >= pExpire or (pDir > 0 ? close < pStop : close > pStop)
         missedCnt += 1
         missedToday += 1
         pDir := 0
-        line.delete(lnPend)
+        line.delete(lnLim)
+        line.delete(lnBrk)
 
 if fillNow
     inTrade := true
@@ -391,79 +429,72 @@ if fillNow
     entryBar := bar_index
     tDir   := fDir
     entryP := fillP
-    // التنفيذ قد يقع أفضل من الحد المنتظر، فتضيق المسافة من جديد: تُثبَّت هنا
-    stopP  := fDir > 0 ? math.min(pPlanStop, entryP - minRiskX * atr)
-         : math.max(pPlanStop, entryP + minRiskX * atr)
+    stopP  := fDir > 0 ? math.min(pStop, entryP - minRiskX * atr) : math.max(pStop, entryP + minRiskX * atr)
     stop0  := stopP
     tp1 := fDir > 0 ? entryP + tp1x * atr : entryP - tp1x * atr
     tp2 := fDir > 0 ? entryP + tp2x * atr : entryP - tp2x * atr
     tp3 := fDir > 0 ? entryP + tp3x * atr : entryP - tp3x * atr
     tp4 := fDir > 0 ? entryP + tp4x * atr : entryP - tp4x * atr
-    h1 := false
-    h2 := false
-    h3 := false
-    h4 := false
+    hits := 0
+    was0dte := isFund and not lateSession
     pDir := 0
-    line.delete(lnPend)
+    line.delete(lnLim)
+    line.delete(lnBrk)
     lnEntry := line.new(bar_index, entryP, bar_index + 1, entryP, extend=extend.right, color=color.new(cTxt, 35), style=line.style_dotted, width=1)
     lnStop  := line.new(bar_index, stopP, bar_index + 1, stopP, extend=extend.right, color=#FF9E45, width=2)
-    label.new(bar_index, fDir > 0 ? low : high, "🎯 " + f_side(fDir) + " " + str.tostring(entryP, format.mintick),
+    label.new(bar_index, fDir > 0 ? low : high,
+         "🎯 " + f_side(fDir) + " " + str.tostring(entryP, format.mintick) + (byBrk ? " ⚡اختراق" : ""),
          style=fDir > 0 ? label.style_label_up : label.style_label_down,
          color=fDir > 0 ? cUp : cDn, textcolor=fDir > 0 ? #04211D : #2B0606, size=size.normal)
     alert("🎯 دخول " + f_side(fDir) + " | " + syminfo.ticker + " فريم " + timeframe.period +
          " | سعر " + str.tostring(entryP, format.mintick) + " | وقف " + str.tostring(stopP, format.mintick) +
+         " | العقد " + expiryTxt + (gapRisk ? " (مخاطرة فجوة)" : "") +
          " | السبب: " + pWhy, alert.freq_once_per_bar)
 
-// ------------------------------------------------------------ إدارة الصفقة
+// ============================ الإدارة ======================================
 tpHit1 = false
 tpHit2 = false
 tpHit3 = false
 tpHit4 = false
 slHit  = false
-// الأهداف تُحتسب من الشمعة التالية للتنفيذ فقط، أما الوقف فيُحتسب حتى في
-// شمعة التنفيذ نفسها — التشدد على النفس في الخسارة والتحفظ في الربح
+// عقد اليوم لا يبيت: يُقفل مع الجرس. أما صفقة أُخذت على عقد الغد فتُترك
+mustFlat = inTrade and atBell and flat0dte and was0dte
 if inTrade and barstate.isconfirmed and bar_index >= entryBar
     if bar_index > entryBar
-        if not h1 and (tDir > 0 ? high >= tp1 : low <= tp1)
-            h1 := true
+        if hits < 1 and (tDir > 0 ? high >= tp1 : low <= tp1)
+            hits := 1
             tpHit1 := true
-            alert("🔺 هدف 1 تحقق — الصفقة تجري خلف الوقف المتحرك | " + syminfo.ticker, alert.freq_once_per_bar)
-        if h1 and not h2 and (tDir > 0 ? high >= tp2 : low <= tp2)
-            h2 := true
+            alert("🔺 هدف 1 | " + syminfo.ticker, alert.freq_once_per_bar)
+        if hits < 2 and (tDir > 0 ? high >= tp2 : low <= tp2)
+            hits := 2
             tpHit2 := true
-            alert("🔺 هدف 2 تحقق — الوقف صعد إلى الدخول (مؤمّنة) | " + syminfo.ticker, alert.freq_once_per_bar)
-        if h2 and not h3 and (tDir > 0 ? high >= tp3 : low <= tp3)
-            h3 := true
+            alert("🔺 هدف 2 | " + syminfo.ticker, alert.freq_once_per_bar)
+        if hits < 3 and (tDir > 0 ? high >= tp3 : low <= tp3)
+            hits := 3
             tpHit3 := true
-            alert("🔺 هدف 3 تحقق | " + syminfo.ticker, alert.freq_once_per_bar)
-        if h3 and not h4 and (tDir > 0 ? high >= tp4 : low <= tp4)
-            h4 := true
+            alert("🔺 هدف 3 | " + syminfo.ticker, alert.freq_once_per_bar)
+        if hits < 4 and (tDir > 0 ? high >= tp4 : low <= tp4)
+            hits := 4
             tpHit4 := true
-            alert("🔺 الهدف الممتد تحقق | " + syminfo.ticker, alert.freq_once_per_bar)
-        if h1
+            alert("🔺 الهدف الممتد | " + syminfo.ticker, alert.freq_once_per_bar)
+        if hits >= 1
             chand = tDir > 0 ? close - trailX * atr : close + trailX * atr
             stopP := tDir > 0 ? math.max(stopP, chand) : math.min(stopP, chand)
-        if h2
+        if hits >= 2
             stopP := tDir > 0 ? math.max(stopP, entryP) : math.min(stopP, entryP)
     line.set_y1(lnStop, stopP)
     line.set_y2(lnStop, stopP)
-    hardStop = not h1 and (tDir > 0 ? low <= stop0 : high >= stop0)
-    softStop = h1 and (tDir > 0 ? close < stopP : close > stopP)
-    if hardStop or softStop or eodNow
+    hardStop = hits < 1 and (tDir > 0 ? low <= stop0 : high >= stop0)
+    softStop = hits >= 1 and (tDir > 0 ? close < stopP : close > stopP)
+    doneT   = hits >= maxT
+    if hardStop or softStop or doneT or mustFlat
         slHit := true
         risk  = math.abs(entryP - stop0)
-        // إن فتحت الشمعة قافزة خلف الوقف فالتنفيذ عند الافتتاح لا عند الوقف:
-        // الوقف وعد بسعر، والفجوة تنقضه، وتسجيله كأنه نُفّذ كذب مريح
         gapped = tDir > 0 ? open < stop0 : open > stop0
         exitP = hardStop ? (gapped ? open : stop0) : close
         rGross = risk > 0 ? (tDir > 0 ? exitP - entryP : entryP - exitP) / risk : 0.0
-        // كل ما يُعدّ بعد هذا السطر صافٍ: تكلفة العقد مطروحة. صفقة تخرج
-        // عند سعر دخولها ليست تعادلاً — هي خسارة بمقدار فرق السعر.
         rMult = rGross - costR
         win   = rMult > 0
-        array.unshift(resArr, win ? 1 : 0)
-        if array.size(resArr) > 20
-            array.pop(resArr)
         winsAll += win ? 1 : 0
         lossAll += win ? 0 : 1
         sumR    += rGross
@@ -487,30 +518,34 @@ if inTrade and barstate.isconfirmed and bar_index >= entryBar
             line.delete(lnEntry)
         line.delete(lnStop)
         label.new(bar_index, tDir > 0 ? low : high,
-             win ? "✅ +" + str.tostring(rMult, "#.#") + "R" : "🔴 " + str.tostring(rMult, "#.#") + "R",
+             (win ? "✅ +" : "🔴 ") + str.tostring(rMult, "#.#") + "R",
              style=tDir > 0 ? label.style_label_up : label.style_label_down,
              color=win ? color.new(cUp, 20) : color.new(cDn, 10),
              textcolor=win ? #04211D : #2B0606, size=size.normal)
-        alert((win ? "✅" : "🔴") + " خروج — " + (eodNow and not hardStop and not softStop ? "إغلاق الجلسة" : "كسر الوقف المتحرك") + " | " + syminfo.ticker +
-             " | النتيجة " + (win ? "+" : "") + str.tostring(rMult, "#.#") + "R", alert.freq_once_per_bar)
+        alert((win ? "✅" : "🔴") + " خروج — " + (mustFlat ? "إغلاق عقد اليوم" : doneT ? "الهدف الأخير" : "الوقف") +
+             " | " + syminfo.ticker + " | النتيجة " + (win ? "+" : "") + str.tostring(rMult, "#.#") + "R", alert.freq_once_per_bar)
         inTrade := false
         lastExit := bar_index
 
-// -------------------------------------------------- alertcondition (كاملة)
-acCall = fDir > 0
-acPut  = fDir < 0
-alertcondition(acCall,  "CALL Entry",  "CALL entry signal")
-alertcondition(acPut,   "PUT Entry",   "PUT entry signal")
-alertcondition(slHit,   "Stop Loss Hit", "Stop loss hit")
-alertcondition(tpHit1,  "TP1 Hit", "Target 1 hit")
-alertcondition(tpHit2,  "TP2 Hit", "Target 2 hit")
-alertcondition(tpHit3,  "TP3 Hit", "Target 3 hit")
-alertcondition(tpHit4,  "TP4 Hit", "Target 4 hit")
+alertcondition(fDir > 0, "CALL Entry", "CALL entry signal")
+alertcondition(fDir < 0, "PUT Entry", "PUT entry signal")
+alertcondition(slHit,  "Exit", "Trade closed")
+alertcondition(tpHit1, "TP1 Hit", "Target 1 hit")
+alertcondition(tpHit2, "TP2 Hit", "Target 2 hit")
+alertcondition(tpHit3, "TP3 Hit", "Target 3 hit")
+alertcondition(tpHit4, "TP4 Hit", "Target 4 hit")
 
-// ------------------------------------------------------ العقد المقترح
+// ==================== الإشارة التمهيدية على الشمعة المتكوّنة ================
+// تُرى مبكراً وقد تختفي قبل الإغلاق. لا تُحتسب في السجل أبداً — وهذا هو
+// الفرق بين إظهارها وبين الكذب في الأرقام.
+earlyUp = showEarly and barstate.islast and not barstate.isconfirmed and pDir == 0 and not inTrade and trigUp and qUp >= minQeff and qGateUp
+earlyDn = showEarly and barstate.islast and not barstate.isconfirmed and pDir == 0 and not inTrade and not earlyUp and trigDn and qDn >= minQeff and qGateDn
+secsLeft = timeframe.isintraday and not na(time_close) ? math.max(0, (time_close - timenow) / 1000) : na
+earlyTxt = earlyUp ? "🔸 كول يتشكّل" : earlyDn ? "🔹 بوت يتشكّل" : ""
+
+// ============================ العقد المقترح ================================
 f_step(p) => p < 50 ? 0.5 : p < 200 ? 1.0 : p < 500 ? 2.5 : 5.0
-isFund = syminfo.ticker == "QQQ" or syminfo.ticker == "SPY" or syminfo.ticker == "SPX"
-liveDir = inTrade ? tDir : qUp >= qDn ? 1 : -1
+liveDir = inTrade ? tDir : pDir != 0 ? pDir : lead
 optBase = inTrade ? entryP : close
 optStep = f_step(optBase)
 optStrk = liveDir > 0 ? math.ceil(optBase / optStep) * optStep : math.floor(optBase / optStep) * optStep
@@ -521,178 +556,258 @@ oP3 = f_optPct(inTrade ? tp3 : (liveDir > 0 ? close + tp3x * atr : close - tp3x 
 oP4 = f_optPct(inTrade ? tp4 : (liveDir > 0 ? close + tp4x * atr : close - tp4x * atr))
 f_pct(p) => na(p) ? "—" : "+" + str.tostring(p, "#") + "%"
 
-// ------------------------------------------------------------------ اللوحة
+// ============================ شاشة المراقبة ================================
+// محرك مصغّر يعمل داخل كل رمز بفريمه: يراقب، يعلّق أمراً، يدخل، يدير أهدافه،
+// ثم يخرج. هذا هو الفرق بين شاشة تقرأ سعراً وشاشة تعرف صفقة.
+f_watch(ck) =>
+    a  = ta.atr(14)
+    cf = ta.hma(close, 21)
+    cs = ta.ema(close, 55)
+    e9 = ta.ema(close, 9)
+    cd = cf > cs ? 1 : -1
+    inC = close <= math.max(cf, cs) and close >= math.min(cf, cs)
+    [dp, dm, ax] = ta.dmi(14, 14)
+    hv = not na(volume) and ta.sma(volume, 20) > 0
+    vs = hv ? volume > 1.2 * ta.sma(volume, 20) : math.abs(close - open) > 0.7 * a
+    bd = math.abs(close - open)
+    dW = cd > 0 and close > cs ? 1 : cd < 0 and close < cs ? -1 : 0
+    sc = 0
+    sc := sc + (dW != 0 ? 25 : 0)
+    sc := sc + (ax >= 18 ? 25 : 0)
+    sc := sc + (vs ? 25 : 0)
+    sc := sc + (not inC ? 25 : 0)
+    var bool aU = false
+    var bool aD = false
+    if dW > 0 and low <= math.max(cf, e9) + 0.20 * a
+        aU := true
+        aD := false
+    if dW < 0 and high >= math.min(cf, e9) - 0.20 * a
+        aD := true
+        aU := false
+    if dW <= 0
+        aU := false
+    if dW >= 0
+        aD := false
+    cU = aU and close > open and close > high[1] and bd > 0.25 * a
+    cD = aD and close < open and close < low[1] and bd > 0.25 * a
+    if cU
+        aU := false
+    if cD
+        aD := false
+    var int   st = 0
+    var int   sd = 0
+    var float sEnt = na
+    var float sStp = na
+    var float sLim = na
+    var float sBrk = na
+    var int   sBar = 0
+    var int   sHit = 0
+    var float sR   = na
+    var int   sOut = -999
+    var int   sIn  = -999
+    if st == 0 and (cU or cD) and barstate.isconfirmed and bar_index - sOut > 3
+        st  := 1
+        sd  := cU ? 1 : -1
+        sBar := bar_index
+        rg = math.max(high - low, syminfo.mintick)
+        sLim := cU ? high - 0.5 * rg : low + 0.5 * rg
+        sBrk := cU ? high + 0.10 * a : low - 0.10 * a
+        bs = cU ? math.min(low, sLim) : math.max(high, sLim)
+        sStp := cU ? bs - 0.7 * a : bs + 0.7 * a
+    else if st == 1 and barstate.isconfirmed and bar_index > sBar
+        hL = sd > 0 ? low <= sLim : high >= sLim
+        hB = sd > 0 ? high >= sBrk : low <= sBrk
+        if hL or hB
+            st := 2
+            sEnt := hB and not hL ? sBrk : (sd > 0 ? math.min(open, sLim) : math.max(open, sLim))
+            sStp := sd > 0 ? math.min(sStp, sEnt - 0.5 * a) : math.max(sStp, sEnt + 0.5 * a)
+            sHit := 0
+            sIn  := bar_index
+        else if bar_index - sBar >= 3
+            st := 0
+    else if st == 2 and barstate.isconfirmed
+        rr = math.max(math.abs(sEnt - sStp), syminfo.mintick)
+        pg = sd > 0 ? (high - sEnt) / rr : (sEnt - low) / rr
+        sHit := math.max(sHit, pg >= 3.0 ? 4 : pg >= 2.0 ? 3 : pg >= 1.2 ? 2 : pg >= 0.7 ? 1 : 0)
+        if sHit >= 1
+            chd = sd > 0 ? close - 1.4 * a : close + 1.4 * a
+            sStp := sd > 0 ? math.max(sStp, chd) : math.min(sStp, chd)
+        if sd > 0 ? low <= sStp : high >= sStp
+            ex = sd > 0 ? math.min(open, sStp) : math.max(open, sStp)
+            sR := (sd > 0 ? ex - sEnt : sEnt - ex) / rr - ck
+            st := 0
+            sOut := bar_index
+    fresh = st == 2 and bar_index - sIn <= 2
+    justOut = st == 0 and bar_index - sOut <= 3
+    [st, sd, sc, sEnt, sStp, sLim, sHit, sR, fresh, justOut, dW]
+
+on1 = showWatch and wCount >= 1
+on2 = showWatch and wCount >= 2
+on3 = showWatch and wCount >= 3
+on4 = showWatch and wCount >= 4
+on5 = showWatch and wCount >= 5
+// صف مطفأ يُطلب على رمز الشارت نفسه: لا بيانات إضافية تُجلب، وهذا هو
+// الجزء البطيء فعلاً في التحميل
+f_sym(on, s) => on ? s : syminfo.tickerid
+f_tfq(on, t) => on ? t : timeframe.period
+[a1s, a1d, a1q, a1e, a1p, a1l, a1h, a1r, a1f, a1o, a1t] = request.security(f_sym(on1, w1s), f_tfq(on1, w1t), f_watch(costR), lookahead=barmerge.lookahead_off)
+[a2s, a2d, a2q, a2e, a2p, a2l, a2h, a2r, a2f, a2o, a2t] = request.security(f_sym(on2, w2s), f_tfq(on2, w2t), f_watch(costR), lookahead=barmerge.lookahead_off)
+[a3s, a3d, a3q, a3e, a3p, a3l, a3h, a3r, a3f, a3o, a3t] = request.security(f_sym(on3, w3s), f_tfq(on3, w3t), f_watch(costR), lookahead=barmerge.lookahead_off)
+[a4s, a4d, a4q, a4e, a4p, a4l, a4h, a4r, a4f, a4o, a4t] = request.security(f_sym(on4, w4s), f_tfq(on4, w4t), f_watch(costR), lookahead=barmerge.lookahead_off)
+[a5s, a5d, a5q, a5e, a5p, a5l, a5h, a5r, a5f, a5o, a5t] = request.security(f_sym(on5, w5s), f_tfq(on5, w5t), f_watch(costR), lookahead=barmerge.lookahead_off)
+
+watchFire = (on1 and a1f and not a1f[1]) or (on2 and a2f and not a2f[1]) or (on3 and a3f and not a3f[1]) or
+     (on4 and a4f and not a4f[1]) or (on5 and a5f and not a5f[1])
+alertcondition(watchFire, "دخول على شاشة المراقبة", "أحد رموز شاشة المراقبة دخل صفقة الآن")
+if watchFire
+    alert("🟢 دخول جديد على شاشة المراقبة — افتح اللوحة", alert.freq_once_per_bar)
+
+// ============================ اللوحة =======================================
 f_pos(s) => s == "أعلى يمين" ? position.top_right : s == "أعلى يسار" ? position.top_left :
      s == "أسفل يمين" ? position.bottom_right : position.bottom_left
-f_tfCell(d) => d > 0 ? "▲" : d < 0 ? "▼" : "•"
-f_tfCol(d) => d > 0 ? cUp : d < 0 ? cDn : cMut
-
-// اسم الفريم بالعربي — يُستعمل في اللوحة وفي شاشة المراقبة
-f_tfName(t) => t == "D" ? "يومي" : t == "W" ? "أسبوعي" : t == "1" ? "1د" : t == "3" ? "3د" :
-     t == "5" ? "5د" : t == "15" ? "15د" : t == "30" ? "30د" : t == "60" ? "1س" :
-     t == "120" ? "2س" : t == "240" ? "4س" : t
-// شريط جودة مرئي بدل رقم جاف
-f_bar(v) =>
+f_tf(d) => d > 0 ? "▲" : d < 0 ? "▼" : "•"
+f_tfc(d) => d > 0 ? cUp : d < 0 ? cDn : cMut
+f_tfName(t) => t == "D" ? "يومي" : t == "W" ? "أسبوعي" : t == "60" ? "1س" : t == "120" ? "2س" :
+     t == "240" ? "4س" : t + "د"
+f_bar5(v) =>
     n = math.round(v / 20.0)
     s = ""
     for i = 1 to 5
         s := s + (i <= n ? "▮" : "▯")
     s
-// اسم الرمز بلا اسم السوق: NASDAQ:AAPL تصير AAPL
 f_short(s) => str.contains(s, ":") ? array.get(str.split(s, ":"), 1) : s
+f_marks(h) => (h >= 1 ? "✓" : "○") + (h >= 2 ? "✓" : "○") + (h >= 3 ? "✓" : "○") + (h >= 4 ? "✓" : "○")
 
-// لوحة واحدة، سطران في كل صف، وكل سطر يجيب على سؤال واحد
-var table dash = table.new(f_pos(dashPosS), 2, 10, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+var table dash = table.new(f_pos(dashPosS), 2, 11, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
 if barstate.islast
     q = math.max(qUp, qDn)
     qCol = q >= 80 ? cUp : q >= 60 ? cYel : cDn
     sCol = inTrade ? (tDir > 0 ? cUp : cDn) : pDir != 0 ? cYel : liveDir > 0 ? cUp : cDn
-    // السطر الوحيد الذي يجب أن يقرأه المتداول: ماذا أفعل الآن؟
-    blockedByGate = qualityMode and (lead > 0 ? not qGateUp : not qGateDn)
-    action = inTrade ? (h2 ? "💰 مؤمّنة — احجز جزءاً ودع الباقي يجري" : h1 ? "🏃 تجري خلف الوقف — لا تستعجل" : "✊ امسك — خسارتك محدودة بـ 1R") :
-         pDir != 0 ? "⏳ ضع أمر " + f_side(pDir) + " عند " + str.tostring(pLimit, format.mintick) + " — ولا تطارد" :
+    blocked = qualityMode and (lead > 0 ? not qGateUp : not qGateDn)
+    action = inTrade ? (hits >= 2 ? "💰 مؤمّنة — احجز جزءاً ودع الباقي" : hits >= 1 ? "🏃 تجري خلف الوقف" : "✊ امسك — خسارتك محدودة بـ 1R") :
+         pDir != 0 ? ("⏳ " + (useBracket ? (pStrong ? "زخم — الأرجح اختراق " + str.tostring(pBreak, format.mintick) + " · وحد " + str.tostring(pLimit, format.mintick) : "هادئ — الأرجح حد " + str.tostring(pLimit, format.mintick) + " · واختراق " + str.tostring(pBreak, format.mintick)) : "ضع أمر " + f_side(pDir) + " عند " + str.tostring(pLimit, format.mintick))) :
+         earlyTxt != "" ? (earlyTxt + " — ينتظر الإغلاق " + (na(secsLeft) ? "" : str.tostring(math.round(secsLeft)) + "ث")) :
          (bar_index - lastExit) <= coolEff ? "😴 راحة بعد الصفقة السابقة" :
-         leadScore < minQeff ? "⏸ انتظر — ينقص: " + f_miss(lead > 0) :
-         blockedByGate ? "⏸ انتظر — سوق بلا قوة اتجاه (ADX " + str.tostring(adx, "#") + ")" :
+         leadScore < minQeff ? "⏸ ينقص: " + f_miss(lead > 0) :
+         blocked ? "⏸ سوق بلا قوة اتجاه (ADX " + str.tostring(adx, "#") + ")" :
          (lead > 0 ? not trigUp : not trigDn) ? "👀 جاهز — بانتظار الشرارة" : "⚡ ادخل الآن"
-    actCol = inTrade ? cUp : pDir != 0 ? cYel : action == "⚡ ادخل الآن" ? cUp : cMut
-    stateTxt = inTrade ? "صفقة " + f_side(tDir) + " قائمة" : pDir != 0 ? "أمر " + f_side(pDir) + " معلق" : "ميل السوق " + (liveDir > 0 ? "كول" : "بوت")
-    // ١ العنوان
+    actCol = inTrade ? cUp : pDir != 0 ? cYel : earlyTxt != "" ? cCyan : cMut
+    state = inTrade ? "صفقة " + f_side(tDir) + " قائمة" : pDir != 0 ? "أمر " + f_side(pDir) + " معلق" : "ميل السوق " + f_side(liveDir)
     table.cell(dash, 0, 0, "مرصاد VIP", text_color=cGold, bgcolor=cHead, text_size=size.normal)
-    table.cell(dash, 1, 0, syminfo.ticker + " · " + f_tfName(timeframe.period), text_color=cTxt, bgcolor=cHead, text_size=size.normal)
-    // ٢ الحالة الآن
+    table.cell(dash, 1, 0, syminfo.ticker + " · " + f_tfName(timeframe.period) + " · " + prof, text_color=cTxt, bgcolor=cHead, text_size=size.normal)
     table.cell(dash, 0, 1, "الحالة", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 1, stateTxt, text_color=#0B0E13, bgcolor=sCol, text_size=size.normal)
-    // ٣ ماذا أفعل
+    table.cell(dash, 1, 1, state, text_color=#0B0E13, bgcolor=sCol, text_size=size.normal)
     table.cell(dash, 0, 2, "ماذا أفعل؟", text_color=cMut, text_size=size.small)
     table.cell(dash, 1, 2, action, text_color=actCol, text_size=size.normal)
-    // ٤ الجودة
     table.cell(dash, 0, 3, "قوة الفرصة", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 3, f_bar(q) + "  " + str.tostring(q) + "/100", text_color=qCol, text_size=size.small)
-    // ٥ العقد
+    table.cell(dash, 1, 3, f_bar5(q) + "  " + str.tostring(q) + "/100" + (strongImp ? "  ⚡زخم" : ""), text_color=qCol, text_size=size.small)
     table.cell(dash, 0, 4, "العقد", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 4, syminfo.ticker + " " + str.tostring(optStrk, format.mintick) + (liveDir > 0 ? "C" : "P") + " · " + (isFund ? "اليوم" : "جمعة الأسبوع"), text_color=sCol, text_size=size.small)
-    // ٦ الأهداف
+    table.cell(dash, 1, 4, syminfo.ticker + " " + str.tostring(optStrk, format.mintick) + (liveDir > 0 ? "C" : "P") + " · " + expiryTxt,
+         text_color=gapRisk ? cYel : sCol, text_size=size.small)
     table.cell(dash, 0, 5, "الأهداف", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 5, (h1 ? "✅" : "①") + f_pct(oP1) + "  " + (h2 ? "✅" : "②") + f_pct(oP2) + "  " + (h3 ? "✅" : "③") + f_pct(oP3) + "  " + (h4 ? "✅" : "④") + f_pct(oP4), text_color=cGold, text_size=size.small)
-    // ٧ الدخول والوقف
+    table.cell(dash, 1, 5, f_marks(hits) + "  " + f_pct(oP1) + " " + f_pct(oP2) + " " + f_pct(oP3) + " " + f_pct(oP4), text_color=cGold, text_size=size.small)
     table.cell(dash, 0, 6, "دخول ← وقف", text_color=cMut, text_size=size.small)
     table.cell(dash, 1, 6, inTrade ? str.tostring(entryP, format.mintick) + "  ←  " + str.tostring(stopP, format.mintick) : "—", text_color=inTrade ? #FF9E45 : cMut, text_size=size.small)
-    // ٨ الفريمات
     table.cell(dash, 0, 7, "الفريمات", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 7, "1د" + f_tfCell(d01) + " 3د" + f_tfCell(d03) + " 5د" + f_tfCell(d05) + " 15د" + f_tfCell(d15) + " 1س" + f_tfCell(d60), text_color=bias > 0 ? cUp : bias < 0 ? cDn : cMut, text_size=size.small)
-    // ٩ السوق
+    table.cell(dash, 1, 7, "1د" + f_tf(d01) + " 3د" + f_tf(d03) + " 5د" + f_tf(d05) + " 15د" + f_tf(d15) + " 1س" + f_tf(d60),
+         text_color=bias > 0 ? cUp : bias < 0 ? cDn : cMut, text_size=size.small)
     mktTxt = rsi >= 70 ? "تشبع شرائي ⚠" : rsi <= 30 ? "تشبع بيعي ⚠" : absorption ? "امتصاص مؤسسي" :
          inCloud ? "داخل السحابة — غير واضح" : cloudDir > 0 ? "زخم صاعد" : "زخم هابط"
-    mktCol = rsi >= 70 or rsi <= 30 ? cDn : absorption ? cCyan : inCloud ? cYel : cloudDir > 0 ? cUp : cDn
-    zoneTxt = inFib ? " · فيبو ذهبية" : nearSup ? " · على الدعم" : nearRes ? " · على المقاومة" : ""
+    zTxt = not na(zoneHi) ? " · منطقة تجميع" : inFib ? " · فيبو ذهبية" : nearSup ? " · على الدعم" : nearRes ? " · على المقاومة" : ""
     table.cell(dash, 0, 8, "السوق", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 8, mktTxt + zoneTxt, text_color=mktCol, text_size=size.small)
-    // ١٠ عداد اليوم
-    table.cell(dash, 0, 9, "اليوم", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 9, "دخل " + str.tostring(tradesToday) + " · ألغي " + str.tostring(missedToday) + " · " + aggro, text_color=cTxt, text_size=size.small)
+    table.cell(dash, 1, 8, mktTxt + zTxt, text_color=inCloud ? cYel : cloudDir > 0 ? cUp : cDn, text_size=size.small)
+    // الخطة القادمة: الشرط يُكتب قبل حدوثه لا بعده
+    upLv = not na(sw3H) ? sw3H : high
+    dnLv = not na(sw3L) ? sw3L : low
+    table.cell(dash, 0, 9, "لو صار كذا", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 9, showPlan ? "▲ فوق " + str.tostring(upLv, format.mintick) + " → كول " + str.tostring(upLv + tp1x * atr, format.mintick) +
+         "   ▼ تحت " + str.tostring(dnLv, format.mintick) + " → بوت " + str.tostring(dnLv - tp1x * atr, format.mintick) : "—",
+         text_color=cCyan, text_size=size.small)
+    table.cell(dash, 0, 10, "اليوم", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 10, "دخل " + str.tostring(tradesToday) + " · ألغي " + str.tostring(missedToday) +
+         (na(minsLeft) ? "" : " · تبقّى " + str.tostring(math.round(minsLeft)) + "د"), text_color=cTxt, text_size=size.small)
 
-// ------------------------------------------------------- شاشة المراقبة
-// خمسة أسماء أخرى، كل واحد بالفريم الذي تختاره له، وأنت ثابت على شارتك.
-// تُقرأ بنفس منطق المحرك: ميل السحابة + قوة الاتجاه + الحجم + القرب من
-// منطقة الارتداد — فتعرف أيها "تحت المراقبة" وأيها صار "كول/بوت جاهز".
-f_scan() =>
-    a  = ta.atr(14)
-    cf = ta.hma(close, cloudFastLen)
-    cs = ta.ema(close, cloudSlowLen)
-    e9 = ta.ema(close, 9)
-    inC = close <= math.max(cf, cs) and close >= math.min(cf, cs)
-    cd  = cf > cs ? 1 : -1
-    [dp, dm, ax] = ta.dmi(14, 14)
-    hv = not na(volume) and ta.sma(volume, 20) > 0
-    vs = hv ? volume > volX * ta.sma(volume, 20) : math.abs(close - open) > 0.7 * a
-    up = cd > 0 and close > cs
-    dn = cd < 0 and close < cs
-    d  = up ? 1 : dn ? -1 : 0
-    near = math.abs(close - math.max(cf, e9)) < 0.5 * a or math.abs(close - math.min(cf, e9)) < 0.5 * a
-    sc = 0
-    sc := sc + (d != 0 ? 25 : 0)
-    sc := sc + (ax >= adxMin ? 25 : 0)
-    sc := sc + (vs ? 25 : 0)
-    sc := sc + (not inC ? 25 : 0)
-    [d, sc, close, a, near, inC]
-
-[s1d, s1q, s1p, s1a, s1n, s1c] = request.security(w1s, w1t, f_scan(), lookahead=barmerge.lookahead_off)
-[s2d, s2q, s2p, s2a, s2n, s2c] = request.security(w2s, w2t, f_scan(), lookahead=barmerge.lookahead_off)
-[s3d, s3q, s3p, s3a, s3n, s3c] = request.security(w3s, w3t, f_scan(), lookahead=barmerge.lookahead_off)
-[s4d, s4q, s4p, s4a, s4n, s4c] = request.security(w4s, w4t, f_scan(), lookahead=barmerge.lookahead_off)
-[s5d, s5q, s5p, s5a, s5n, s5c] = request.security(w5s, w5t, f_scan(), lookahead=barmerge.lookahead_off)
-
-f_wState(d, q, near, inC) => d == 0 ? "خارج اللعب" : inC ? "👁 تحت المراقبة" :
-     q >= 75 and near ? (d > 0 ? "⚡ كول جاهز" : "⚡ بوت جاهز") :
-     q >= 75 ? (d > 0 ? "▲ صاعد قوي" : "▼ هابط قوي") : (d > 0 ? "▲ صاعد" : "▼ هابط")
-f_wCol(d, q, inC) => d == 0 ? cMut : inC ? cYel : q >= 75 ? (d > 0 ? cUp : cDn) : color.new(d > 0 ? cUp : cDn, 35)
-
+// ============================ شاشة المراقبة: الرسم =========================
 var table wt = table.new(f_pos(wPosS), 5, 6, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
-f_wRow(r, sym, tf, d, q, p, a, near, inC) =>
-    table.cell(wt, 0, r, f_short(sym), text_color=cTxt, text_size=size.small)
-    table.cell(wt, 1, r, f_tfName(tf), text_color=cMut, text_size=size.small)
-    table.cell(wt, 2, r, f_wState(d, q, near, inC), text_color=f_wCol(d, q, inC), text_size=size.small)
-    table.cell(wt, 3, r, f_bar(q), text_color=q >= 75 ? cUp : q >= 50 ? cYel : cMut, text_size=size.small)
-    table.cell(wt, 4, r, d == 0 ? "—" : f_short(sym) + " " + str.tostring(d > 0 ? math.ceil(p / f_step(p)) * f_step(p) : math.floor(p / f_step(p)) * f_step(p), format.mintick) + (d > 0 ? "C" : "P"), text_color=d == 0 ? cMut : d > 0 ? cUp : cDn, text_size=size.small)
+blink = math.floor(timenow / 700) % 2 == 0
+f_wTxt(st, d, sc, hit, r, fresh, jout, dW) =>
+    st == 2 and fresh ? "🟢 دخول " + (d > 0 ? "كول" : "بوت") + " الآن" :
+     st == 2 ? "🎯 " + (d > 0 ? "كول" : "بوت") + " " + f_marks(hit) :
+     st == 1 ? "⏳ أمر معلق" :
+     jout ? ((r > 0 ? "✅ +" : "🔴 ") + str.tostring(r, "#.#") + "R") :
+     dW == 0 ? "خارج اللعب" :
+     sc >= 75 ? (dW > 0 ? "👁 يتجهز كول" : "👁 يتجهز بوت") :
+     (dW > 0 ? "▲ صاعد" : "▼ هابط")
+f_wCol(st, d, sc, fresh, jout, r, dW) =>
+    st == 2 and fresh ? #0B0E13 :
+     st == 2 ? (d > 0 ? cUp : cDn) :
+     st == 1 ? cYel :
+     jout ? (r > 0 ? cUp : cDn) :
+     dW == 0 ? cMut : sc >= 75 ? cGold : color.new(dW > 0 ? cUp : cDn, 35)
+f_wBg(st, d, fresh) =>
+    st == 2 and fresh ? (blink ? (d > 0 ? cUp : cDn) : color.new(d > 0 ? cUp : cDn, 55)) : color.new(cPanl, 100)
+
+f_wRow(r, on, sym, tf, st, d, sc, ent, stp, lim, hit, rr, fresh, jout, dW) =>
+    if on
+        table.cell(wt, 0, r, f_short(sym), text_color=cTxt, text_size=size.small)
+        table.cell(wt, 1, r, f_tfName(tf), text_color=cMut, text_size=size.small)
+        table.cell(wt, 2, r, f_wTxt(st, d, sc, hit, rr, fresh, jout, dW),
+             text_color=f_wCol(st, d, sc, fresh, jout, rr, dW), bgcolor=f_wBg(st, d, fresh), text_size=size.small)
+        table.cell(wt, 3, r, st == 2 ? "وقف " + str.tostring(stp, format.mintick) : st == 1 ? str.tostring(lim, format.mintick) : f_bar5(sc),
+             text_color=st == 2 ? #FF9E45 : st == 1 ? cYel : sc >= 75 ? cUp : cMut, text_size=size.small)
+        table.cell(wt, 4, r, dW == 0 and st == 0 ? "—" : f_short(sym) + " " +
+             str.tostring((st == 2 ? (d > 0 ? math.ceil(ent / f_step(ent)) * f_step(ent) : math.floor(ent / f_step(ent)) * f_step(ent)) : close), format.mintick) +
+             ((st == 2 ? d : dW) > 0 ? "C" : "P"),
+             text_color=(st == 2 ? d : dW) > 0 ? cUp : cDn, text_size=size.small)
 
 if barstate.islast and showWatch
     table.cell(wt, 0, 0, "الاسم", text_color=cGold, bgcolor=cHead, text_size=size.small)
     table.cell(wt, 1, 0, "الفريم", text_color=cGold, bgcolor=cHead, text_size=size.small)
     table.cell(wt, 2, 0, "الحالة", text_color=cGold, bgcolor=cHead, text_size=size.small)
-    table.cell(wt, 3, 0, "القوة", text_color=cGold, bgcolor=cHead, text_size=size.small)
+    table.cell(wt, 3, 0, "الوقف/القوة", text_color=cGold, bgcolor=cHead, text_size=size.small)
     table.cell(wt, 4, 0, "العقد", text_color=cGold, bgcolor=cHead, text_size=size.small)
-    f_wRow(1, w1s, w1t, s1d, s1q, s1p, s1a, s1n, s1c)
-    f_wRow(2, w2s, w2t, s2d, s2q, s2p, s2a, s2n, s2c)
-    f_wRow(3, w3s, w3t, s3d, s3q, s3p, s3a, s3n, s3c)
-    f_wRow(4, w4s, w4t, s4d, s4q, s4p, s4a, s4n, s4c)
-    f_wRow(5, w5s, w5t, s5d, s5q, s5p, s5a, s5n, s5c)
+    f_wRow(1, on1, w1s, w1t, a1s, a1d, a1q, a1e, a1p, a1l, a1h, a1r, a1f, a1o, a1t)
+    f_wRow(2, on2, w2s, w2t, a2s, a2d, a2q, a2e, a2p, a2l, a2h, a2r, a2f, a2o, a2t)
+    f_wRow(3, on3, w3s, w3t, a3s, a3d, a3q, a3e, a3p, a3l, a3h, a3r, a3f, a3o, a3t)
+    f_wRow(4, on4, w4s, w4t, a4s, a4d, a4q, a4e, a4p, a4l, a4h, a4r, a4f, a4o, a4t)
+    f_wRow(5, on5, w5s, w5t, a5s, a5d, a5q, a5e, a5p, a5l, a5h, a5r, a5f, a5o, a5t)
 
-// -------------------------------------------------- جدول الاختبار الحي
-// أداء المحرك على هذا الشارت. الأرقام كلها صافية بعد تكلفة العقد.
-// ثلاثة أسطر تُقال هنا ولا تُقال في لوحات غيرنا: المحصلة الكلية بالـ R،
-// وأطول سلسلة خسائر متتالية، وحجم ما أكلته تكلفة العقد من المتوسط الخام.
-// وحين تكون العينة أصغر من ثلاثين صفقة يُقال ذلك صراحة بدل تركها تُقرأ
-// كأنها حقيقة مستقرة.
+// ============================ الاختبار الحي ================================
 var table bt = table.new(f_pos(btPosS), 2, 11, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
-f_wrCol(v) => v >= 60 ? cUp : v >= 45 ? cYel : cDn
+f_wr(v) => v >= 60 ? cUp : v >= 45 ? cYel : cDn
 if barstate.islast
     btWr  = btTot > 0 ? 100.0 * btWin / btTot : 0.0
     btCwr = btCallTot > 0 ? 100.0 * btCallWin / btCallTot : 0.0
     btPwr = btPutTot  > 0 ? 100.0 * btPutWin  / btPutTot  : 0.0
     btPf  = btLoss > 0 ? btGross / btLoss : (btGross > 0 ? 99.0 : 0.0)
     totAll = winsAll + lossAll
+    avgG = totAll > 0 ? sumR / totAll : 0.0
+    avgN = totAll > 0 ? sumRnet / totAll : 0.0
+    fillRate = (totAll + missedCnt) > 0 ? 100.0 * totAll / (totAll + missedCnt) : 0.0
     table.cell(bt, 0, 0, "الاختبار الحي", text_color=cGold, bgcolor=cHead, text_size=size.small)
     table.cell(bt, 1, 0, "آخر " + str.tostring(btDays) + " يوم", text_color=cTxt, bgcolor=cHead, text_size=size.small)
     table.cell(bt, 0, 1, "عدد الصفقات", text_color=cMut, text_size=size.small)
-    table.cell(bt, 1, 1, str.tostring(btTot) + (btTot < 30 ? "  عينة صغيرة ⚠" : ""),
-         text_color=btTot < 30 ? cYel : cTxt, text_size=size.small)
+    table.cell(bt, 1, 1, str.tostring(btTot) + (btTot < 30 ? "  عينة صغيرة ⚠" : ""), text_color=btTot < 30 ? cYel : cTxt, text_size=size.small)
     table.cell(bt, 0, 2, "نسبة النجاح", text_color=cMut, text_size=size.small)
-    table.cell(bt, 1, 2, btTot > 0 ? str.tostring(btWr, "#.#") + "%" : "—", text_color=f_wrCol(btWr), text_size=size.small)
+    table.cell(bt, 1, 2, btTot > 0 ? str.tostring(btWr, "#.#") + "%" : "—", text_color=f_wr(btWr), text_size=size.small)
     table.cell(bt, 0, 3, "نجاح الكول", text_color=cMut, text_size=size.small)
-    table.cell(bt, 1, 3, btCallTot > 0 ? str.tostring(btCwr, "#") + "% (" + str.tostring(btCallTot) + ")" : "—", text_color=f_wrCol(btCwr), text_size=size.small)
+    table.cell(bt, 1, 3, btCallTot > 0 ? str.tostring(btCwr, "#") + "% (" + str.tostring(btCallTot) + ")" : "—", text_color=f_wr(btCwr), text_size=size.small)
     table.cell(bt, 0, 4, "نجاح البوت", text_color=cMut, text_size=size.small)
-    table.cell(bt, 1, 4, btPutTot > 0 ? str.tostring(btPwr, "#") + "% (" + str.tostring(btPutTot) + ")" : "—", text_color=f_wrCol(btPwr), text_size=size.small)
-    // عامل ربح مبني على أقل من ثلاثين صفقة رقم لا يُبنى عليه قرار
+    table.cell(bt, 1, 4, btPutTot > 0 ? str.tostring(btPwr, "#") + "% (" + str.tostring(btPutTot) + ")" : "—", text_color=f_wr(btPwr), text_size=size.small)
     table.cell(bt, 0, 5, "عامل الربح", text_color=cMut, text_size=size.small)
     table.cell(bt, 1, 5, btTot == 0 ? "—" : btTot < 30 ? str.tostring(btPf, "#.##") + " (لا يُعتمد)" : str.tostring(btPf, "#.##"),
          text_color=btTot < 30 ? cMut : btPf >= 1.5 ? cUp : btPf >= 1.0 ? cYel : cDn, text_size=size.small)
-    avgGross = totAll > 0 ? sumR / totAll : 0.0
-    avgNet   = totAll > 0 ? sumRnet / totAll : 0.0
     table.cell(bt, 0, 6, "متوسط خام", text_color=cMut, text_size=size.small)
-    table.cell(bt, 1, 6, totAll > 0 ? (avgGross >= 0 ? "+" : "") + str.tostring(avgGross, "#.##") + "R" : "—", text_color=cMut, text_size=size.small)
-    // الرقم الذي يقرر: المتوسط بعد أن يأخذ فرق سعر العقد نصيبه
+    table.cell(bt, 1, 6, totAll > 0 ? (avgG >= 0 ? "+" : "") + str.tostring(avgG, "#.##") + "R" : "—", text_color=cMut, text_size=size.small)
     table.cell(bt, 0, 7, "متوسط بعد التكلفة", text_color=cTxt, text_size=size.small)
-    table.cell(bt, 1, 7, totAll > 0 ? (avgNet >= 0 ? "+" : "") + str.tostring(avgNet, "#.##") + "R" : "—",
-         text_color=avgNet > 0 ? cUp : cDn, bgcolor=color.new(avgNet > 0 ? cUp : cDn, 85), text_size=size.normal)
+    table.cell(bt, 1, 7, totAll > 0 ? (avgN >= 0 ? "+" : "") + str.tostring(avgN, "#.##") + "R" : "—",
+         text_color=avgN > 0 ? cUp : cDn, bgcolor=color.new(avgN > 0 ? cUp : cDn, 85), text_size=size.normal)
     table.cell(bt, 0, 8, "المحصلة الكلية", text_color=cMut, text_size=size.small)
-    table.cell(bt, 1, 8, totAll > 0 ? (sumRnet >= 0 ? "+" : "") + str.tostring(sumRnet, "#.#") + "R (" + str.tostring(totAll) + " صفقة)" : "—",
+    table.cell(bt, 1, 8, totAll > 0 ? (sumRnet >= 0 ? "+" : "") + str.tostring(sumRnet, "#.#") + "R (" + str.tostring(totAll) + ")" : "—",
          text_color=sumRnet > 0 ? cUp : cDn, text_size=size.small)
-    // ما يكسر المتداول ليس المتوسط بل أطول صف خسائر يمر به وهو صابر
     table.cell(bt, 0, 9, "أطول سلسلة خسائر", text_color=cMut, text_size=size.small)
     table.cell(bt, 1, 9, totAll > 0 ? str.tostring(maxLossRun) + " متتالية" : "—",
          text_color=maxLossRun >= 8 ? cDn : maxLossRun >= 5 ? cYel : cTxt, text_size=size.small)
-    // كم أمراً معلقاً نُفّذ فعلاً مقابل ما أُلغي — يضبط عمق الارتداد المطلوب
-    fillRate = (totAll + missedCnt) > 0 ? 100.0 * totAll / (totAll + missedCnt) : 0.0
     table.cell(bt, 0, 10, "نُفّذ / ألغي", text_color=cMut, text_size=size.small)
-    table.cell(bt, 1, 10, str.tostring(totAll) + " / " + str.tostring(missedCnt) + " · " + str.tostring(fillRate, "#") + "%", text_color=fillRate >= 40 ? cUp : fillRate >= 20 ? cYel : cDn, text_size=size.small)
+    table.cell(bt, 1, 10, str.tostring(totAll) + " / " + str.tostring(missedCnt) + " · " + str.tostring(fillRate, "#") + "%",
+         text_color=fillRate >= 40 ? cUp : fillRate >= 20 ? cYel : cDn, text_size=size.small)
