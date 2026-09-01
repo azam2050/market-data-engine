@@ -15,7 +15,7 @@
 //  التنبيهات بنفس صيغ مرصاد: ⏳ استعداد · 🪤 مصيدة · 🎯 دخول · 🔺 هدف · ✅/🔴 خروج
 // ============================================================================
 indicator("مرصاد برو — الاستباقي", shorttitle="مرصاد برو", overlay=true,
-     max_lines_count=100, max_labels_count=150)
+     max_lines_count=100, max_labels_count=150, max_boxes_count=50)
 
 // ---------------------------------------------------------------- المدخلات
 grpS = "محرك الاستباق"
@@ -32,6 +32,8 @@ trailX = input.float(2.0, "الوقف المتحرك (ATR)", minval=1.0, maxval=
 coolN  = input.int(6, "شموع انتظار بعد كل صفقة", minval=0, maxval=100, group=grpM)
 grpD = "العرض"
 showPrep  = input.bool(true, "علامة يتجهز ▲/▼ (الاستباق البصري)", group=grpD)
+showZones = input.bool(true, "مناطق التجميع/التصريف (صناديق ملونة)", group=grpD)
+showTri   = input.bool(true, "رسم المثلثات (قمم هابطة وقيعان صاعدة)", group=grpD)
 keepTrail = input.bool(true, "إبقاء آثار الصفقات الماضية (للمراجعة)", group=grpD)
 dashPosS  = input.string("أعلى يمين", "مكان اللوحة", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpD)
 
@@ -222,6 +224,64 @@ if barstate.isconfirmed and bullTrap and not inTrade
 if barstate.isconfirmed and bearTrap and not inTrade
     label.new(bar_index, high, "🪤", style=label.style_label_down, color=cGold, textcolor=#161309, size=size.small)
     alert("🪤 مصيدة سيولة فوق السقف | " + syminfo.ticker + " — اختراق كاذب وإغلاق تحت المستوى", alert.freq_once_per_bar)
+
+// --------------------------------------------- مناطق التجميع والتصريف
+// الصندوق يرسم منطقة الانضغاط نفسها: أخضر فاتح = تجميع شرائي داخلها،
+// أحمر فاتح = تصريف بيعي، رمادي = متعادل. يمتد مع المنطقة ويتجمد عند الإفراج.
+var box sqzBox = na
+if showZones and barstate.isconfirmed
+    if ready and na(sqzBox)
+        sqzBox := box.new(bar_index - sqzBars + 1, sqzHi, bar_index, sqzLo,
+             border_color=color.new(cMut, 40), bgcolor=color.new(cMut, 88))
+    if not na(sqzBox) and sqzOn
+        box.set_right(sqzBox, bar_index)
+        box.set_top(sqzBox, sqzHi)
+        box.set_bottom(sqzBox, sqzLo)
+        zc = sqzFlow > 0 ? cUp : sqzFlow < 0 ? cDn : cMut
+        box.set_border_color(sqzBox, color.new(zc, 35))
+        box.set_bgcolor(sqzBox, color.new(zc, 88))
+        box.set_text(sqzBox, sqzFlow > 0 ? "منطقة تجميع" : sqzFlow < 0 ? "منطقة تصريف" : "منطقة انضغاط")
+        box.set_text_color(sqzBox, color.new(zc, 20))
+        box.set_text_size(sqzBox, size.small)
+    if not na(sqzBox) and not sqzOn
+        sqzBox := na
+
+// ---------------------------------------------------- كاشف المثلثات
+// مثلث = قمم متأرجحة تنزل وقيعان متأرجحة تصعد في نفس الوقت — السعر
+// ينحصر بين ضلعين متقاربين، وهو شكل الانضغاط الكلاسيكي بعين الفنيين.
+pv3H = ta.pivothigh(high, 3, 3)
+pv3L = ta.pivotlow(low, 3, 3)
+var float th1 = na
+var float th2 = na
+var int   tb1 = na
+var int   tb2 = na
+var float tl1 = na
+var float tl2 = na
+var int   tc1 = na
+var int   tc2 = na
+if not na(pv3H)
+    th2 := th1
+    tb2 := tb1
+    th1 := pv3H
+    tb1 := bar_index - 3
+if not na(pv3L)
+    tl2 := tl1
+    tc2 := tc1
+    tl1 := pv3L
+    tc1 := bar_index - 3
+var line triUp = na
+var line triDn = na
+var int lastTriBar = -999
+triNow = showTri and not na(th2) and not na(tl2) and th1 < th2 and tl1 > tl2 and
+     bar_index - math.min(tb2, tc2) < 60 and bar_index - lastTriBar > 20
+if triNow and barstate.isconfirmed
+    lastTriBar := bar_index
+    line.delete(triUp)
+    line.delete(triDn)
+    triUp := line.new(tb2, th2, tb1, th1, extend=extend.right, color=color.new(cGold, 25), style=line.style_dashed, width=1)
+    triDn := line.new(tc2, tl2, tc1, tl1, extend=extend.right, color=color.new(cGold, 25), style=line.style_dashed, width=1)
+    label.new(bar_index, high, "مثلث 📐", style=label.style_label_down, color=color.new(cGold, 20), textcolor=#161309, size=size.small)
+    alert("📐 مثلث يتكوّن | " + syminfo.ticker + " — قمم تنزل وقيعان تصعد، انتظر الإفراج قرب " + str.tostring(close, format.mintick), alert.freq_once_per_bar)
 
 // ------------------------------------------------------------------ اللوحة
 f_pos(s) => s == "أعلى يمين" ? position.top_right : s == "أعلى يسار" ? position.top_left :
