@@ -1,0 +1,365 @@
+//@version=5
+// ============================================================================
+//  مرصاد VIP | لوحة العقود المؤسسية — Institutional Option Signal Dashboard
+// ----------------------------------------------------------------------------
+//  المحرك (كل شرط يُحسم على إغلاق الشمعة فقط — لا إعادة رسم نهائياً):
+//
+//  الدخول المبكر: لا ننتظر الفريمات العالية تكمل انقلابها — ندخل عندما
+//  يصنع الفريم الصغير كسر بنية BOS أو تغيير طابع CHoCH بينما السعر جالس
+//  على منطقة قرار كبرى: دعم/مقاومة بنيوية، أو منطقة فيبوناتشي 0.618–0.786
+//  لآخر موجة كبرى، أو حافة الأمس.
+//
+//  وايكوف: سبرينق التجميع (كسر كاذب للدعم بامتصاص حجم = كول) وأبثراست
+//  التوزيع (اختراق كاذب للمقاومة بامتصاص = بوت) + منطق الجهد مقابل
+//  النتيجة (حجم ضخم بجسم صغير = امتصاص مؤسسي).
+//
+//  السيولة والبرايس أكشن: مسح السيولة (ذيل يتجاوز قمة/قاع متأرجح حديث
+//  ويغلق داخلاً)، دبابيس الرفض، والابتلاع.
+//
+//  سكور الجودة 0–100: حجم 20 + نمط شموع 20 + التقاء فيبو/مستوى 20 +
+//  BOS/CHoCH 20 + زخم RSI وانفراجاته 20. لا دخول تحت العتبة.
+//
+//  الإدارة: وقف بنيوي (خلف آخر قاع/قمة متأرجحة ± ATR)، وأربعة أهداف
+//  TP1–TP4 بنسب عقد تقديرية، تأمين عند TP1، تصعيد عند TP2، تتبع بعدها.
+// ============================================================================
+indicator("مرصاد VIP | لوحة العقود", shorttitle="مرصاد VIP", overlay=true,
+     max_lines_count=100, max_labels_count=150, max_boxes_count=30)
+
+// ---------------------------------------------------------------- المدخلات
+grpQ = "عقل الجودة"
+minQ    = input.int(60, "أدنى سكور جودة للدخول (0-100)", minval=40, maxval=90, group=grpQ)
+volX    = input.float(1.2, "مضاعف الحجم المؤسسي", minval=1.0, maxval=3.0, step=0.1, group=grpQ)
+grpM = "إدارة الصفقة"
+tp1x = input.float(0.8, "TP1 (ATR)", minval=0.3, maxval=2.0, step=0.1, group=grpM)
+tp2x = input.float(1.5, "TP2 (ATR)", minval=0.8, maxval=3.0, step=0.1, group=grpM)
+tp3x = input.float(2.5, "TP3 (ATR)", minval=1.5, maxval=5.0, step=0.1, group=grpM)
+tp4x = input.float(3.5, "TP4 (ATR)", minval=2.0, maxval=8.0, step=0.1, group=grpM)
+trailX = input.float(1.8, "الوقف المتحرك بعد TP2 (ATR)", minval=1.0, maxval=4.0, step=0.1, group=grpM)
+coolN  = input.int(6, "شموع انتظار بعد كل صفقة", minval=0, maxval=100, group=grpM)
+grpO = "لوحة العقد"
+optLev  = input.float(10.0, "الرافعة التقديرية (٪ العقد لكل ١٪ سهم)", minval=3, maxval=30, step=1, group=grpO)
+grpD = "العرض"
+keepTrail = input.bool(true, "إبقاء آثار الصفقات الماضية (للمراجعة)", group=grpD)
+dashPosS  = input.string("أعلى يمين", "مكان اللوحة", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpD)
+
+// ------------------------------------------------------------------ الألوان
+cUp   = #26A69A
+cDn   = #EF5350
+cGold = #E3B34D
+cCyan = #38C8E8
+cTxt  = #D5D9E4
+cMut  = #787B86
+cYel  = #E8C547
+cPanl = color.new(#151A24, 4)
+cHead = color.new(#232B3D, 0)
+
+// ----------------------------------------------------------- حسابات أساسية
+atr    = ta.atr(14)
+rngHL  = math.max(high - low, syminfo.mintick)
+hasVol = not na(volume) and ta.sma(volume, 20) > 0
+volMA  = hasVol ? ta.sma(volume, 20) : na
+volSpike = hasVol ? volume > volX * volMA : math.abs(close - open) > 0.7 * atr
+// الجهد مقابل النتيجة: حجم ضخم بجسم صغير = امتصاص مؤسسي صامت
+absorption = hasVol and volume > 1.5 * volMA and math.abs(close - open) < 0.5 * atr
+rsi = ta.rsi(close, 14)
+
+// ------------------------------------ البنية: بايفوتات صغرى (3,3) وكبرى (10,10)
+pv3H = ta.pivothigh(high, 3, 3)
+pv3L = ta.pivotlow(low, 3, 3)
+var float sw3H = na
+var float sw3L = na
+if not na(pv3H)
+    sw3H := pv3H
+if not na(pv3L)
+    sw3L := pv3L
+pv10H = ta.pivothigh(high, 10, 10)
+pv10L = ta.pivotlow(low, 10, 10)
+var float majH = na
+var float majL = na
+var int   majHB = na
+var int   majLB = na
+if not na(pv10H)
+    majH := pv10H
+    majHB := bar_index - 10
+if not na(pv10L)
+    majL := pv10L
+    majLB := bar_index - 10
+
+// اتجاه البنية الحالي — يميّز BOS (مع البنية) عن CHoCH (انقلاب الطابع)
+var int structDir = 0
+bosUp = not na(sw3H) and close > sw3H and close[1] <= sw3H
+bosDn = not na(sw3L) and close < sw3L and close[1] >= sw3L
+chochUp = bosUp and structDir == -1
+chochDn = bosDn and structDir == 1
+if bosUp
+    structDir := 1
+if bosDn
+    structDir := -1
+
+// ---------------------------- مناطق القرار الكبرى: فيبو 0.618–0.786 + الحواف
+[pdH, pdL] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_off)
+impUp = not na(majH) and not na(majL) and majHB > majLB and majH > majL
+impDn = not na(majH) and not na(majL) and majLB > majHB and majH > majL
+fzTop = impUp ? majH - (majH - majL) * 0.618 : impDn ? majL + (majH - majL) * 0.786 : na
+fzBot = impUp ? majH - (majH - majL) * 0.786 : impDn ? majL + (majH - majL) * 0.618 : na
+inFib = not na(fzTop) and close <= math.max(fzTop, fzBot) and close >= math.min(fzTop, fzBot)
+nearSup = (not na(majL) and math.abs(close - majL) < 1.0 * atr) or (not na(pdL) and math.abs(close - pdL) < 1.0 * atr)
+nearRes = (not na(majH) and math.abs(close - majH) < 1.0 * atr) or (not na(pdH) and math.abs(close - pdH) < 1.0 * atr)
+atZoneUp = (inFib and impUp) or nearSup
+atZoneDn = (inFib and impDn) or nearRes
+
+// -------------------------------- وايكوف: السبرينق والأبثراست + مسح السيولة
+tol = 0.05 * atr
+supLvl = not na(majL) and not na(pdL) ? math.max(majL, pdL) : not na(majL) ? majL : pdL
+resLvl = not na(majH) and not na(pdH) ? math.min(majH, pdH) : not na(majH) ? majH : pdH
+spring   = not na(supLvl) and low < supLvl - tol and close > supLvl and close > open and (volSpike or absorption)
+upthrust = not na(resLvl) and high > resLvl + tol and close < resLvl and close < open and (volSpike or absorption)
+sweepUp  = not na(sw3L) and low < sw3L - tol and close > sw3L and close > open
+sweepDn  = not na(sw3H) and high > sw3H + tol and close < sw3H and close < open
+
+// ------------------------------------------- البرايس أكشن: الأنماط الشمعية
+body   = math.abs(close - open)
+upWick = high - math.max(close, open)
+dnWick = math.min(close, open) - low
+bullPin = dnWick > 2.0 * body and upWick < body and close >= open
+bearPin = upWick > 2.0 * body and dnWick < body and close <= open
+bullEng = close > open and close[1] < open[1] and close >= open[1] and open <= close[1] and body > 0.4 * atr
+bearEng = close < open and close[1] > open[1] and close <= open[1] and open >= close[1] and body > 0.4 * atr
+paUp = bullPin or bullEng
+paDn = bearPin or bearEng
+
+// ------------------------------------------------- الزخم: RSI وانفراجاته
+divBull = not na(pv3L) and rsi < 45 and rsi > rsi[3]
+divBear = not na(pv3H) and rsi > 55 and rsi < rsi[3]
+momUp = rsi < 35 or divBull
+momDn = rsi > 65 or divBear
+
+// --------------------------------------------- سكور الجودة 0–100 (خمسة أخماس)
+f_q(sideUp) =>
+    q = 0
+    q := q + ((volSpike or absorption) ? 20 : 0)
+    q := q + ((sideUp ? paUp : paDn) ? 20 : 0)
+    q := q + ((sideUp ? atZoneUp : atZoneDn) ? 20 : 0)
+    q := q + ((sideUp ? (bosUp or chochUp or spring or sweepUp) : (bosDn or chochDn or upthrust or sweepDn)) ? 20 : 0)
+    q := q + ((sideUp ? momUp : momDn) ? 20 : 0)
+    q
+qUp = f_q(true)
+qDn = f_q(false)
+
+// ------------------------------------- مصفوفة الفريمات الخمسة (عرض فقط)
+f_dir() =>
+    eF = ta.ema(close, 9)
+    eS = ta.ema(close, 21)
+    eF > eS and close > eS ? 1 : eF < eS and close < eS ? -1 : 0
+d01 = request.security(syminfo.tickerid, "1",  f_dir(), lookahead=barmerge.lookahead_off)
+d03 = request.security(syminfo.tickerid, "3",  f_dir(), lookahead=barmerge.lookahead_off)
+d05 = request.security(syminfo.tickerid, "5",  f_dir(), lookahead=barmerge.lookahead_off)
+d15 = request.security(syminfo.tickerid, "15", f_dir(), lookahead=barmerge.lookahead_off)
+d60 = request.security(syminfo.tickerid, "60", f_dir(), lookahead=barmerge.lookahead_off)
+
+// ------------------------------------------------------------- حالة الصفقة
+var bool  inTrade = false
+var int   tDir    = 0
+var float entryP  = na
+var float stopP   = na
+var float stop0   = na
+var float tp1 = na
+var float tp2 = na
+var float tp3 = na
+var float tp4 = na
+var bool  h1 = false
+var bool  h2 = false
+var bool  h3 = false
+var bool  h4 = false
+var int   entryBar = 0
+var int   lastExit = -99999
+var line  lnEntry = na
+var line  lnStop  = na
+var resArr = array.new_int()
+var int   winsAll = 0
+var int   lossAll = 0
+var float sumR    = 0.0
+f_side(d) => d > 0 ? "كول" : "بوت"
+
+// ------------------------------------------------------------------- الدخول
+// الشرارة: سبرينق / أبثراست / مسح سيولة / CHoCH مبكر عند منطقة قرار
+trigUp = spring or (sweepUp and atZoneUp) or (chochUp and atZoneUp) or (bosUp and atZoneUp and volSpike)
+trigDn = upthrust or (sweepDn and atZoneDn) or (chochDn and atZoneDn) or (bosDn and atZoneDn and volSpike)
+canEnter = barstate.isconfirmed and not inTrade and (bar_index - lastExit) > coolN and bar_index > 60
+longSig  = canEnter and trigUp and qUp >= minQ
+shortSig = canEnter and not longSig and trigDn and qDn >= minQ
+sigDir = longSig ? 1 : shortSig ? -1 : 0
+sigWhy = longSig ? (spring ? "سبرينق وايكوف على الدعم" : chochUp ? "انقلاب طابع CHoCH عند منطقة قرار" : sweepUp ? "مسح سيولة تحت قاع متأرجح" : "كسر بنية BOS بحجم عند منطقة") :
+     shortSig ? (upthrust ? "أبثراست وايكوف على المقاومة" : chochDn ? "انقلاب طابع CHoCH عند منطقة قرار" : sweepDn ? "مسح سيولة فوق قمة متأرجحة" : "كسر بنية BOS بحجم عند منطقة") : ""
+
+if sigDir != 0
+    inTrade := true
+    entryBar := bar_index
+    tDir   := sigDir
+    entryP := close
+    stopP  := sigDir > 0 ? (not na(sw3L) and close - sw3L < 3 * atr ? sw3L - 0.25 * atr : low - 0.5 * atr)
+         : (not na(sw3H) and sw3H - close < 3 * atr ? sw3H + 0.25 * atr : high + 0.5 * atr)
+    stop0  := stopP
+    tp1 := sigDir > 0 ? entryP + tp1x * atr : entryP - tp1x * atr
+    tp2 := sigDir > 0 ? entryP + tp2x * atr : entryP - tp2x * atr
+    tp3 := sigDir > 0 ? entryP + tp3x * atr : entryP - tp3x * atr
+    tp4 := sigDir > 0 ? entryP + tp4x * atr : entryP - tp4x * atr
+    h1 := false
+    h2 := false
+    h3 := false
+    h4 := false
+    lnEntry := line.new(bar_index, entryP, bar_index + 1, entryP, extend=extend.right, color=color.new(cTxt, 35), style=line.style_dotted, width=1)
+    lnStop  := line.new(bar_index, stopP, bar_index + 1, stopP, extend=extend.right, color=#FF9E45, width=2)
+    label.new(bar_index, sigDir > 0 ? low : high, "🎯 " + f_side(sigDir) + " " + str.tostring(entryP, format.mintick) + " · جودة " + str.tostring(sigDir > 0 ? qUp : qDn),
+         style=sigDir > 0 ? label.style_label_up : label.style_label_down,
+         color=sigDir > 0 ? cUp : cDn, textcolor=sigDir > 0 ? #04211D : #2B0606, size=size.normal)
+    alert("🎯 دخول " + f_side(sigDir) + " | " + syminfo.ticker + " فريم " + timeframe.period +
+         " | سعر " + str.tostring(entryP, format.mintick) + " | وقف " + str.tostring(stopP, format.mintick) +
+         " | السبب: " + sigWhy, alert.freq_once_per_bar)
+
+// ------------------------------------------------------------ إدارة الصفقة
+tpHit1 = false
+tpHit2 = false
+tpHit3 = false
+tpHit4 = false
+slHit  = false
+if inTrade and barstate.isconfirmed and bar_index > entryBar
+    if not h1 and (tDir > 0 ? high >= tp1 : low <= tp1)
+        h1 := true
+        tpHit1 := true
+        stopP := entryP
+        alert("🔺 هدف 1 تحقق والصفقة مؤمّنة (الوقف = الدخول) | " + syminfo.ticker, alert.freq_once_per_bar)
+    if h1 and not h2 and (tDir > 0 ? high >= tp2 : low <= tp2)
+        h2 := true
+        tpHit2 := true
+        stopP := tp1
+        alert("🔺 هدف 2 تحقق — الوقف صعد إلى هدف 1 | " + syminfo.ticker, alert.freq_once_per_bar)
+    if h2 and not h3 and (tDir > 0 ? high >= tp3 : low <= tp3)
+        h3 := true
+        tpHit3 := true
+        alert("🔺 هدف 3 تحقق | " + syminfo.ticker, alert.freq_once_per_bar)
+    if h3 and not h4 and (tDir > 0 ? high >= tp4 : low <= tp4)
+        h4 := true
+        tpHit4 := true
+        alert("🔺 الهدف الممتد تحقق | " + syminfo.ticker, alert.freq_once_per_bar)
+    if h2
+        chand = tDir > 0 ? close - trailX * atr : close + trailX * atr
+        stopP := tDir > 0 ? math.max(stopP, chand) : math.min(stopP, chand)
+    line.set_y1(lnStop, stopP)
+    line.set_y2(lnStop, stopP)
+    if tDir > 0 ? close < stopP : close > stopP
+        slHit := true
+        risk  = math.abs(entryP - stop0)
+        rMult = risk > 0 ? (tDir > 0 ? close - entryP : entryP - close) / risk : 0.0
+        win   = h1
+        array.unshift(resArr, win ? 1 : 0)
+        if array.size(resArr) > 20
+            array.pop(resArr)
+        winsAll += win ? 1 : 0
+        lossAll += win ? 0 : 1
+        sumR    += rMult
+        if keepTrail
+            line.set_extend(lnEntry, extend.none)
+            line.set_x2(lnEntry, bar_index)
+            line.new(entryBar, entryP, bar_index, close, color=win ? color.new(cUp, 35) : color.new(cDn, 30), width=2)
+        else
+            line.delete(lnEntry)
+        line.delete(lnStop)
+        label.new(bar_index, tDir > 0 ? low : high,
+             win ? "✅ +" + str.tostring(rMult, "#.#") + "R" : "🔴 " + str.tostring(rMult, "#.#") + "R",
+             style=tDir > 0 ? label.style_label_up : label.style_label_down,
+             color=win ? color.new(cUp, 20) : color.new(cDn, 10),
+             textcolor=win ? #04211D : #2B0606, size=size.normal)
+        alert((win ? "✅" : "🔴") + " خروج — كسر الوقف المتحرك | " + syminfo.ticker +
+             " | النتيجة " + (win ? "+" : "") + str.tostring(rMult, "#.#") + "R", alert.freq_once_per_bar)
+        inTrade := false
+        lastExit := bar_index
+
+// -------------------------------------------------- alertcondition (كاملة)
+acCall = barstate.isconfirmed and sigDir > 0
+acPut  = barstate.isconfirmed and sigDir < 0
+alertcondition(acCall,  "CALL Entry",  "CALL entry signal")
+alertcondition(acPut,   "PUT Entry",   "PUT entry signal")
+alertcondition(slHit,   "Stop Loss Hit", "Stop loss hit")
+alertcondition(tpHit1,  "TP1 Hit", "Target 1 hit")
+alertcondition(tpHit2,  "TP2 Hit", "Target 2 hit")
+alertcondition(tpHit3,  "TP3 Hit", "Target 3 hit")
+alertcondition(tpHit4,  "TP4 Hit", "Target 4 hit")
+
+// ------------------------------------------------------ العقد المقترح
+f_step(p) => p < 50 ? 0.5 : p < 200 ? 1.0 : p < 500 ? 2.5 : 5.0
+isFund = syminfo.ticker == "QQQ" or syminfo.ticker == "SPY" or syminfo.ticker == "SPX"
+liveDir = inTrade ? tDir : qUp >= qDn ? 1 : -1
+optBase = inTrade ? entryP : close
+optStep = f_step(optBase)
+optStrk = liveDir > 0 ? math.ceil(optBase / optStep) * optStep : math.floor(optBase / optStep) * optStep
+f_optPct(tgt) => optBase > 0 and not na(tgt) ? math.abs(tgt - optBase) / optBase * 100.0 * optLev : na
+oP1 = f_optPct(inTrade ? tp1 : (liveDir > 0 ? close + tp1x * atr : close - tp1x * atr))
+oP2 = f_optPct(inTrade ? tp2 : (liveDir > 0 ? close + tp2x * atr : close - tp2x * atr))
+oP3 = f_optPct(inTrade ? tp3 : (liveDir > 0 ? close + tp3x * atr : close - tp3x * atr))
+oP4 = f_optPct(inTrade ? tp4 : (liveDir > 0 ? close + tp4x * atr : close - tp4x * atr))
+f_pct(p) => na(p) ? "—" : "+" + str.tostring(p, "#") + "%"
+
+// ------------------------------------------------------------------ اللوحة
+f_pos(s) => s == "أعلى يمين" ? position.top_right : s == "أعلى يسار" ? position.top_left :
+     s == "أسفل يمين" ? position.bottom_right : position.bottom_left
+f_tfCell(d) => d > 0 ? "▲" : d < 0 ? "▼" : "•"
+f_tfCol(d) => d > 0 ? cUp : d < 0 ? cDn : cMut
+
+var table dash = table.new(f_pos(dashPosS), 6, 8, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+if barstate.islast
+    q = math.max(qUp, qDn)
+    qCol = q >= 80 ? cUp : q >= 60 ? cYel : cDn
+    sCol = liveDir > 0 ? cUp : cDn
+    tot = winsAll + lossAll
+    wr  = tot > 0 ? 100.0 * winsAll / tot : 0.0
+    guide = inTrade ? (h2 ? "💰 احجز الربح — الوقف يتسلق" : h1 ? "🛡️ ارفع الوقف — مؤمّنة" : "✊ امسك — التزم بالوقف") :
+         q >= minQ and (trigUp or trigDn) ? "⚡ ادخل الآن" : q >= minQ ? "👀 جاهز — بانتظار الشرارة" : "⏸ انتظر"
+    table.cell(dash, 0, 0, "مرصاد VIP", text_color=cGold, bgcolor=cHead, text_size=size.small)
+    table.cell(dash, 1, 0, syminfo.ticker, text_color=cTxt, bgcolor=cHead, text_size=size.small)
+    table.cell(dash, 2, 0, "", bgcolor=cHead)
+    table.cell(dash, 3, 0, "", bgcolor=cHead)
+    table.cell(dash, 4, 0, "الإشارة", text_color=cMut, bgcolor=cHead, text_size=size.tiny)
+    table.cell(dash, 5, 0, inTrade ? f_side(tDir) : f_side(liveDir), text_color=#0B0E13, bgcolor=sCol, text_size=size.small)
+    table.cell(dash, 0, 1, "سكور الجودة", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 1, str.tostring(q) + "/100", text_color=qCol, bgcolor=color.new(qCol, 85), text_size=size.small)
+    table.cell(dash, 2, 1, "", text_size=size.tiny)
+    table.cell(dash, 3, 1, "", text_size=size.tiny)
+    table.cell(dash, 4, 1, "الإرشاد", text_color=cMut, text_size=size.tiny)
+    table.cell(dash, 5, 1, guide, text_color=cGold, text_size=size.small)
+    table.cell(dash, 0, 2, "العقد المقترح", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 2, syminfo.ticker + " " + str.tostring(optStrk, format.mintick) + (liveDir > 0 ? "C" : "P"), text_color=sCol, text_size=size.small)
+    table.cell(dash, 2, 2, "", text_size=size.tiny)
+    table.cell(dash, 3, 2, "", text_size=size.tiny)
+    table.cell(dash, 4, 2, "الانتهاء", text_color=cMut, text_size=size.tiny)
+    table.cell(dash, 5, 2, isFund ? "اليوم 0DTE" : "جمعة الأسبوع", text_color=cTxt, text_size=size.small)
+    table.cell(dash, 0, 3, "أهداف العقد ≈", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 3, f_pct(oP1), text_color=h1 ? cUp : cGold, text_size=size.small)
+    table.cell(dash, 2, 3, f_pct(oP2), text_color=h2 ? cUp : cGold, text_size=size.small)
+    table.cell(dash, 3, 3, f_pct(oP3), text_color=h3 ? cUp : cGold, text_size=size.small)
+    table.cell(dash, 4, 3, f_pct(oP4), text_color=h4 ? cUp : cGold, text_size=size.small)
+    table.cell(dash, 5, 3, (h1 ? "✓" : "○") + (h2 ? "✓" : "○") + (h3 ? "✓" : "○") + (h4 ? "✓" : "○"), text_color=cUp, text_size=size.small)
+    table.cell(dash, 0, 4, "الفريمات", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 4, "1د " + f_tfCell(d01), text_color=f_tfCol(d01), text_size=size.small)
+    table.cell(dash, 2, 4, "3د " + f_tfCell(d03), text_color=f_tfCol(d03), text_size=size.small)
+    table.cell(dash, 3, 4, "5د " + f_tfCell(d05), text_color=f_tfCol(d05), text_size=size.small)
+    table.cell(dash, 4, 4, "15د " + f_tfCell(d15), text_color=f_tfCol(d15), text_size=size.small)
+    table.cell(dash, 5, 4, "1س " + f_tfCell(d60), text_color=f_tfCol(d60), text_size=size.small)
+    table.cell(dash, 0, 5, "الصفقة", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 5, inTrade ? str.tostring(entryP, format.mintick) : "—", text_color=cTxt, text_size=size.small)
+    table.cell(dash, 2, 5, "", text_size=size.tiny)
+    table.cell(dash, 3, 5, "", text_size=size.tiny)
+    table.cell(dash, 4, 5, "الوقف", text_color=cMut, text_size=size.tiny)
+    table.cell(dash, 5, 5, inTrade ? str.tostring(stopP, format.mintick) : "—", text_color=#FF9E45, text_size=size.small)
+    table.cell(dash, 0, 6, "وايكوف", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 6, spring ? "سبرينق ✓" : upthrust ? "أبثراست ✓" : absorption ? "امتصاص" : "—", text_color=spring ? cUp : upthrust ? cDn : absorption ? cCyan : cMut, text_size=size.small)
+    table.cell(dash, 2, 6, "", text_size=size.tiny)
+    table.cell(dash, 3, 6, "", text_size=size.tiny)
+    table.cell(dash, 4, 6, "المنطقة", text_color=cMut, text_size=size.tiny)
+    table.cell(dash, 5, 6, inFib ? "فيبو ذهبية" : nearSup ? "على الدعم" : nearRes ? "على المقاومة" : "—", text_color=inFib ? cGold : cTxt, text_size=size.small)
+    table.cell(dash, 0, 7, "السجل", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 7, tot > 0 ? str.tostring(tot) + " صفقة" : "—", text_color=cMut, text_size=size.small)
+    table.cell(dash, 2, 7, tot > 0 ? "نجاح " + str.tostring(wr, "#") + "%" : "", text_color=cMut, text_size=size.small)
+    table.cell(dash, 3, 7, "", text_size=size.tiny)
+    table.cell(dash, 4, 7, "متوسط", text_color=cMut, text_size=size.tiny)
+    table.cell(dash, 5, 7, tot > 0 ? (sumR / tot >= 0 ? "+" : "") + str.tostring(sumR / tot, "#.##") + "R" : "—", text_color=cMut, text_size=size.small)
