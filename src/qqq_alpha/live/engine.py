@@ -2039,24 +2039,16 @@ class LiveEngine:
                 for caption, png in self._preview_cards():
                     await self.commands.send_photo(admin, png, caption)
             return
+        # the operator types on a tablet, in a hurry, in Arabic: "رابط جديد",
+        # "ارسل الرابط الجديد" and "جدد الرابط" all mean the same thing. An
+        # exact-match command list makes him hunt for the magic wording, so
+        # intent is read from the words present, not from their order.
         low = text.strip().lower()
-        if low in {"رابط الإشارات", "رابط الاشارات", "الرابط", "tvlink"}:
-            from qqq_alpha.live.tvbridge import tv_webhook_secret
-
-            base = (self.settings.public_base_url or "").rstrip("/")
-            if not base:
-                await self.notifier.note("➖ PUBLIC_BASE_URL غير مضبوط في Railway")
-                return
-            sec = tv_webhook_secret(self.settings, self.memory)
-            await self.notifier.note(
-                "🔗 عنوان استقبال إشارات TradingView (سري — لا تشاركه):\n"
-                f"{base}/tv/{sec}\n\n"
-                "الصقه في خانة Webhook URL داخل نافذة التنبيه لكل سهم، "
-                "وكل إشارة يطلقها المؤشر ستصلني هنا فوراً.\n\n"
-                "لإصدار رابط جديد وإبطال القديم: أرسل «رابط جديد»."
-            )
-            return
-        if low in {"رابط جديد", "تجديد الرابط", "tvlink new"}:
+        wants_link = "رابط" in low or low == "tvlink"
+        wants_fresh = wants_link and any(
+            w in low for w in ("جديد", "جديدة", "جدد", "تجديد", "new")
+        )
+        if wants_fresh:
             # a new key retires the old one on the spot: alerts still holding
             # the previous URL go silent, which is exactly what makes this a
             # revocation and not just a second door
@@ -2074,6 +2066,22 @@ class LiveEngine:
                 f"{base}/tv/{sec}\n\n"
                 "حدّث خانة Webhook URL في كل تنبيه على TradingView، "
                 "ثم جرّب سهماً واحداً وتأكد أن الرسالة وصلت."
+            )
+            return
+        if wants_link:
+            from qqq_alpha.live.tvbridge import tv_webhook_secret
+
+            base = (self.settings.public_base_url or "").rstrip("/")
+            if not base:
+                await self.notifier.note("➖ PUBLIC_BASE_URL غير مضبوط في Railway")
+                return
+            sec = tv_webhook_secret(self.settings, self.memory)
+            await self.notifier.note(
+                "🔗 عنوان استقبال إشارات TradingView (سري — لا تشاركه):\n"
+                f"{base}/tv/{sec}\n\n"
+                "الصقه في خانة Webhook URL داخل نافذة التنبيه لكل سهم، "
+                "وكل إشارة يطلقها المؤشر ستصلني هنا فوراً.\n\n"
+                "لإصدار رابط جديد وإبطال القديم: أرسل «رابط جديد»."
             )
             return
         if parts and parts[0].strip().lower() in {"تشخيص", "diagnose"}:
