@@ -316,7 +316,7 @@ if barstate.islast
     sCol = liveDir > 0 ? cUp : cDn
     tot = winsAll + lossAll
     wr  = tot > 0 ? 100.0 * winsAll / tot : 0.0
-    guide = inTrade ? (h2 ? "💰 احجز الربح — الوقف يتسلق" : h1 ? "🛡️ ارفع الوقف — مؤمّنة" : "✊ امسك — التزم بالوقف") :
+    guide = inTrade ? (h2 ? "💰 مؤمّنة — احجز جزءاً ودع الباقي يجري" : h1 ? "🏃 تجري خلف الوقف المتحرك — لا تستعجل" : "✊ امسك — الخسارة محدودة بـ 1R") :
          q >= minQ and (trigUp or trigDn) ? "⚡ ادخل الآن" : q >= minQ ? "👀 جاهز — بانتظار الشرارة" : "⏸ انتظر"
     table.cell(dash, 0, 0, "مرصاد VIP", text_color=cGold, bgcolor=cHead, text_size=size.small)
     table.cell(dash, 1, 0, syminfo.ticker, text_color=cTxt, bgcolor=cHead, text_size=size.small)
