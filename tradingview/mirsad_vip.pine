@@ -266,8 +266,10 @@ var int   btPutWin  = 0
 var float btGross = 0.0
 var float btLoss  = 0.0
 var int tradesToday = 0
+var int missedToday = 0
 if ta.change(time("D")) != 0
     tradesToday := 0
+    missedToday := 0
 f_side(d) => d > 0 ? "كول" : "بوت"
 
 // -------------------------------------------------- الأمر المعلق (لا مطاردة)
@@ -342,6 +344,7 @@ if pDir != 0 and not inTrade and barstate.isconfirmed and bar_index > pBar
         fDir := pDir
     else if bar_index - pBar >= pExpire or (pDir > 0 ? close < pPlanStop : close > pPlanStop)
         missedCnt += 1
+        missedToday += 1
         pDir := 0
         line.delete(lnPend)
 
@@ -419,7 +422,7 @@ if inTrade and barstate.isconfirmed and bar_index >= entryBar
         winsAll += win ? 1 : 0
         lossAll += win ? 0 : 1
         sumR    += rMult
-        if time >= timenow - btDays * 86400000
+        if time >= timenow - btDays * 86400000.0
             btTot += 1
             btWin += win ? 1 : 0
             btCallTot += tDir > 0 ? 1 : 0
@@ -549,13 +552,13 @@ if barstate.islast
     table.cell(dash, 1, 8, whyIdle, text_color=cYel, text_size=size.small)
     table.cell(dash, 2, 8, "", text_size=size.tiny)
     table.cell(dash, 3, 8, "", text_size=size.tiny)
-    table.cell(dash, 4, 8, "اليوم · ملغاة", text_color=cMut, text_size=size.tiny)
-    table.cell(dash, 5, 8, str.tostring(tradesToday) + " · " + str.tostring(missedCnt), text_color=cTxt, text_size=size.small)
+    table.cell(dash, 4, 8, "اليوم", text_color=cMut, text_size=size.tiny)
+    table.cell(dash, 5, 8, "دخل " + str.tostring(tradesToday) + " · ألغي " + str.tostring(missedToday), text_color=cTxt, text_size=size.small)
 
 // -------------------------------------------------- جدول الاختبار الحي
 // أداء المحرك على هذا الشارت خلال نافذة الأيام المختارة: صفقات، نسبة
 // نجاح، نجاح الكول، نجاح البوت، وعامل الربح (الأرباح ÷ الخسائر).
-var table bt = table.new(f_pos(btPosS), 2, 7, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+var table bt = table.new(f_pos(btPosS), 2, 8, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
 f_wrCol(v) => v >= 60 ? cUp : v >= 45 ? cYel : cDn
 if barstate.islast
     btWr  = btTot > 0 ? 100.0 * btWin / btTot : 0.0
@@ -577,3 +580,7 @@ if barstate.islast
     table.cell(bt, 1, 5, btTot > 0 ? str.tostring(btPf, "#.##") : "—", text_color=btPf >= 1.5 ? cUp : btPf >= 1.0 ? cYel : cDn, text_size=size.small)
     table.cell(bt, 0, 6, "متوسط الصفقة", text_color=cMut, text_size=size.small)
     table.cell(bt, 1, 6, totAll > 0 ? (sumR / totAll >= 0 ? "+" : "") + str.tostring(sumR / totAll, "#.##") + "R" : "—", text_color=totAll > 0 and sumR / totAll > 0 ? cUp : cDn, text_size=size.small)
+    // كم أمراً معلقاً نُفّذ فعلاً مقابل ما أُلغي — يضبط عمق الارتداد المطلوب
+    fillRate = (totAll + missedCnt) > 0 ? 100.0 * totAll / (totAll + missedCnt) : 0.0
+    table.cell(bt, 0, 7, "نُفّذ / ألغي", text_color=cMut, text_size=size.small)
+    table.cell(bt, 1, 7, str.tostring(totAll) + " / " + str.tostring(missedCnt) + " · " + str.tostring(fillRate, "#") + "%", text_color=fillRate >= 40 ? cUp : fillRate >= 20 ? cYel : cDn, text_size=size.small)
