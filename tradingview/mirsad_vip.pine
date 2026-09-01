@@ -27,7 +27,7 @@ indicator("مرصاد VIP | لوحة العقود", shorttitle="مرصاد VIP",
 
 // ---------------------------------------------------------------- المدخلات
 grpQ = "عقل الجودة"
-minQ    = input.int(60, "أدنى سكور جودة للدخول (0-100)", minval=40, maxval=90, group=grpQ)
+minQ    = input.int(80, "أدنى سكور جودة للدخول (0-100)", minval=40, maxval=100, group=grpQ)
 volX    = input.float(1.2, "مضاعف الحجم المؤسسي", minval=1.0, maxval=3.0, step=0.1, group=grpQ)
 grpM = "إدارة الصفقة"
 tp1x = input.float(0.8, "TP1 (ATR)", minval=0.3, maxval=2.0, step=0.1, group=grpM)
@@ -227,13 +227,11 @@ if inTrade and barstate.isconfirmed and bar_index > entryBar
     if not h1 and (tDir > 0 ? high >= tp1 : low <= tp1)
         h1 := true
         tpHit1 := true
-        stopP := entryP
-        alert("🔺 هدف 1 تحقق والصفقة مؤمّنة (الوقف = الدخول) | " + syminfo.ticker, alert.freq_once_per_bar)
+        alert("🔺 هدف 1 تحقق — الصفقة تجري خلف الوقف المتحرك | " + syminfo.ticker, alert.freq_once_per_bar)
     if h1 and not h2 and (tDir > 0 ? high >= tp2 : low <= tp2)
         h2 := true
         tpHit2 := true
-        stopP := tp1
-        alert("🔺 هدف 2 تحقق — الوقف صعد إلى هدف 1 | " + syminfo.ticker, alert.freq_once_per_bar)
+        alert("🔺 هدف 2 تحقق — الوقف صعد إلى الدخول (مؤمّنة) | " + syminfo.ticker, alert.freq_once_per_bar)
     if h2 and not h3 and (tDir > 0 ? high >= tp3 : low <= tp3)
         h3 := true
         tpHit3 := true
@@ -242,16 +240,21 @@ if inTrade and barstate.isconfirmed and bar_index > entryBar
         h4 := true
         tpHit4 := true
         alert("🔺 الهدف الممتد تحقق | " + syminfo.ticker, alert.freq_once_per_bar)
-    if h2
+    if h1
         chand = tDir > 0 ? close - trailX * atr : close + trailX * atr
         stopP := tDir > 0 ? math.max(stopP, chand) : math.min(stopP, chand)
+    if h2
+        stopP := tDir > 0 ? math.max(stopP, entryP) : math.min(stopP, entryP)
     line.set_y1(lnStop, stopP)
     line.set_y2(lnStop, stopP)
-    if tDir > 0 ? close < stopP : close > stopP
+    hardStop = not h1 and (tDir > 0 ? low <= stop0 : high >= stop0)
+    softStop = h1 and (tDir > 0 ? close < stopP : close > stopP)
+    if hardStop or softStop
         slHit := true
         risk  = math.abs(entryP - stop0)
-        rMult = risk > 0 ? (tDir > 0 ? close - entryP : entryP - close) / risk : 0.0
-        win   = h1
+        exitP = hardStop ? stop0 : close
+        rMult = risk > 0 ? (tDir > 0 ? exitP - entryP : entryP - exitP) / risk : 0.0
+        win   = rMult > 0
         array.unshift(resArr, win ? 1 : 0)
         if array.size(resArr) > 20
             array.pop(resArr)
@@ -261,7 +264,7 @@ if inTrade and barstate.isconfirmed and bar_index > entryBar
         if keepTrail
             line.set_extend(lnEntry, extend.none)
             line.set_x2(lnEntry, bar_index)
-            line.new(entryBar, entryP, bar_index, close, color=win ? color.new(cUp, 35) : color.new(cDn, 30), width=2)
+            line.new(entryBar, entryP, bar_index, exitP, color=win ? color.new(cUp, 35) : color.new(cDn, 30), width=2)
         else
             line.delete(lnEntry)
         line.delete(lnStop)
