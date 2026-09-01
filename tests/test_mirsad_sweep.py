@@ -71,3 +71,30 @@ def test_a_sweep_with_no_paying_frame_says_so_instead_of_flattering():
     text = format_sweep([losing], 1, 12)
     assert "لا فريم يعبر" in text
     assert "المشكلة في الدخول" in text
+
+
+def test_the_autopsy_refuses_to_crown_a_four_trade_slice():
+    """A slice that pays on a handful of trades is thin, not a discovery."""
+    from qqq_alpha.backtest.mirsad import format_autopsy
+
+    early = Outcome(symbol="X", minutes=5, profile="سريع")
+    late = Outcome(symbol="X", minutes=5, profile="سريع")
+    # forty losers through the early door, four winners through the late one
+    early.trades = [Trade(1, 100, 99, 0, 5, -0.4, 4, kind="مبكر", hour=10) for _ in range(40)]
+    early.trades += [Trade(1, 100, 99, 0, 5, 3.0, 9, kind="استئناف", hour=11) for _ in range(4)]
+    late.trades = list(early.trades)
+    text = format_autopsy(early, late)
+    assert "عينة صغيرة" in text
+    assert "لا شريحة تعبر" in text
+
+
+def test_the_autopsy_reports_a_real_slice_when_one_survives():
+    from qqq_alpha.backtest.mirsad import format_autopsy
+
+    early = Outcome(symbol="X", minutes=5, profile="سريع")
+    late = Outcome(symbol="X", minutes=5, profile="سريع")
+    early.trades = [Trade(1, 100, 99, 0, 5, 0.5, 9, kind="مبكر", hour=10) for _ in range(30)]
+    early.trades += [Trade(-1, 100, 101, 0, 5, -0.2, 4, kind="مبكر", hour=10) for _ in range(20)]
+    late.trades = list(early.trades)
+    text = format_autopsy(early, late)
+    assert "شريحة صمدت" in text

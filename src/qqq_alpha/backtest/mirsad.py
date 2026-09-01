@@ -27,8 +27,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from qqq_alpha.domain import Bar
+
+NY = ZoneInfo("America/New_York")
+
+
+def _ny_hour(ts: datetime) -> int:
+    """The hour the trade opened, in market time — the session's own clock is
+    the only one under which "the first hour" or "lunch" means anything."""
+    try:
+        return ts.astimezone(NY).hour
+    except Exception:  # noqa: BLE001 - a bar without tz is not worth a crash
+        return -1
+
 
 # the spread paid on the way in and on the way out, in units of the risk
 COST_R = 0.15
@@ -70,6 +83,11 @@ class Trade:
     r_net: float = 0.0
     bars: int = 0
     reason: str = ""
+    # which door the trade came through, and at what hour of the New York
+    # session — a system that loses overall can still hold a slice that pays,
+    # and only the split can tell
+    kind: str = ""
+    hour: int = -1
 
 
 @dataclass
@@ -263,6 +281,9 @@ def run(bars: list[Bar], symbol: str, minutes: int, *, min_quality: int = 60,
     p_dir = 0
     p_limit = p_break = p_stop = 0.0
     p_bar = 0
+    p_kind_held = ""
+    t_kind = ""
+    t_hour = -1
     in_trade = False
     side = 0
     entry = stop0 = stop = tp1 = tp2 = 0.0
@@ -347,7 +368,8 @@ def run(bars: list[Bar], symbol: str, minutes: int, *, min_quality: int = 60,
                 exit_px = (b.open if gapped else stop0) if hard else b.close
                 gross = ((exit_px - entry) if side > 0 else (entry - exit_px)) / risk if risk else 0.0
                 t = Trade(side, entry, stop0, entry_i, i, gross - COST_R, i - entry_i,
-                          "وقف" if hard else "مهلة" if dead else "متحرك")
+                          "وقف" if hard else "مهلة" if dead else "متحرك",
+                          kind=t_kind, hour=t_hour)
                 res.trades.append(t)
                 loss_run_day = 0 if t.r_net > 0 else loss_run_day + 1
                 in_trade = False
@@ -369,6 +391,8 @@ def run(bars: list[Bar], symbol: str, minutes: int, *, min_quality: int = 60,
                 hits = 0
                 entry_i = i
                 in_trade = True
+                t_kind = p_kind_held
+                t_hour = _ny_hour(b.ts)
                 p_dir = 0
                 continue
             if (i - p_bar) >= 3 or (b.close < p_stop if p_dir > 0 else b.close > p_stop):
@@ -386,6 +410,7 @@ def run(bars: list[Bar], symbol: str, minutes: int, *, min_quality: int = 60,
             continue
         d = 1 if long_ok else -1
         at_zone = (ant_up and not cont_up) if d > 0 else (ant_dn and not cont_dn)
+        p_kind = "مبكر" if at_zone else "استئناف"
         d_lim = 0.3 if strong else 0.5
         if at_zone:
             p_limit = min(pb_up, b.close) if d > 0 else max(pb_dn, b.close)
@@ -396,6 +421,7 @@ def run(bars: list[Bar], symbol: str, minutes: int, *, min_quality: int = 60,
         p_stop = base - prof.stop * a if d > 0 else base + prof.stop * a
         p_dir = d
         p_bar = i
+        p_kind_held = p_kind
 
     return res
 
@@ -434,5 +460,88 @@ def format_sweep(rows: list[Outcome], symbol_count: int, months: int) -> str:
         lines.append(
             "\n⚠️ لا فريم يعبر عامل ربح 1.0. المشكلة في الدخول لا في الإدارة،"
             " وضبط الأرقام بعد هذا تفصيل على مقاس الماضي."
+        )
+    return "\n".join(lines)
+
+
+def _slice(trades: list[Trade]) -> tuple[int, float, float, float]:
+    """Count, profit factor, average R, and the win rate this slice's payoff
+    would need to break even."""
+    if not trades:
+        return 0, 0.0, 0.0, 100.0
+    wins = [t.r_net for t in trades if t.r_net > 0]
+    losses = [-t.r_net for t in trades if t.r_net <= 0]
+    gain, pain = sum(wins), sum(losses)
+    pf = (gain / pain) if pain > 0 else (99.0 if gain > 0 else 0.0)
+    avg = sum(t.r_net for t in trades) / len(trades)
+    payoff = (gain / len(wins)) / (pain / len(losses)) if wins and losses else 0.0
+    need = 100.0 / (1.0 + payoff) if payoff > 0 else 100.0
+    return len(trades), pf, avg, need
+
+
+def _line(label: str, trades: list[Trade], floor: int = 40) -> str:
+    n, pf, avg, need = _slice(trades)
+    if n == 0:
+        return f"   {label}: —"
+    wr = 100.0 * len([t for t in trades if t.r_net > 0]) / n
+    mark = "✅" if pf >= 1.0 and n >= floor else "🟡" if pf >= 1.0 else "🔴"
+    thin = " (عينة صغيرة)" if n < floor else ""
+    return (f"   {mark} {label}: {n} صفقة · عامل {pf:.2f} · متوسط "
+            f"{'+' if avg >= 0 else ''}{avg:.2f}R · نجاح {wr:.0f}% "
+            f"مقابل {need:.0f}% مطلوب{thin}")
+
+
+def format_autopsy(early: Outcome, late: Outcome) -> str:
+    """Cut the same population every way that could hide an edge, and say
+    plainly whether any slice survives. A slice that only pays on a handful of
+    trades is labelled thin rather than celebrated."""
+    lines = [
+        f"🔎 تشريح {early.symbol} · {early.minutes}د ({early.profile})",
+        "كل الأرقام صافية بعد تكلفة العقد.",
+        "",
+        "▸ الدخول المبكر مقابل انتظار الاستئناف:",
+        _line("المبكر مشغّل", early.trades),
+        _line("المبكر مطفأ", late.trades),
+        "",
+        "▸ داخل النسخة المبكرة، حسب باب الدخول:",
+        _line("مبكر من المنطقة", [t for t in early.trades if t.kind == "مبكر"]),
+        _line("بعد شمعة استئناف", [t for t in early.trades if t.kind == "استئناف"]),
+        "",
+        "▸ حسب الجهة:",
+        _line("كول", [t for t in early.trades if t.side > 0]),
+        _line("بوت", [t for t in early.trades if t.side < 0]),
+        "",
+        "▸ حسب ساعة نيويورك:",
+    ]
+    for h in range(9, 17):
+        sub = [t for t in early.trades if t.hour == h]
+        if sub:
+            lines.append(_line(f"{h}:00", sub, floor=30))
+    lines.append("")
+    lines.append("▸ حسب سبب الخروج:")
+    for reason in ("وقف", "مهلة", "متحرك"):
+        lines.append(_line(reason, [t for t in early.trades if t.reason == reason]))
+
+    # the verdict, stated by the numbers and not softened
+    pool = [
+        ("المبكر", early.trades), ("المتأخر", late.trades),
+        ("كول", [t for t in early.trades if t.side > 0]),
+        ("بوت", [t for t in early.trades if t.side < 0]),
+    ] + [(f"ساعة {h}", [t for t in early.trades if t.hour == h]) for h in range(9, 17)]
+    survivors = [(nm, tr) for nm, tr in pool if len(tr) >= 40 and _slice(tr)[1] >= 1.0]
+    lines.append("")
+    if survivors:
+        best = max(survivors, key=lambda x: _slice(x[1])[1])
+        n, pf, avg, _ = _slice(best[1])
+        lines.append(
+            f"🏆 شريحة صمدت: {best[0]} — {n} صفقة · عامل {pf:.2f}"
+            f" · متوسط {'+' if avg >= 0 else ''}{avg:.2f}R.\n"
+            "الخطوة التالية: اختبرها على رمز لم تُضبط عليه."
+        )
+    else:
+        lines.append(
+            "⚠️ لا شريحة تعبر عامل ربح 1.0 بعينة محترمة — لا ساعة، ولا جهة،"
+            " ولا باب دخول. الميزة ليست مخبأة في زاوية، وهي أصغر من تكلفة"
+            " العقد. أي ضبط بعد هذا تفصيل على مقاس الماضي."
         )
     return "\n".join(lines)

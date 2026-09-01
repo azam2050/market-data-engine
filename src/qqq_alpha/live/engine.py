@@ -1893,6 +1893,34 @@ class LiveEngine:
                 f"⚠️ تعطل جسر TradingView على إشارة: {exc}\n{raw[:300]}"
             )
 
+    async def _run_autopsy(self, symbols: list[str], frame: int, months: int) -> None:
+        """Cut one timeframe every way an edge could be hiding, and report."""
+        from qqq_alpha.backtest.mirsad import Outcome, format_autopsy, run
+
+        try:
+            end = datetime.now(UTC).date()
+            start = end - timedelta(days=round(months * 30.4))
+            early = Outcome(symbol="+".join(symbols), minutes=frame, profile="")
+            late = Outcome(symbol="+".join(symbols), minutes=frame, profile="")
+            chunk = 20 if frame < 5 else 90
+            async with MassiveClient(self.settings) as client:
+                for sym in symbols:
+                    bars: list = []
+                    s = start
+                    while s <= end:
+                        e = min(s + timedelta(days=chunk - 1), end)
+                        bars.extend(await client.range_minute_bars(sym, frame, s, e))
+                        s = e + timedelta(days=1)
+                    on = await asyncio.to_thread(run, bars, sym, frame)
+                    off = await asyncio.to_thread(run, bars, sym, frame, anticipate=False)
+                    early.profile = on.profile
+                    late.profile = off.profile
+                    early.trades.extend(on.trades)
+                    late.trades.extend(off.trades)
+            await self.notifier.note(format_autopsy(early, late))
+        except Exception as exc:  # noqa: BLE001 - report, never kill the loop
+            await self.notifier.note(f"⚠️ تعطل التشريح: {exc}")
+
     async def _run_frame_sweep(self, symbols: list[str], months: int) -> None:
         """Replay the current engine across every timeframe and report once.
 
@@ -2138,6 +2166,22 @@ class LiveEngine:
                 self._run_indicator_backtest(
                     symbols, frame, months, diagnose=True, mode=mode, profile=profile
                 )
+            )
+            return
+        if parts and parts[0].strip().lower() in {"تشريح", "التشريح", "autopsy"}:
+            # a losing system can still hide a paying slice; only the split
+            # says whether it does, and the answer is a number either way
+            syms = [t.upper() for t in parts[1:] if t.isascii() and t.isalpha()]
+            nums = [int(t) for t in parts[1:] if t.isdigit()]
+            frame = next((n for n in nums if n in (1, 3, 5, 15, 30, 60)), 5)
+            months = next((n for n in nums if n not in (1, 3, 5, 15, 30, 60)), 12)
+            await self.notifier.note(
+                f"🔎 بدأ التشريح — فريم {frame} دقيقة، {months} شهر."
+                " يقسّم الصفقات حسب الدخول والجهة والساعة وسبب الخروج."
+            )
+            asyncio.create_task(
+                self._run_autopsy(syms or ["QQQ", "NVDA", "AAPL", "TSLA", "MSFT"],
+                                  frame, months)
             )
             return
         if parts and parts[0].strip().lower() in {"مسح", "المسح", "sweep"}:
