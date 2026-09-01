@@ -704,7 +704,7 @@ if barstate.islast
     blocked = qualityMode and (lead > 0 ? not qGateUp : not qGateDn)
     action = not dayOpen and not inTrade ? "🛑 توقف اليوم — " + str.tostring(lossRunDay) + " خسائر متتالية" :
          inTrade ? (hits >= 2 ? "💰 مؤمّنة — احجز جزءاً ودع الباقي" : hits >= 1 ? "🏃 تجري خلف الوقف" : "✊ امسك — خسارتك محدودة بـ 1R") :
-         pDir != 0 ? ("⏳ " + (useBracket ? (pStrong ? "زخم — الأرجح اختراق " + str.tostring(pBreak, format.mintick) + " · وحد " + str.tostring(pLimit, format.mintick) : "هادئ — الأرجح حد " + str.tostring(pLimit, format.mintick) + " · واختراق " + str.tostring(pBreak, format.mintick)) : "ضع أمر " + f_side(pDir) + " عند " + str.tostring(pLimit, format.mintick))) :
+         pDir != 0 ? ("⏳ " + (useBracket and not na(pBreak) ? "زخم — اختراق " + str.tostring(pBreak, format.mintick) + " · أو حد " + str.tostring(pLimit, format.mintick) : "ضع أمر " + f_side(pDir) + " حداً عند " + str.tostring(pLimit, format.mintick) + " ولا تطارد")) :
          earlyTxt != "" ? (earlyTxt + " — ينتظر الإغلاق " + (na(secsLeft) ? "" : str.tostring(math.round(secsLeft)) + "ث")) :
          (bar_index - lastExit) <= coolEff ? "😴 راحة بعد الصفقة السابقة" :
          leadScore < minQeff ? "⏸ ينقص: " + f_miss(lead > 0) :
