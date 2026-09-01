@@ -1893,6 +1893,39 @@ class LiveEngine:
                 f"⚠️ تعطل جسر TradingView على إشارة: {exc}\n{raw[:300]}"
             )
 
+    async def _run_frame_sweep(self, symbols: list[str], months: int) -> None:
+        """Replay the current engine across every timeframe and report once.
+
+        The Strategy Tester answers one chart at a time; this answers the
+        question behind all of them — which frame, if any, holds an edge.
+        """
+        from qqq_alpha.backtest.mirsad import Outcome, format_sweep, run
+
+        frames = [1, 3, 5, 15, 30, 60]
+        try:
+            end = datetime.now(UTC).date()
+            start = end - timedelta(days=round(months * 30.4))
+            merged: list[Outcome] = []
+            async with MassiveClient(self.settings) as client:
+                for frame in frames:
+                    pooled = Outcome(symbol="الكل", minutes=frame, profile="")
+                    for sym in symbols:
+                        bars: list = []
+                        chunk = 20 if frame < 5 else 90
+                        s = start
+                        while s <= end:
+                            e = min(s + timedelta(days=chunk - 1), end)
+                            bars.extend(await client.range_minute_bars(sym, frame, s, e))
+                            s = e + timedelta(days=1)
+                        out = await asyncio.to_thread(run, bars, sym, frame)
+                        pooled.profile = out.profile
+                        pooled.trades.extend(out.trades)
+                        pooled.cancelled += out.cancelled
+                    merged.append(pooled)
+            await self.notifier.note(format_sweep(merged, len(symbols), months))
+        except Exception as exc:  # noqa: BLE001 - report, never kill the loop
+            await self.notifier.note(f"⚠️ تعطل المسح: {exc}")
+
     async def _run_indicator_backtest(
         self, symbols: list[str], frame: int, months: int, diagnose: bool = False,
         mode: str = "عادي", profile: str = "متوازن",
@@ -2104,6 +2137,22 @@ class LiveEngine:
             asyncio.create_task(
                 self._run_indicator_backtest(
                     symbols, frame, months, diagnose=True, mode=mode, profile=profile
+                )
+            )
+            return
+        if parts and parts[0].strip().lower() in {"مسح", "المسح", "sweep"}:
+            # one word, every timeframe: the operator should not be reading a
+            # report tab on a tablet to learn which frame carries an edge
+            syms = [t.upper() for t in parts[1:] if t.isascii() and t.isalpha()]
+            mons = [int(t) for t in parts[1:] if t.isdigit()]
+            await self.notifier.note(
+                "🔬 بدأ مسح الفريمات — 1، 3، 5، 15، 30، 60 دقيقة."
+                " يستغرق دقائق، والنتيجة تصلك هنا."
+            )
+            asyncio.create_task(
+                self._run_frame_sweep(
+                    syms or ["QQQ", "NVDA", "AAPL", "TSLA", "MSFT"],
+                    mons[0] if mons else 12,
                 )
             )
             return

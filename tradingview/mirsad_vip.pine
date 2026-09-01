@@ -51,6 +51,7 @@ retrX      = input.float(0.5, "عمق الارتداد (من مدى شمعة ا�
 brkX       = input.float(0.10, "مسافة أمر الاختراق (ATR)", minval=0.02, maxval=0.5, step=0.02, group=gE)
 pExpire    = input.int(3, "صلاحية الأمرين (شموع)", minval=1, maxval=12, group=gE)
 minRiskX   = input.float(0.5, "أدنى مسافة وقف (ATR)", minval=0.2, maxval=2.0, step=0.1, group=gE)
+anticipate = input.bool(true, "دخول مبكر من منطقة التصحيح (بلا انتظار شمعة الاستئناف)", group=gE)
 
 gO = "العقود اليومية"
 dteCut  = input.int(90, "امنع عقد اليوم قبل الإغلاق بـ (دقيقة)", minval=0, maxval=240, group=gO, tooltip="بعد هذا الوقت يتحول العقد المقترح إلى عقد الغد وتُوسم الإشارة بمخاطرة الفجوة")
@@ -112,9 +113,10 @@ stopX  = prof == "حارق" ? 0.5 : prof == "سريع" ? 0.7 : prof == "نصف �
 // أن تكتمل — وثمنها أن نردّ جزءاً من كل رابحة عادية.
 trailX = prof == "حارق" ? 1.5 : prof == "سريع" ? 2.5 : prof == "نصف يوم" ? 3.2 : prof == "يوم" ? 4.0 : 5.0
 // الحارق يخرج كاملاً عند الهدف الثاني: لا وقت لمطاردة أهداف بعيدة
-// الرابح لا يُقفل بعدد أهداف بل بالوقف المتحرك. الحارق وحده يخرج مبكراً
-// لأن عقده يموت خلال ساعات.
-maxT  = prof == "حارق" ? 2 : 4
+// الرابح لا يُقفل بعدد أهداف أبداً — الوقف المتحرك وحده يقرر متى ينتهي.
+// إقفاله عند الهدف الرابع كان يقصّ الموجة التي يعيش عليها النظام كله.
+// والحارق وحده يستثنى، لأن عقده يموت خلال ساعات لا أيام.
+maxT  = prof == "حارق" ? 2 : 99
 coolN = prof == "حارق" ? 3 : prof == "سريع" ? 6 : prof == "نصف يوم" ? 6 : 8
 // العقد يفقد قيمته بمرور الوقت وحده. صفقة لم تصل هدفها الأول خلال هذه المدة
 // ليست صفقة بطيئة — هي صفقة ميتة تنزف قيمة زمنية، والخروج منها ربح.
@@ -286,9 +288,15 @@ if bias >= 0
     armDn := false
 contUp = armUp and close > open and close > high[1] and close > cloudFast and body > 0.25 * atr
 contDn = armDn and close < open and close < low[1] and close < cloudFast and body > 0.25 * atr
-if contUp
+// الدخول المبكر: انتظار شمعة الاستئناف كاملةً يكلّف شمعة إلى ثلاث، وفيها
+// يقطع السعر نصف الحركة. يكفي أن يلمس السعر منطقة التصحيح ثم يُرفض منها —
+// إغلاق في النصف العلوي من مدى الشمعة فوق السحابة البطيئة — لنضع الأمر.
+antUp = anticipate and armUp and low <= pbUp + 0.20 * atr and close > (high + low) / 2 and close > cloudSlow
+antDn = anticipate and armDn and high >= pbDn - 0.20 * atr and close < (high + low) / 2 and close < cloudSlow
+// المنطقة تُستهلك بأول أمر تُصدره، مبكراً كان أو بعد شمعة الاستئناف
+if contUp or antUp
     armUp := false
-if contDn
+if contDn or antDn
     armDn := false
 
 // ============================ سكور الجودة ===================================
@@ -383,8 +391,8 @@ var bool   pStrong = false
 var line   lnLim  = na
 var line   lnBrk  = na
 
-trigUp = contUp or spring or sweepUp or chochUp or zoneUp or (bosUp and (volSpike or bias > 0))
-trigDn = contDn or upthrust or sweepDn or chochDn or zoneDn or (bosDn and (volSpike or bias < 0))
+trigUp = contUp or antUp or spring or sweepUp or chochUp or zoneUp or (bosUp and (volSpike or bias > 0))
+trigDn = contDn or antDn or upthrust or sweepDn or chochDn or zoneDn or (bosDn and (volSpike or bias < 0))
 minQeff = math.max(0, math.min(100, minQ + (aggro == "هادئ" ? 20 : aggro == "نشط" ? -20 : 0)))
 coolEff = aggro == "هادئ" ? coolN * 2 : aggro == "نشط" ? math.max(1, coolN / 2) : coolN
 qGateUp = not qualityMode or contUp or atZoneUp or (adx >= adxMin and cloudDir >= 0)
@@ -407,7 +415,9 @@ if sigDir != 0
     // الهادئ: حد أعمق ووقف أضيق، لأننا ندخل بسعر أفضل
     dLim = strongImp ? retrX * 0.6 : retrX
     dBrk = strongImp ? brkX * 0.6 : brkX
-    pLimit := sigDir > 0 ? high - dLim * rngHL : low + dLim * rngHL
+    atZone = sigDir > 0 ? antUp and not contUp : antDn and not contDn
+    pLimit := atZone ? (sigDir > 0 ? math.min(pbUp, close) : math.max(pbDn, close))
+         : (sigDir > 0 ? high - dLim * rngHL : low + dLim * rngHL)
     pBreak := strongImp ? (sigDir > 0 ? high + dBrk * atr : low - dBrk * atr) : na
     base = sigDir > 0 ? math.min(low, pLimit) : math.max(high, pLimit)
     pStop := sigDir > 0 ? base - stopX * atr : base + stopX * atr
