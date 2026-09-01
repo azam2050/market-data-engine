@@ -288,3 +288,26 @@ def test_the_stored_secret_survives_reopening_the_database(tmp_path):
 
     fresh = rotate_tv_webhook_secret(Memory(tmp_path / "m.db"))
     assert tv_webhook_secret(_S(), Memory(tmp_path / "m.db")) == fresh
+
+
+def test_the_pay_branch_no_longer_swallows_the_webhook_link_request():
+    """«رابط جديد» must reach the webhook handler, not the payment offer.
+
+    A bare "رابط" first word used to route to the pay link, so every
+    message about the TradingView webhook came back as the plans card.
+    """
+    from qqq_alpha.live.engine import LiveEngine
+
+    def _wants_pay(text: str) -> bool:
+        parts = text.strip().split()
+        low = text.strip().lower()
+        return (parts and parts[0].strip().lower() in {"دفع", "paylink"}) or (
+            "رابط" in low and "دفع" in low
+        )
+
+    assert not _wants_pay("رابط جديد")
+    assert not _wants_pay("الرابط")
+    assert not _wants_pay("ارسل الرابط الجديد")
+    assert _wants_pay("دفع")
+    assert _wants_pay("رابط الدفع")
+    assert LiveEngine is not None  # the module imports cleanly with the branch

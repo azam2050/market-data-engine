@@ -1961,7 +1961,15 @@ class LiveEngine:
 
     async def _handle_command(self, text: str) -> None:
         parts = text.strip().split()
-        if parts and parts[0].strip().lower() in {"دفع", "رابط", "paylink"}:
+        # "رابط" alone used to land here, which swallowed every message about
+        # the TradingView webhook link — the operator asks for that one far
+        # more often. Payment now needs the word "دفع" (or "رابط الدفع"), and
+        # a bare link request belongs to the webhook handler further down.
+        _low_all = text.strip().lower()
+        wants_pay = (parts and parts[0].strip().lower() in {"دفع", "paylink"}) or (
+            "رابط" in _low_all and "دفع" in _low_all
+        )
+        if wants_pay:
             # the operator's own signed pay link — the fastest way to test
             # the money door end-to-end with a real card. Same styled offer
             # a subscriber sees, so the test previews the real experience.
@@ -2081,7 +2089,8 @@ class LiveEngine:
                 f"{base}/tv/{sec}\n\n"
                 "الصقه في خانة Webhook URL داخل نافذة التنبيه لكل سهم، "
                 "وكل إشارة يطلقها المؤشر ستصلني هنا فوراً.\n\n"
-                "لإصدار رابط جديد وإبطال القديم: أرسل «رابط جديد»."
+                "لإصدار رابط جديد وإبطال القديم: أرسل «رابط جديد».\n"
+                "ولرابط الدفع التجريبي: أرسل «دفع»."
             )
             return
         if parts and parts[0].strip().lower() in {"تشخيص", "diagnose"}:
