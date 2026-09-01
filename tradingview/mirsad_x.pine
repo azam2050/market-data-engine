@@ -1,0 +1,356 @@
+//@version=5
+// ============================================================================
+//  مرصاد X | عقل كلاود — مجلس المدارس الثماني
+// ----------------------------------------------------------------------------
+//  الفكرة: ما فيه مدرسة تحليل واحدة تصيب دائماً — لكن لما ثماني مدارس
+//  مستقلة تتفق على نفس الجهة في نفس اللحظة، فهذه أقوى لحظة يعرفها
+//  التحليل الفني. هذا المؤشر مجلس تصويت:
+//
+//   ١) داو        — بنية القمم والقيعان (قمم أعلى وقيعان أعلى = صعود)
+//   ٢) المتوسطات  — ترتيب 9/21/50 وموقع السعر منها
+//   ٣) وايكوف     — الانضغاط ومن يجمّع/يصرّف داخله بصمت
+//   ٤) فيبوناتشي  — الارتداد من المنطقة الذهبية (0.5–0.618) لآخر موجة
+//   ٥) الشموع     — الابتلاع والمطرقة والشهاب في أماكنها الصحيحة
+//   ٦) الزخم      — RSI واتجاهه وانفراجاته المخفية
+//   ٧) السيولة    — مصايد الكسر الكاذب لحواف الأمس والأسبوع
+//   ٨) الفريم الأعلى — تيار السوق الأكبر (×4) الذي لا يُسبح ضده
+//
+//  كل مدرسة تصوّت (كول/بوت/حياد) بوزنها، والمجموع "إجماع العقل" من 100.
+//  الدخول لا يصير إلا بثلاثة شروط معاً: إجماع فوق العتبة + أغلبية مدارس
+//  متفقة + شرارة تفجير (إفراج وايكوف أو مصيدة سيولة أو ارتداد ذهبي).
+//  ولوحة المجلس تعرض تصويت كل مدرسة قدامك — تشوف "ليش" بعينك.
+//
+//  يعمل على كل الفريمات (حساباته نسبية لفريم الشارت) وكل الأسواق.
+//  التنبيهات بنفس صيغ مرصاد: ⏳ · 🪤 · 🎯 · 🔺 · ✅/🔴
+// ============================================================================
+indicator("مرصاد X | عقل كلاود", shorttitle="مرصاد X", overlay=true,
+     max_lines_count=100, max_labels_count=150, max_boxes_count=30)
+
+// ---------------------------------------------------------------- المدخلات
+grpC = "عقل المجلس"
+thr      = input.int(65, "عتبة الإجماع للدخول (من 100)", minval=50, maxval=90, group=grpC)
+minVotes = input.int(5, "أقل عدد مدارس متفقة", minval=3, maxval=8, group=grpC)
+useHTF   = input.bool(true, "حق النقض للفريم الأعلى — لا دخول ضده", group=grpC)
+grpM = "إدارة الصفقة"
+t1x    = input.float(1.0, "الهدف الأول (ATR)",  minval=0.5, maxval=3.0, step=0.1, group=grpM)
+t2x    = input.float(2.0, "الهدف الثاني (ATR)", minval=1.0, maxval=5.0, step=0.1, group=grpM)
+t3x    = input.float(3.5, "الهدف الممتد (ATR)", minval=1.5, maxval=8.0, step=0.1, group=grpM)
+trailX = input.float(2.0, "الوقف المتحرك (ATR)", minval=1.0, maxval=4.0, step=0.1, group=grpM)
+coolN  = input.int(6, "شموع انتظار بعد كل صفقة", minval=0, maxval=100, group=grpM)
+grpD = "العرض"
+showCouncil = input.bool(true, "لوحة المجلس (تصويت المدارس)", group=grpD)
+showGold    = input.bool(true, "رسم المنطقة الذهبية لفيبوناتشي", group=grpD)
+keepTrail   = input.bool(true, "إبقاء آثار الصفقات الماضية (للمراجعة)", group=grpD)
+dashPosS = input.string("أعلى يمين", "مكان اللوحة", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpD)
+
+// ------------------------------------------------------------------ الألوان
+cUp   = #26A69A
+cDn   = #EF5350
+cGold = #E3B34D
+cCyan = #38C8E8
+cTxt  = #D5D9E4
+cMut  = #787B86
+cPanl = color.new(#1B2130, 8)
+cHead = color.new(#232B3D, 0)
+
+// ----------------------------------------------------------- حسابات أساسية
+atr   = ta.atr(14)
+rngHL = math.max(high - low, syminfo.mintick)
+hasVol = not na(volume) and ta.sma(volume, 20) > 0
+flow   = hasVol ? volume * (close - open) / rngHL : (close - open) / rngHL
+relVol = hasVol ? volume / ta.sma(volume, 20) : math.abs(close - open) / math.max(atr, syminfo.mintick)
+
+e9  = ta.ema(close, 9)
+e21 = ta.ema(close, 21)
+e50 = ta.ema(close, 50)
+rsi = ta.rsi(close, 14)
+
+// بايفوتات مؤكدة — تستخدمها مدارس داو وفيبوناتشي والوقف البنيوي
+pv5H = ta.pivothigh(high, 5, 5)
+pv5L = ta.pivotlow(low, 5, 5)
+var float ph1 = na
+var float ph2 = na
+var int   phB = na
+var float pl1 = na
+var float pl2 = na
+var int   plB = na
+if not na(pv5H)
+    ph2 := ph1
+    ph1 := pv5H
+    phB := bar_index - 5
+if not na(pv5L)
+    pl2 := pl1
+    pl1 := pv5L
+    plB := bar_index - 5
+
+// ============================ المدرسة ١: داو — بنية القمم والقيعان
+dowVote = not na(ph2) and not na(pl2) ? (ph1 > ph2 and pl1 > pl2 ? 1 : ph1 < ph2 and pl1 < pl2 ? -1 : 0) : 0
+
+// ============================ المدرسة ٢: المتوسطات — الترتيب والموقع
+maVote = e9 > e21 and e21 > e50 and close > e9 ? 1 : e9 < e21 and e21 < e50 and close < e9 ? -1 : 0
+
+// ============================ المدرسة ٣: وايكوف — الانضغاط والتجميع
+sd2   = 2.0 * ta.stdev(close, 20)
+sqzOn = sd2 < 1.5 * atr
+var int   sqzBars = 0
+var float sqzFlow = 0.0
+var float sqzHi   = na
+var float sqzLo   = na
+if sqzOn
+    sqzBars += 1
+    sqzFlow += flow
+    sqzHi := na(sqzHi) ? high : math.max(sqzHi, high)
+    sqzLo := na(sqzLo) ? low  : math.min(sqzLo, low)
+wyVote  = sqzOn and sqzBars >= 5 ? (sqzFlow > 0 ? 1 : sqzFlow < 0 ? -1 : 0) : 0
+release = not sqzOn and sqzOn[1] and sqzBars >= 5
+relUp   = release and close > open and math.abs(close - open) >= 0.5 * atr and close > nz(sqzHi, high) and sqzFlow >= 0
+relDn   = release and close < open and math.abs(close - open) >= 0.5 * atr and close < nz(sqzLo, low) and sqzFlow <= 0
+
+// ============================ المدرسة ٤: فيبوناتشي — المنطقة الذهبية
+// آخر موجة: من آخر قاع بايفوت لآخر قمة بايفوت (أو العكس، الأحدث يقود)
+impUp   = not na(ph1) and not na(pl1) and phB > plB and ph1 > pl1
+impDn   = not na(ph1) and not na(pl1) and plB > phB and ph1 > pl1
+fibHi   = impUp ? ph1 : impDn ? ph1 : na
+fibLo   = impUp ? pl1 : impDn ? pl1 : na
+gzTop   = impUp ? ph1 - (ph1 - pl1) * 0.500 : impDn ? pl1 + (ph1 - pl1) * 0.618 : na
+gzBot   = impUp ? ph1 - (ph1 - pl1) * 0.618 : impDn ? pl1 + (ph1 - pl1) * 0.500 : na
+inGold  = not na(gzTop) and not na(gzBot) and close <= math.max(gzTop, gzBot) and close >= math.min(gzTop, gzBot)
+fibVote = inGold and impUp and close > open ? 1 : inGold and impDn and close < open ? -1 : 0
+fibUpTouch = inGold and impUp and close > open
+fibDnTouch = inGold and impDn and close < open
+
+// ============================ المدرسة ٥: الشموع — الأنماط في مكانها
+body    = math.abs(close - open)
+upWick  = high - math.max(close, open)
+dnWick  = math.min(close, open) - low
+bullEng = close > open and close[1] < open[1] and close >= open[1] and open <= close[1] and body > 0.4 * atr
+bearEng = close < open and close[1] > open[1] and close <= open[1] and open >= close[1] and body > 0.4 * atr
+hammer  = dnWick > 2.0 * body and upWick < body and close >= open and low < e21
+shooter = upWick > 2.0 * body and dnWick < body and close <= open and high > e21
+cdlVote = bullEng or hammer ? 1 : bearEng or shooter ? -1 : 0
+
+// ============================ المدرسة ٦: الزخم — RSI وانفراجاته
+divBull = not na(pl2) and pl1 < pl2 and ta.valuewhen(not na(pv5L), rsi[5], 0) > ta.valuewhen(not na(pv5L), rsi[5], 1)
+divBear = not na(ph2) and ph1 > ph2 and ta.valuewhen(not na(pv5H), rsi[5], 0) < ta.valuewhen(not na(pv5H), rsi[5], 1)
+momVote = divBull ? 1 : divBear ? -1 : rsi > 55 and rsi > rsi[3] ? 1 : rsi < 45 and rsi < rsi[3] ? -1 : 0
+
+// ============================ المدرسة ٧: السيولة — مصايد الحواف
+[pdH, pdL] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_off)
+tol = 0.05 * atr
+volOk = hasVol ? relVol > 1.3 : math.abs(close - open) > 0.6 * atr
+bullTrap = not na(pdL) and low < pdL - tol and close > pdL and close > open and volOk
+bearTrap = not na(pdH) and high > pdH + tol and close < pdH and close < open and volOk
+liqVote  = bullTrap ? 1 : bearTrap ? -1 : 0
+
+// ============================ المدرسة ٨: الفريم الأعلى — التيار الكبير
+f_h() =>
+    eF = ta.ema(close, 9)
+    eS = ta.ema(close, 21)
+    eF > eS and close > eS ? 1 : eF < eS and close < eS ? -1 : 0
+htfSec = timeframe.in_seconds(timeframe.period) * 4
+htfMin = math.max(1, int(htfSec / 60))
+htfStr = timeframe.isintraday ? (htfMin >= 1440 ? "D" : str.tostring(htfMin)) : timeframe.isdaily ? "W" : "M"
+htfVote = request.security(syminfo.tickerid, htfStr, f_h(), lookahead=barmerge.lookahead_off)
+
+// ================================================== الإجماع — عقل المجلس
+wDow = 1.5
+wMa  = 1.0
+wWy  = 2.0
+wFib = 1.5
+wCdl = 1.0
+wMom = 1.0
+wLiq = 2.0
+wHtf = 2.0
+wSum = wDow + wMa + wWy + wFib + wCdl + wMom + wLiq + wHtf
+
+f_w(v, w) => v > 0 ? w : 0.0
+f_wn(v, w) => v < 0 ? w : 0.0
+callW = f_w(dowVote, wDow) + f_w(maVote, wMa) + f_w(wyVote, wWy) + f_w(fibVote, wFib) + f_w(cdlVote, wCdl) + f_w(momVote, wMom) + f_w(liqVote, wLiq) + f_w(htfVote, wHtf)
+putW  = f_wn(dowVote, wDow) + f_wn(maVote, wMa) + f_wn(wyVote, wWy) + f_wn(fibVote, wFib) + f_wn(cdlVote, wCdl) + f_wn(momVote, wMom) + f_wn(liqVote, wLiq) + f_wn(htfVote, wHtf)
+callScore = math.round(100 * callW / wSum)
+putScore  = math.round(100 * putW / wSum)
+
+f_c(v) => v > 0 ? 1 : 0
+f_cn(v) => v < 0 ? 1 : 0
+callN = f_c(dowVote) + f_c(maVote) + f_c(wyVote) + f_c(fibVote) + f_c(cdlVote) + f_c(momVote) + f_c(liqVote) + f_c(htfVote)
+putN  = f_cn(dowVote) + f_cn(maVote) + f_cn(wyVote) + f_cn(fibVote) + f_cn(cdlVote) + f_cn(momVote) + f_cn(liqVote) + f_cn(htfVote)
+
+// الشرارة: بدون مفجّر، الإجماع مجرد ميول — معه يصير قرار دخول
+sparkUp = relUp or bullTrap or fibUpTouch
+sparkDn = relDn or bearTrap or fibDnTouch
+sparkTxtUp = relUp ? "إفراج وايكوف" : bullTrap ? "مصيدة سيولة" : "ارتداد ذهبي"
+sparkTxtDn = relDn ? "إفراج وايكوف" : bearTrap ? "مصيدة سيولة" : "رفض ذهبي"
+
+// ------------------------------------------------------------- حالة الصفقة
+var bool  inTrade = false
+var int   tDir    = 0
+var float entryP  = na
+var float stopP   = na
+var float stop0   = na
+var float t1P     = na
+var float t2P     = na
+var float t3P     = na
+var bool  t1Hit   = false
+var bool  t2Hit   = false
+var bool  t3Hit   = false
+var int   entryBar = 0
+var int   lastExit = -99999
+var line  lnEntry = na
+var line  lnStop  = na
+var label lbStop  = na
+var resArr = array.new_int()
+var int   winsAll = 0
+var int   lossAll = 0
+var float sumR    = 0.0
+
+f_side(d) => d > 0 ? "كول" : "بوت"
+
+// ------------------------------------------------------------------- الدخول
+canEnter = barstate.isconfirmed and not inTrade and (bar_index - lastExit) > coolN and bar_index > 60
+longSig  = canEnter and sparkUp and callScore >= thr and callN >= minVotes and (not useHTF or htfVote >= 0)
+shortSig = canEnter and not longSig and sparkDn and putScore >= thr and putN >= minVotes and (not useHTF or htfVote <= 0)
+sigDir   = longSig ? 1 : shortSig ? -1 : 0
+sigWhy   = longSig ? "إجماع " + str.tostring(callN) + "/8 مدارس بقوة " + str.tostring(callScore) + " والشرارة: " + sparkTxtUp :
+     shortSig ? "إجماع " + str.tostring(putN) + "/8 مدارس بقوة " + str.tostring(putScore) + " والشرارة: " + sparkTxtDn : ""
+
+if sigDir != 0
+    inTrade := true
+    entryBar := bar_index
+    tDir   := sigDir
+    entryP := close
+    stopP  := sigDir > 0 ? (not na(pl1) and pl1 < close and close - pl1 < 3 * atr ? pl1 - 0.25 * atr : math.min(low, low[1]) - 0.4 * atr)
+         : (not na(ph1) and ph1 > close and ph1 - close < 3 * atr ? ph1 + 0.25 * atr : math.max(high, high[1]) + 0.4 * atr)
+    stop0  := stopP
+    t1P := sigDir > 0 ? entryP + t1x * atr : entryP - t1x * atr
+    t2P := sigDir > 0 ? entryP + t2x * atr : entryP - t2x * atr
+    t3P := sigDir > 0 ? entryP + t3x * atr : entryP - t3x * atr
+    t1Hit := false
+    t2Hit := false
+    t3Hit := false
+    lnEntry := line.new(bar_index, entryP, bar_index + 1, entryP, extend=extend.right, color=color.new(cTxt, 35), style=line.style_dotted, width=1)
+    lnStop  := line.new(bar_index, stopP, bar_index + 1, stopP, extend=extend.right, color=#FF9E45, width=2)
+    lbStop  := label.new(bar_index + 3, stopP, "الوقف · " + str.tostring(stopP, format.mintick), style=label.style_label_left, textcolor=#1A0E02, color=#FF9E45, size=size.small)
+    label.new(bar_index, sigDir > 0 ? low : high, "🎯 " + f_side(sigDir) + " " + str.tostring(entryP, format.mintick),
+         style=sigDir > 0 ? label.style_label_up : label.style_label_down,
+         color=sigDir > 0 ? cUp : cDn, textcolor=sigDir > 0 ? #04211D : #2B0606, size=size.normal)
+    alert("🎯 دخول " + f_side(sigDir) + " | " + syminfo.ticker + " فريم " + timeframe.period +
+         " | سعر " + str.tostring(entryP, format.mintick) + " | وقف " + str.tostring(stopP, format.mintick) +
+         " | السبب: " + sigWhy, alert.freq_once_per_bar)
+
+// ------------------------------------------------------------ إدارة الصفقة
+if inTrade and barstate.isconfirmed and bar_index > entryBar
+    if not t1Hit and (tDir > 0 ? high >= t1P : low <= t1P)
+        t1Hit := true
+        stopP := entryP
+        alert("🔺 هدف 1 تحقق والصفقة مؤمّنة (الوقف = الدخول) | " + syminfo.ticker, alert.freq_once_per_bar)
+    if t1Hit and not t2Hit and (tDir > 0 ? high >= t2P : low <= t2P)
+        t2Hit := true
+        stopP := t1P
+        alert("🔺 هدف 2 تحقق — الوقف صعد إلى هدف 1 | " + syminfo.ticker, alert.freq_once_per_bar)
+    if t2Hit and not t3Hit and (tDir > 0 ? high >= t3P : low <= t3P)
+        t3Hit := true
+        alert("🔺 الهدف الممتد تحقق | " + syminfo.ticker, alert.freq_once_per_bar)
+    if t1Hit
+        chand = tDir > 0 ? close - trailX * atr : close + trailX * atr
+        stopP := tDir > 0 ? math.max(stopP, chand) : math.min(stopP, chand)
+    line.set_y1(lnStop, stopP)
+    line.set_y2(lnStop, stopP)
+    label.set_y(lbStop, stopP)
+    label.set_x(lbStop, bar_index + 3)
+    label.set_text(lbStop, (stopP == entryP ? "مؤمّنة ✓ · " : "الوقف · ") + str.tostring(stopP, format.mintick))
+    if tDir > 0 ? close < stopP : close > stopP
+        risk  = math.abs(entryP - stop0)
+        rMult = risk > 0 ? (tDir > 0 ? close - entryP : entryP - close) / risk : 0.0
+        win   = t1Hit
+        array.unshift(resArr, win ? 1 : 0)
+        if array.size(resArr) > 20
+            array.pop(resArr)
+        winsAll += win ? 1 : 0
+        lossAll += win ? 0 : 1
+        sumR    += rMult
+        if keepTrail
+            line.set_extend(lnEntry, extend.none)
+            line.set_x2(lnEntry, bar_index)
+            line.new(entryBar, entryP, bar_index, close, color=win ? color.new(cUp, 35) : color.new(cDn, 30), width=2)
+        else
+            line.delete(lnEntry)
+        line.delete(lnStop)
+        label.delete(lbStop)
+        label.new(bar_index, tDir > 0 ? low : high,
+             win ? "✅ +" + str.tostring(rMult, "#.#") + "R" : "🔴 خروج",
+             style=tDir > 0 ? label.style_label_up : label.style_label_down,
+             color=win ? color.new(cUp, 20) : color.new(cDn, 10),
+             textcolor=win ? #04211D : #2B0606, size=size.normal)
+        alert((win ? "✅" : "🔴") + " خروج — كسر الوقف المتحرك | " + syminfo.ticker +
+             " | النتيجة " + (win ? "+" : "") + str.tostring(rMult, "#.#") + "R", alert.freq_once_per_bar)
+        inTrade := false
+        lastExit := bar_index
+
+// تصفير ذاكرة الانضغاط بعد استخدامها
+if release or (not sqzOn and not sqzOn[1] and sqzBars > 0)
+    sqzBars := 0
+    sqzFlow := 0.0
+    sqzHi := na
+    sqzLo := na
+
+// -------------------------------------------------- المنطقة الذهبية (رسم)
+var box goldBox = na
+if showGold and barstate.islast and not na(gzTop) and not na(gzBot)
+    if not na(goldBox)
+        box.delete(goldBox)
+    goldBox := box.new(bar_index - 20, math.max(gzTop, gzBot), bar_index + 5, math.min(gzTop, gzBot),
+         border_color=color.new(cGold, 55), bgcolor=color.new(cGold, 90))
+    box.set_text(goldBox, "المنطقة الذهبية 0.5–0.618")
+    box.set_text_color(goldBox, color.new(cGold, 25))
+    box.set_text_size(goldBox, size.tiny)
+
+// ------------------------------------------------------------ لوحة المجلس
+f_pos(s) => s == "أعلى يمين" ? position.top_right : s == "أعلى يسار" ? position.top_left :
+     s == "أسفل يمين" ? position.bottom_right : position.bottom_left
+f_vTxt(v) => v > 0 ? "كول ✓" : v < 0 ? "بوت ✓" : "حياد —"
+f_vCol(v) => v > 0 ? cUp : v < 0 ? cDn : cMut
+
+var table cou = table.new(f_pos(dashPosS), 2, 12, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+if showCouncil and barstate.islast
+    lead = callScore >= putScore ? 1 : -1
+    leadScore = lead > 0 ? callScore : putScore
+    leadN = lead > 0 ? callN : putN
+    lCol = lead > 0 ? cUp : cDn
+    tot = winsAll + lossAll
+    wr  = tot > 0 ? 100.0 * winsAll / tot : 0.0
+    avR = tot > 0 ? sumR / tot : 0.0
+    table.cell(cou, 0, 0, "مرصاد X — مجلس المدارس", text_color=cTxt, bgcolor=cHead, text_size=size.small)
+    table.cell(cou, 1, 0, syminfo.ticker, text_color=cTxt, bgcolor=cHead, text_size=size.small)
+    table.cell(cou, 0, 1, "داو (البنية)", text_color=cMut, text_size=size.small)
+    table.cell(cou, 1, 1, f_vTxt(dowVote), text_color=f_vCol(dowVote), text_size=size.small)
+    table.cell(cou, 0, 2, "المتوسطات", text_color=cMut, text_size=size.small)
+    table.cell(cou, 1, 2, f_vTxt(maVote), text_color=f_vCol(maVote), text_size=size.small)
+    table.cell(cou, 0, 3, "وايكوف (التجميع)", text_color=cMut, text_size=size.small)
+    table.cell(cou, 1, 3, f_vTxt(wyVote), text_color=f_vCol(wyVote), text_size=size.small)
+    table.cell(cou, 0, 4, "فيبوناتشي", text_color=cMut, text_size=size.small)
+    table.cell(cou, 1, 4, f_vTxt(fibVote), text_color=f_vCol(fibVote), text_size=size.small)
+    table.cell(cou, 0, 5, "الشموع", text_color=cMut, text_size=size.small)
+    table.cell(cou, 1, 5, f_vTxt(cdlVote), text_color=f_vCol(cdlVote), text_size=size.small)
+    table.cell(cou, 0, 6, "الزخم RSI", text_color=cMut, text_size=size.small)
+    table.cell(cou, 1, 6, f_vTxt(momVote), text_color=f_vCol(momVote), text_size=size.small)
+    table.cell(cou, 0, 7, "السيولة (المصايد)", text_color=cMut, text_size=size.small)
+    table.cell(cou, 1, 7, f_vTxt(liqVote), text_color=f_vCol(liqVote), text_size=size.small)
+    table.cell(cou, 0, 8, "الفريم الأعلى ×4", text_color=cMut, text_size=size.small)
+    table.cell(cou, 1, 8, f_vTxt(htfVote), text_color=f_vCol(htfVote), text_size=size.small)
+    table.cell(cou, 0, 9, "إجماع العقل", text_color=cTxt, bgcolor=color.new(lCol, 85), text_size=size.small)
+    table.cell(cou, 1, 9, f_side(lead) + " " + str.tostring(leadScore) + "/100 · " + str.tostring(leadN) + "/8", text_color=lCol, bgcolor=color.new(lCol, 85), text_size=size.small)
+    stTxt = inTrade ? "🎯 صفقة " + f_side(tDir) + " نشطة" : leadScore >= thr and leadN >= minVotes ? "⚡ جاهز — بانتظار الشرارة" : "مراقبة"
+    table.cell(cou, 0, 10, "الحالة", text_color=cMut, text_size=size.small)
+    table.cell(cou, 1, 10, stTxt, text_color=inTrade ? (tDir > 0 ? cUp : cDn) : leadScore >= thr ? cGold : cMut, text_size=size.small)
+    table.cell(cou, 0, 11, "السجل", text_color=cMut, text_size=size.small)
+    table.cell(cou, 1, 11, tot > 0 ? str.tostring(tot) + " صفقة · نجاح " + str.tostring(wr, "#") + "% · متوسط " + (avR >= 0 ? "+" : "") + str.tostring(avR, "#.##") + "R" : "لا صفقات بعد", text_color=cMut, text_size=size.small)
+
+// إنذار استباقي: الإجماع اكتمل وننتظر الشرارة فقط
+var int lastReadyBar = -999
+if barstate.isconfirmed and not inTrade and bar_index - lastReadyBar > 10
+    if callScore >= thr and callN >= minVotes and not sparkUp
+        lastReadyBar := bar_index
+        alert("⏳ استعداد | " + syminfo.ticker + " — إجماع " + str.tostring(callN) + "/8 مدارس على الكول (" + str.tostring(callScore) + "/100)، بانتظار الشرارة", alert.freq_once_per_bar)
+    else if putScore >= thr and putN >= minVotes and not sparkDn
+        lastReadyBar := bar_index
+        alert("⏳ استعداد | " + syminfo.ticker + " — إجماع " + str.tostring(putN) + "/8 مدارس على البوت (" + str.tostring(putScore) + "/100)، بانتظار الشرارة", alert.freq_once_per_bar)
