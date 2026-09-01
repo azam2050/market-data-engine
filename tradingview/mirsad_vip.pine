@@ -27,7 +27,8 @@ indicator("مرصاد VIP | لوحة العقود", shorttitle="مرصاد VIP",
 
 // ---------------------------------------------------------------- المدخلات
 grpQ = "عقل الجودة"
-minQ    = input.int(80, "أدنى سكور جودة للدخول (0-100)", minval=40, maxval=100, group=grpQ)
+aggro   = input.string("متوازن", "شخصية المؤشر", options=["هادئ", "متوازن", "نشط"], group=grpQ)
+minQ    = input.int(40, "أدنى سكور جودة للدخول (0-100)", minval=0, maxval=100, group=grpQ)
 volX    = input.float(1.2, "مضاعف الحجم المؤسسي", minval=1.0, maxval=3.0, step=0.1, group=grpQ)
 qualityMode  = input.bool(true,  "وضع الجودة — منع الدخول في التذبذب وداخل السحابة", group=grpQ)
 reversalMode = input.bool(false, "وضع الانعكاس — دخول عكسي عند التشبع الحاد", group=grpQ)
@@ -153,24 +154,13 @@ paUp = bullPin or bullEng
 paDn = bearPin or bearEng
 
 // ------------------------------------------------- الزخم: RSI وانفراجاته
+// زخم مع الاتجاه (للاستمرار) أو انفراج/تشبع (للانعكاس) — كلاهما زخم صالح
 divBull = not na(pv3L) and rsi < 45 and rsi > rsi[3]
 divBear = not na(pv3H) and rsi > 55 and rsi < rsi[3]
-momUp = rsi < 35 or divBull
-momDn = rsi > 65 or divBear
+momUp = (rsi > 50 and rsi > rsi[1]) or divBull or rsi < 32
+momDn = (rsi < 50 and rsi < rsi[1]) or divBear or rsi > 68
 
-// --------------------------------------------- سكور الجودة 0–100 (خمسة أخماس)
-f_q(sideUp) =>
-    q = 0
-    q := q + ((volSpike or absorption) ? 20 : 0)
-    q := q + ((sideUp ? paUp : paDn) ? 20 : 0)
-    q := q + ((sideUp ? atZoneUp : atZoneDn) ? 20 : 0)
-    q := q + ((sideUp ? (bosUp or chochUp or spring or sweepUp) : (bosDn or chochDn or upthrust or sweepDn)) ? 20 : 0)
-    q := q + ((sideUp ? momUp : momDn) ? 20 : 0)
-    q
-qUp = f_q(true)
-qDn = f_q(false)
-
-// ------------------------------------- مصفوفة الفريمات الخمسة (عرض فقط)
+// ------------------------------------- مصفوفة الفريمات الخمسة
 f_dir() =>
     eF = ta.ema(close, 9)
     eS = ta.ema(close, 21)
@@ -180,6 +170,64 @@ d03 = request.security(syminfo.tickerid, "3",  f_dir(), lookahead=barmerge.looka
 d05 = request.security(syminfo.tickerid, "5",  f_dir(), lookahead=barmerge.lookahead_off)
 d15 = request.security(syminfo.tickerid, "15", f_dir(), lookahead=barmerge.lookahead_off)
 d60 = request.security(syminfo.tickerid, "60", f_dir(), lookahead=barmerge.lookahead_off)
+
+// ------------------------------------------------- ميل السوق القائد (bias)
+// إجماع 5د/15د/60د + ميل السحابة. اثنان فأكثر في جهة = هذه جهة اليوم.
+biasSum = (d05 > 0 ? 1 : d05 < 0 ? -1 : 0) + (d15 > 0 ? 1 : d15 < 0 ? -1 : 0) +
+     (d60 > 0 ? 1 : d60 < 0 ? -1 : 0) + cloudDir
+bias = biasSum >= 2 ? 1 : biasSum <= -2 ? -1 : 0
+
+// ----------------------------------------- محرك الاستمرار: ارتداد ثم استئناف
+// هذا هو مصدر الدخول اليومي: في اتجاه واضح، السعر يرجع للسحابة/EMA9
+// (تصحيح)، ثم أول شمعة تستأنف الاتجاه هي الدخول. يتكرر عدة مرات كل يوم.
+ema9 = ta.ema(close, 9)
+pbUp = math.max(cloudFast, ema9)
+pbDn = math.min(cloudFast, ema9)
+var bool armUp = false
+var bool armDn = false
+if bias > 0 and low <= pbUp + 0.20 * atr
+    armUp := true
+    armDn := false
+if bias < 0 and high >= pbDn - 0.20 * atr
+    armDn := true
+    armUp := false
+if bias <= 0
+    armUp := false
+if bias >= 0
+    armDn := false
+contUp = armUp and close > open and close > high[1] and close > cloudFast and body > 0.25 * atr
+contDn = armDn and close < open and close < low[1] and close < cloudFast and body > 0.25 * atr
+if contUp
+    armUp := false
+if contDn
+    armDn := false
+
+// --------------------------------------------- سكور الجودة 0–100 (خمسة أخماس)
+// خمسة أسئلة: هل الفريمات معي؟ هل هناك حجم؟ هل هناك نموذج/شرارة؟
+// هل أنا عند منطقة أو مع السحابة؟ هل الزخم معي؟
+f_q(sideUp) =>
+    q = 0
+    q := q + ((sideUp ? bias > 0 : bias < 0) ? 20 : 0)
+    q := q + ((volSpike or absorption) ? 20 : 0)
+    q := q + ((sideUp ? (paUp or contUp or spring or sweepUp) : (paDn or contDn or upthrust or sweepDn)) ? 20 : 0)
+    q := q + ((sideUp ? (atZoneUp or cloudDir > 0) : (atZoneDn or cloudDir < 0)) ? 20 : 0)
+    q := q + ((sideUp ? momUp : momDn) ? 20 : 0)
+    q
+qUp = f_q(true)
+qDn = f_q(false)
+lead      = qUp >= qDn ? 1 : -1
+leadScore = math.max(qUp, qDn)
+
+// ------------------------------- تشخيص السكون: ما الذي ينقص للدخول الآن؟
+// أهم سطر في اللوحة — يمنع أن يكون صمت المؤشر لغزاً
+f_miss(sideUp) =>
+    m = ""
+    m := m + ((sideUp ? bias > 0 : bias < 0) ? "" : "فريمات · ")
+    m := m + ((volSpike or absorption) ? "" : "حجم · ")
+    m := m + ((sideUp ? (paUp or contUp or spring or sweepUp) : (paDn or contDn or upthrust or sweepDn)) ? "" : "نموذج · ")
+    m := m + ((sideUp ? (atZoneUp or cloudDir > 0) : (atZoneDn or cloudDir < 0)) ? "" : "منطقة · ")
+    m := m + ((sideUp ? momUp : momDn) ? "" : "زخم")
+    m
 
 // ------------------------------------------------------------- حالة الصفقة
 var bool  inTrade = false
@@ -212,27 +260,35 @@ var int   btPutTot  = 0
 var int   btPutWin  = 0
 var float btGross = 0.0
 var float btLoss  = 0.0
+var int tradesToday = 0
+if ta.change(time("D")) != 0
+    tradesToday := 0
 f_side(d) => d > 0 ? "كول" : "بوت"
 
 // ------------------------------------------------------------------- الدخول
 // الشرارة: سبرينق / أبثراست / مسح سيولة / CHoCH مبكر عند منطقة قرار
-trigUp = spring or (sweepUp and atZoneUp) or (chochUp and atZoneUp) or (bosUp and atZoneUp and volSpike)
-trigDn = upthrust or (sweepDn and atZoneDn) or (chochDn and atZoneDn) or (bosDn and atZoneDn and volSpike)
-canEnter = barstate.isconfirmed and not inTrade and (bar_index - lastExit) > coolN and bar_index > 60
-// وضع الجودة: لا دخول داخل السحابة، ولا ضد ميلها، ولا في سوق بلا قوة اتجاه
-qGateUp = not qualityMode or (not inCloud and cloudDir >= 0 and adx >= adxMin)
-qGateDn = not qualityMode or (not inCloud and cloudDir <= 0 and adx >= adxMin)
+trigUp = contUp or spring or sweepUp or chochUp or (bosUp and (volSpike or bias > 0))
+trigDn = contDn or upthrust or sweepDn or chochDn or (bosDn and (volSpike or bias < 0))
+// شخصية المؤشر: هادئ = أقل صفقات وأنقى · نشط = دخول يومي أكثر
+minQeff = math.max(0, math.min(100, minQ + (aggro == "هادئ" ? 20 : aggro == "نشط" ? -20 : 0)))
+coolEff = aggro == "هادئ" ? coolN * 2 : aggro == "نشط" ? math.max(1, coolN / 2) : coolN
+canEnter = barstate.isconfirmed and not inTrade and (bar_index - lastExit) > coolEff and bar_index > 60
+// وضع الجودة: يمنع الدخول العشوائي في سوق ميت — ولا يمنع الاستمرار مع
+// اتجاه واضح ولا الارتداد من منطقة قرار كبرى
+qGateUp = not qualityMode or contUp or atZoneUp or (adx >= adxMin and cloudDir >= 0)
+qGateDn = not qualityMode or contDn or atZoneDn or (adx >= adxMin and cloudDir <= 0)
 // وضع الانعكاس: دخول عكسي عند التشبع الحاد مع دليل امتصاص أو مسح سيولة
-revUp = reversalMode and rsi <= revLo and (spring or sweepUp or bullPin) and qUp >= minQ - 20
-revDn = reversalMode and rsi >= revHi and (upthrust or sweepDn or bearPin) and qDn >= minQ - 20
-longSig  = canEnter and ((trigUp and qUp >= minQ and qGateUp) or revUp)
-shortSig = canEnter and not longSig and ((trigDn and qDn >= minQ and qGateDn) or revDn)
+revUp = reversalMode and rsi <= revLo and (spring or sweepUp or bullPin) and qUp >= minQeff - 20
+revDn = reversalMode and rsi >= revHi and (upthrust or sweepDn or bearPin) and qDn >= minQeff - 20
+longSig  = canEnter and ((trigUp and qUp >= minQeff and qGateUp) or revUp)
+shortSig = canEnter and not longSig and ((trigDn and qDn >= minQeff and qGateDn) or revDn)
 sigDir = longSig ? 1 : shortSig ? -1 : 0
-sigWhy = longSig ? (revUp and not trigUp ? "انعكاس من تشبع بيعي حاد" : spring ? "سبرينق وايكوف على الدعم" : chochUp ? "انقلاب طابع CHoCH عند منطقة قرار" : sweepUp ? "مسح سيولة تحت قاع متأرجح" : "كسر بنية BOS بحجم عند منطقة") :
-     shortSig ? (revDn and not trigDn ? "انعكاس من تشبع شرائي حاد" : upthrust ? "أبثراست وايكوف على المقاومة" : chochDn ? "انقلاب طابع CHoCH عند منطقة قرار" : sweepDn ? "مسح سيولة فوق قمة متأرجحة" : "كسر بنية BOS بحجم عند منطقة") : ""
+sigWhy = longSig ? (revUp and not trigUp ? "انعكاس من تشبع بيعي حاد" : contUp ? "استئناف بعد تصحيح مع الاتجاه" : spring ? "سبرينق وايكوف على الدعم" : chochUp ? "انقلاب طابع CHoCH" : sweepUp ? "مسح سيولة تحت قاع متأرجح" : "كسر بنية BOS") :
+     shortSig ? (revDn and not trigDn ? "انعكاس من تشبع شرائي حاد" : contDn ? "استئناف بعد تصحيح مع الاتجاه" : upthrust ? "أبثراست وايكوف على المقاومة" : chochDn ? "انقلاب طابع CHoCH" : sweepDn ? "مسح سيولة فوق قمة متأرجحة" : "كسر بنية BOS") : ""
 
 if sigDir != 0
     inTrade := true
+    tradesToday += 1
     entryBar := bar_index
     tDir   := sigDir
     entryP := close
@@ -365,7 +421,7 @@ if barstate.islast
     tot = winsAll + lossAll
     wr  = tot > 0 ? 100.0 * winsAll / tot : 0.0
     guide = inTrade ? (h2 ? "💰 مؤمّنة — احجز جزءاً ودع الباقي يجري" : h1 ? "🏃 تجري خلف الوقف المتحرك — لا تستعجل" : "✊ امسك — الخسارة محدودة بـ 1R") :
-         q >= minQ and (trigUp or trigDn) ? "⚡ ادخل الآن" : q >= minQ ? "👀 جاهز — بانتظار الشرارة" : "⏸ انتظر"
+         q >= minQeff and (trigUp or trigDn) ? "⚡ ادخل الآن" : q >= minQeff ? "👀 جاهز — بانتظار الشرارة" : "⏸ انتظر"
     table.cell(dash, 0, 0, "مرصاد VIP", text_color=cGold, bgcolor=cHead, text_size=size.small)
     table.cell(dash, 1, 0, syminfo.ticker, text_color=cTxt, bgcolor=cHead, text_size=size.small)
     table.cell(dash, 2, 0, "", bgcolor=cHead)
@@ -418,6 +474,19 @@ if barstate.islast
     table.cell(dash, 3, 7, "", text_size=size.tiny)
     table.cell(dash, 4, 7, "المنطقة", text_color=cMut, text_size=size.tiny)
     table.cell(dash, 5, 7, inFib ? "فيبو ذهبية" : nearSup ? "على الدعم" : nearRes ? "على المقاومة" : "—", text_color=inFib ? cGold : cTxt, text_size=size.small)
+    // لماذا لا توجد إشارة الآن؟ الجواب صريح بدل الصمت
+    blockedByGate = qualityMode and (lead > 0 ? not qGateUp : not qGateDn)
+    whyIdle = inTrade ? "صفقة قائمة — لا دخول جديد" :
+         (bar_index - lastExit) <= coolEff ? "راحة بعد الصفقة السابقة" :
+         leadScore < minQeff ? "ينقص: " + f_miss(lead > 0) :
+         blockedByGate ? "سوق بلا قوة اتجاه (ADX " + str.tostring(adx, "#") + ") وبعيد عن المناطق" :
+         (lead > 0 ? not trigUp : not trigDn) ? "الإجماع جاهز — بانتظار الشرارة" : "جاهز للدخول"
+    table.cell(dash, 0, 8, "لماذا لا إشارة؟", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 8, whyIdle, text_color=cYel, text_size=size.small)
+    table.cell(dash, 2, 8, "", text_size=size.tiny)
+    table.cell(dash, 3, 8, "", text_size=size.tiny)
+    table.cell(dash, 4, 8, "صفقات اليوم", text_color=cMut, text_size=size.tiny)
+    table.cell(dash, 5, 8, str.tostring(tradesToday) + " · " + aggro, text_color=cTxt, text_size=size.small)
 
 // -------------------------------------------------- جدول الاختبار الحي
 // أداء المحرك على هذا الشارت خلال نافذة الأيام المختارة: صفقات، نسبة
