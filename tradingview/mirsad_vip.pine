@@ -55,6 +55,10 @@ maxChase  = input.float(0.5, "أقصى مطاردة مسموحة (ATR)", minval=
 // المسافة من الصفر تصير قسمة النتيجة عليها بلا معنى: صفقة تافهة تُسجَّل
 // بمئة R وتفسد كل متوسط بعدها. لا صفقة بمخاطرة أقل من هذا الحد.
 minRiskX  = input.float(0.5, "أدنى مسافة وقف (ATR)", minval=0.2, maxval=2.0, step=0.1, group=grpE)
+// الصفقة اليومية لا تُترك للّيل. العقد الذي يقترحه المؤشر ينتهي اليوم أو
+// هذا الأسبوع، والسعر يقفز بين الإغلاق والافتتاح قفزة لا وقف يحميها —
+// هكذا تولد خسارة بعشرين ضعف المخاطرة من صفقة كانت مضبوطة.
+flatEod = input.bool(true, "أغلق كل شيء قبل نهاية الجلسة", group=grpE)
 grpM = "إدارة الصفقة"
 tp1x = input.float(0.8, "TP1 (ATR)", minval=0.3, maxval=2.0, step=0.1, group=grpM)
 tp2x = input.float(1.5, "TP2 (ATR)", minval=0.8, maxval=3.0, step=0.1, group=grpM)
@@ -358,6 +362,8 @@ if sigDir != 0
              " | صالح " + str.tostring(pExpire) + " شموع | السبب: " + pWhy, alert.freq_once_per_bar)
 
 // ٢) التنفيذ يقع على شمعة لاحقة بسعر يمكن الحصول عليه فعلاً
+// آخر شمعة في الجلسة النظامية: بعدها فجوة لا وقف فيها
+eodNow = flatEod and timeframe.isintraday and session.islastbar_regular
 fillNow = false
 float fillP = na
 int   fDir  = 0
@@ -373,7 +379,7 @@ if pDir != 0 and not inTrade and barstate.isconfirmed and bar_index > pBar
             fillP := open
     if fillNow
         fDir := pDir
-    else if bar_index - pBar >= pExpire or (pDir > 0 ? close < pPlanStop : close > pPlanStop)
+    else if bar_index - pBar >= pExpire or (pDir > 0 ? close < pPlanStop : close > pPlanStop) or eodNow
         missedCnt += 1
         missedToday += 1
         pDir := 0
@@ -443,10 +449,13 @@ if inTrade and barstate.isconfirmed and bar_index >= entryBar
     line.set_y2(lnStop, stopP)
     hardStop = not h1 and (tDir > 0 ? low <= stop0 : high >= stop0)
     softStop = h1 and (tDir > 0 ? close < stopP : close > stopP)
-    if hardStop or softStop
+    if hardStop or softStop or eodNow
         slHit := true
         risk  = math.abs(entryP - stop0)
-        exitP = hardStop ? stop0 : close
+        // إن فتحت الشمعة قافزة خلف الوقف فالتنفيذ عند الافتتاح لا عند الوقف:
+        // الوقف وعد بسعر، والفجوة تنقضه، وتسجيله كأنه نُفّذ كذب مريح
+        gapped = tDir > 0 ? open < stop0 : open > stop0
+        exitP = hardStop ? (gapped ? open : stop0) : close
         rGross = risk > 0 ? (tDir > 0 ? exitP - entryP : entryP - exitP) / risk : 0.0
         // كل ما يُعدّ بعد هذا السطر صافٍ: تكلفة العقد مطروحة. صفقة تخرج
         // عند سعر دخولها ليست تعادلاً — هي خسارة بمقدار فرق السعر.
@@ -482,7 +491,7 @@ if inTrade and barstate.isconfirmed and bar_index >= entryBar
              style=tDir > 0 ? label.style_label_up : label.style_label_down,
              color=win ? color.new(cUp, 20) : color.new(cDn, 10),
              textcolor=win ? #04211D : #2B0606, size=size.normal)
-        alert((win ? "✅" : "🔴") + " خروج — كسر الوقف المتحرك | " + syminfo.ticker +
+        alert((win ? "✅" : "🔴") + " خروج — " + (eodNow and not hardStop and not softStop ? "إغلاق الجلسة" : "كسر الوقف المتحرك") + " | " + syminfo.ticker +
              " | النتيجة " + (win ? "+" : "") + str.tostring(rMult, "#.#") + "R", alert.freq_once_per_bar)
         inTrade := false
         lastExit := bar_index
