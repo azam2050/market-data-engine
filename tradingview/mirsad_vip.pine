@@ -41,6 +41,10 @@ cloudSlowLen = input.int(55, "السحابة البطيئة (EMA)", minval=20, m
 showCloud    = input.bool(true, "إظهار السحابة", group=grpC)
 grpB = "الاختبار الحي"
 btDays  = input.int(30, "احسب الأداء على آخر (يوم)", minval=1, maxval=365, group=grpB)
+// كل حساب هنا على سعر السهم. لكنك تشتري عقداً، وللعقد فرق بين البيع
+// والشراء يُدفع مرتين — عند الدخول وعند الخروج. من لا يطرحه من نتيجته
+// يقرأ أرباحاً لم تدخل جيبه. هذا الرقم يُطرح من كل صفقة قبل عدّها.
+costR   = input.float(0.15, "تكلفة العقد ذهاباً وإياباً (R)", minval=0.0, maxval=0.6, step=0.05, group=grpB)
 btPosS  = input.string("أسفل يمين", "مكان جدول الاختبار", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpB)
 grpE = "طريقة الدخول"
 entryMode = input.string("حد — انتظر ارتداد", "أسلوب التنفيذ", options=["حد — انتظر ارتداد", "سوق — افتتاح الشمعة التالية"], group=grpE)
@@ -278,6 +282,12 @@ var int   btPutTot  = 0
 var int   btPutWin  = 0
 var float btGross = 0.0
 var float btLoss  = 0.0
+// الصدق يكتمل بثلاثة أرقام كان ينقصها: المحصلة الكلية بعد التكلفة،
+// وأطول سلسلة خسائر متتالية (هي التي تكسر المتداول لا المتوسط)،
+// والمتوسط الخام لمقارنته بالصافي فيظهر حجم ما يأكله فرق السعر
+var float sumRnet = 0.0
+var int   lossRun = 0
+var int   maxLossRun = 0
 var int tradesToday = 0
 var int missedToday = 0
 if ta.change(time("D")) != 0
@@ -427,14 +437,20 @@ if inTrade and barstate.isconfirmed and bar_index >= entryBar
         slHit := true
         risk  = math.abs(entryP - stop0)
         exitP = hardStop ? stop0 : close
-        rMult = risk > 0 ? (tDir > 0 ? exitP - entryP : entryP - exitP) / risk : 0.0
+        rGross = risk > 0 ? (tDir > 0 ? exitP - entryP : entryP - exitP) / risk : 0.0
+        // كل ما يُعدّ بعد هذا السطر صافٍ: تكلفة العقد مطروحة. صفقة تخرج
+        // عند سعر دخولها ليست تعادلاً — هي خسارة بمقدار فرق السعر.
+        rMult = rGross - costR
         win   = rMult > 0
         array.unshift(resArr, win ? 1 : 0)
         if array.size(resArr) > 20
             array.pop(resArr)
         winsAll += win ? 1 : 0
         lossAll += win ? 0 : 1
-        sumR    += rMult
+        sumR    += rGross
+        sumRnet += rMult
+        lossRun := win ? 0 : lossRun + 1
+        maxLossRun := math.max(maxLossRun, lossRun)
         if time >= timenow - btDays * 86400000.0
             btTot += 1
             btWin += win ? 1 : 0
@@ -614,9 +630,12 @@ if barstate.islast and showWatch
     f_wRow(5, w5s, w5t, s5d, s5q, s5p, s5a, s5n, s5c)
 
 // -------------------------------------------------- جدول الاختبار الحي
-// أداء المحرك على هذا الشارت خلال نافذة الأيام المختارة: صفقات، نسبة
-// نجاح، نجاح الكول، نجاح البوت، وعامل الربح (الأرباح ÷ الخسائر).
-var table bt = table.new(f_pos(btPosS), 2, 8, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+// أداء المحرك على هذا الشارت. الأرقام كلها صافية بعد تكلفة العقد.
+// ثلاثة أسطر تُقال هنا ولا تُقال في لوحات غيرنا: المحصلة الكلية بالـ R،
+// وأطول سلسلة خسائر متتالية، وحجم ما أكلته تكلفة العقد من المتوسط الخام.
+// وحين تكون العينة أصغر من ثلاثين صفقة يُقال ذلك صراحة بدل تركها تُقرأ
+// كأنها حقيقة مستقرة.
+var table bt = table.new(f_pos(btPosS), 2, 11, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
 f_wrCol(v) => v >= 60 ? cUp : v >= 45 ? cYel : cDn
 if barstate.islast
     btWr  = btTot > 0 ? 100.0 * btWin / btTot : 0.0
@@ -627,18 +646,34 @@ if barstate.islast
     table.cell(bt, 0, 0, "الاختبار الحي", text_color=cGold, bgcolor=cHead, text_size=size.small)
     table.cell(bt, 1, 0, "آخر " + str.tostring(btDays) + " يوم", text_color=cTxt, bgcolor=cHead, text_size=size.small)
     table.cell(bt, 0, 1, "عدد الصفقات", text_color=cMut, text_size=size.small)
-    table.cell(bt, 1, 1, str.tostring(btTot), text_color=cTxt, text_size=size.small)
+    table.cell(bt, 1, 1, str.tostring(btTot) + (btTot < 30 ? "  عينة صغيرة ⚠" : ""),
+         text_color=btTot < 30 ? cYel : cTxt, text_size=size.small)
     table.cell(bt, 0, 2, "نسبة النجاح", text_color=cMut, text_size=size.small)
     table.cell(bt, 1, 2, btTot > 0 ? str.tostring(btWr, "#.#") + "%" : "—", text_color=f_wrCol(btWr), text_size=size.small)
     table.cell(bt, 0, 3, "نجاح الكول", text_color=cMut, text_size=size.small)
     table.cell(bt, 1, 3, btCallTot > 0 ? str.tostring(btCwr, "#") + "% (" + str.tostring(btCallTot) + ")" : "—", text_color=f_wrCol(btCwr), text_size=size.small)
     table.cell(bt, 0, 4, "نجاح البوت", text_color=cMut, text_size=size.small)
     table.cell(bt, 1, 4, btPutTot > 0 ? str.tostring(btPwr, "#") + "% (" + str.tostring(btPutTot) + ")" : "—", text_color=f_wrCol(btPwr), text_size=size.small)
+    // عامل ربح مبني على أقل من ثلاثين صفقة رقم لا يُبنى عليه قرار
     table.cell(bt, 0, 5, "عامل الربح", text_color=cMut, text_size=size.small)
-    table.cell(bt, 1, 5, btTot > 0 ? str.tostring(btPf, "#.##") : "—", text_color=btPf >= 1.5 ? cUp : btPf >= 1.0 ? cYel : cDn, text_size=size.small)
-    table.cell(bt, 0, 6, "متوسط الصفقة", text_color=cMut, text_size=size.small)
-    table.cell(bt, 1, 6, totAll > 0 ? (sumR / totAll >= 0 ? "+" : "") + str.tostring(sumR / totAll, "#.##") + "R" : "—", text_color=totAll > 0 and sumR / totAll > 0 ? cUp : cDn, text_size=size.small)
+    table.cell(bt, 1, 5, btTot == 0 ? "—" : btTot < 30 ? str.tostring(btPf, "#.##") + " (لا يُعتمد)" : str.tostring(btPf, "#.##"),
+         text_color=btTot < 30 ? cMut : btPf >= 1.5 ? cUp : btPf >= 1.0 ? cYel : cDn, text_size=size.small)
+    avgGross = totAll > 0 ? sumR / totAll : 0.0
+    avgNet   = totAll > 0 ? sumRnet / totAll : 0.0
+    table.cell(bt, 0, 6, "متوسط خام", text_color=cMut, text_size=size.small)
+    table.cell(bt, 1, 6, totAll > 0 ? (avgGross >= 0 ? "+" : "") + str.tostring(avgGross, "#.##") + "R" : "—", text_color=cMut, text_size=size.small)
+    // الرقم الذي يقرر: المتوسط بعد أن يأخذ فرق سعر العقد نصيبه
+    table.cell(bt, 0, 7, "متوسط بعد التكلفة", text_color=cTxt, text_size=size.small)
+    table.cell(bt, 1, 7, totAll > 0 ? (avgNet >= 0 ? "+" : "") + str.tostring(avgNet, "#.##") + "R" : "—",
+         text_color=avgNet > 0 ? cUp : cDn, bgcolor=color.new(avgNet > 0 ? cUp : cDn, 85), text_size=size.normal)
+    table.cell(bt, 0, 8, "المحصلة الكلية", text_color=cMut, text_size=size.small)
+    table.cell(bt, 1, 8, totAll > 0 ? (sumRnet >= 0 ? "+" : "") + str.tostring(sumRnet, "#.#") + "R (" + str.tostring(totAll) + " صفقة)" : "—",
+         text_color=sumRnet > 0 ? cUp : cDn, text_size=size.small)
+    // ما يكسر المتداول ليس المتوسط بل أطول صف خسائر يمر به وهو صابر
+    table.cell(bt, 0, 9, "أطول سلسلة خسائر", text_color=cMut, text_size=size.small)
+    table.cell(bt, 1, 9, totAll > 0 ? str.tostring(maxLossRun) + " متتالية" : "—",
+         text_color=maxLossRun >= 8 ? cDn : maxLossRun >= 5 ? cYel : cTxt, text_size=size.small)
     // كم أمراً معلقاً نُفّذ فعلاً مقابل ما أُلغي — يضبط عمق الارتداد المطلوب
     fillRate = (totAll + missedCnt) > 0 ? 100.0 * totAll / (totAll + missedCnt) : 0.0
-    table.cell(bt, 0, 7, "نُفّذ / ألغي", text_color=cMut, text_size=size.small)
-    table.cell(bt, 1, 7, str.tostring(totAll) + " / " + str.tostring(missedCnt) + " · " + str.tostring(fillRate, "#") + "%", text_color=fillRate >= 40 ? cUp : fillRate >= 20 ? cYel : cDn, text_size=size.small)
+    table.cell(bt, 0, 10, "نُفّذ / ألغي", text_color=cMut, text_size=size.small)
+    table.cell(bt, 1, 10, str.tostring(totAll) + " / " + str.tostring(missedCnt) + " · " + str.tostring(fillRate, "#") + "%", text_color=fillRate >= 40 ? cUp : fillRate >= 20 ? cYel : cDn, text_size=size.small)
