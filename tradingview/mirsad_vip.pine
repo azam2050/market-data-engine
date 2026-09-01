@@ -31,13 +31,22 @@ profSel = input.string("تلقائي", "الشخصية", options=["تلقائي"
 
 gQ = "عقل الجودة"
 aggro   = input.string("متوازن", "حدة الدخول", options=["هادئ", "متوازن", "نشط"], group=gQ)
-minQ    = input.int(40, "أدنى سكور جودة", minval=0, maxval=100, group=gQ)
+minQ    = input.int(60, "أدنى سكور جودة", minval=0, maxval=100, group=gQ)
+// أقوى فلتر منفرد في التداول اليومي: لا تشترِ في ساعة هابطة ولا تبِع في
+// ساعة صاعدة. يقتل ثلث الصفقات، وأغلبها كان خاسراً.
+h1Veto  = input.bool(true, "لا دخول ضد اتجاه الساعة", group=gQ)
 volX    = input.float(1.2, "مضاعف الحجم المؤسسي", minval=1.0, maxval=3.0, step=0.1, group=gQ)
 adxMin  = input.int(18, "أدنى قوة اتجاه ADX", minval=10, maxval=40, group=gQ)
 qualityMode = input.bool(true, "امنع الدخول في سوق ميت", group=gQ)
+// ما يُنهي صبر المشترك ليس المتوسط بل صفّ الخسائر. أطول صف في سجلك اثنتا
+// عشرة صفقة — يومٌ كهذا يُقفل ولا يُكمَل.
+maxLossDay = input.int(3, "أوقف اليوم بعد خسائر متتالية", minval=0, maxval=10, group=gQ)
 
 gE = "طريقة الدخول"
-useBracket = input.bool(true, "أمران معاً: حد للارتداد واختراق للاندفاع", group=gE, tooltip="أطفئه لتعود لأمر الحد وحده — وقارن الجدولين")
+// أمر الاختراق يُوضع فقط حين يكون الاندفاع حقيقياً. وضعه دائماً يلغي وظيفة
+// الحدّ في الرفض، فيدخل كل ما كان يُرفض بحق — وهذا ما أنزل المتوسط إلى الصفر.
+useBracket = input.bool(true, "أضف أمر اختراق عند الاندفاع القوي فقط", group=gE)
+impMin     = input.float(3.4, "عتبة الاندفاع لفتح باب الاختراق", minval=2.5, maxval=5.0, step=0.1, group=gE)
 retrX      = input.float(0.5, "عمق الارتداد (من مدى شمعة الشرارة)", minval=0.1, maxval=0.9, step=0.05, group=gE)
 brkX       = input.float(0.10, "مسافة أمر الاختراق (ATR)", minval=0.02, maxval=0.5, step=0.02, group=gE)
 pExpire    = input.int(3, "صلاحية الأمرين (شموع)", minval=1, maxval=12, group=gE)
@@ -102,6 +111,9 @@ trailX = prof == "حارق" ? 0.8 : prof == "سريع" ? 1.2 : prof == "نصف �
 // الحارق يخرج كاملاً عند الهدف الثاني: لا وقت لمطاردة أهداف بعيدة
 maxT  = prof == "حارق" ? 2 : prof == "سريع" ? 3 : 4
 coolN = prof == "حارق" ? 3 : prof == "سريع" ? 6 : prof == "نصف يوم" ? 6 : 8
+// العقد يفقد قيمته بمرور الوقت وحده. صفقة لم تصل هدفها الأول خلال هذه المدة
+// ليست صفقة بطيئة — هي صفقة ميتة تنزف قيمة زمنية، والخروج منها ربح.
+timeStop = prof == "حارق" ? 6 : prof == "سريع" ? 10 : prof == "نصف يوم" ? 12 : prof == "يوم" ? 14 : 20
 
 // ============================ حسابات أساسية =================================
 atr   = ta.atr(14)
@@ -311,7 +323,7 @@ gapRisk = isFund and lateSession
 impulse = (body / math.max(atr, syminfo.mintick)) +
      (hasVol ? math.min(2.0, volume / math.max(volMA, 1)) : 1.0) +
      (adx >= 25 and adx > adx[1] ? 1.0 : 0.0)
-strongImp = impulse >= 3.4
+strongImp = impulse >= impMin
 
 // ============================ حالة الصفقة ==================================
 var bool  inTrade = false
@@ -345,10 +357,12 @@ var float btGross = 0.0
 var float btLoss  = 0.0
 var int   tradesToday = 0
 var int   missedToday = 0
+var int   lossRunDay  = 0
 var int   missedCnt   = 0
 if ta.change(time("D")) != 0
     tradesToday := 0
     missedToday := 0
+    lossRunDay  := 0
 f_side(d) => d > 0 ? "كول" : "بوت"
 
 // ============================ الأمران المعلقان ==============================
@@ -368,9 +382,10 @@ minQeff = math.max(0, math.min(100, minQ + (aggro == "هادئ" ? 20 : aggro == 
 coolEff = aggro == "هادئ" ? coolN * 2 : aggro == "نشط" ? math.max(1, coolN / 2) : coolN
 qGateUp = not qualityMode or contUp or atZoneUp or (adx >= adxMin and cloudDir >= 0)
 qGateDn = not qualityMode or contDn or atZoneDn or (adx >= adxMin and cloudDir <= 0)
-canEnter = barstate.isconfirmed and not inTrade and pDir == 0 and (bar_index - lastExit) > coolEff and bar_index > 60
-longSig  = canEnter and trigUp and qUp >= minQeff and qGateUp
-shortSig = canEnter and not longSig and trigDn and qDn >= minQeff and qGateDn
+dayOpen = maxLossDay == 0 or lossRunDay < maxLossDay
+canEnter = barstate.isconfirmed and not inTrade and pDir == 0 and dayOpen and (bar_index - lastExit) > coolEff and bar_index > 60
+longSig  = canEnter and trigUp and qUp >= minQeff and qGateUp and (not h1Veto or d60 >= 0)
+shortSig = canEnter and not longSig and trigDn and qDn >= minQeff and qGateDn and (not h1Veto or d60 <= 0)
 sigDir = longSig ? 1 : shortSig ? -1 : 0
 sigWhy = sigDir == 0 ? "" :
      (sigDir > 0 ? (zoneUp ? "كسر منطقة تجميع بحجم" : contUp ? "استئناف بعد تصحيح مع الاتجاه" : spring ? "سبرينق وايكوف على الدعم" : chochUp ? "انقلاب طابع CHoCH" : sweepUp ? "مسح سيولة تحت قاع" : "كسر بنية BOS")
@@ -386,19 +401,19 @@ if sigDir != 0
     dLim = strongImp ? retrX * 0.6 : retrX
     dBrk = strongImp ? brkX * 0.6 : brkX
     pLimit := sigDir > 0 ? high - dLim * rngHL : low + dLim * rngHL
-    pBreak := sigDir > 0 ? high + dBrk * atr : low - dBrk * atr
+    pBreak := strongImp ? (sigDir > 0 ? high + dBrk * atr : low - dBrk * atr) : na
     base = sigDir > 0 ? math.min(low, pLimit) : math.max(high, pLimit)
     pStop := sigDir > 0 ? base - stopX * atr : base + stopX * atr
     if showPlan
         lnLim := line.new(bar_index, pLimit, bar_index + pExpire, pLimit, color=color.new(cYel, 20), style=line.style_dashed, width=1)
-        lnBrk := useBracket ? line.new(bar_index, pBreak, bar_index + pExpire, pBreak, color=color.new(cCyan, 30), style=line.style_dotted, width=1) : na
+        lnBrk := useBracket and not na(pBreak) ? line.new(bar_index, pBreak, bar_index + pExpire, pBreak, color=color.new(cCyan, 30), style=line.style_dotted, width=1) : na
     label.new(bar_index, sigDir > 0 ? low : high,
-         "⏳ " + f_side(sigDir) + (useBracket ? "  حد " + str.tostring(pLimit, format.mintick) + " · اختراق " + str.tostring(pBreak, format.mintick) : "  حد " + str.tostring(pLimit, format.mintick)),
+         "⏳ " + f_side(sigDir) + "  حد " + str.tostring(pLimit, format.mintick) + (useBracket and not na(pBreak) ? " · اختراق " + str.tostring(pBreak, format.mintick) : ""),
          style=sigDir > 0 ? label.style_label_up : label.style_label_down,
          color=color.new(cYel, 25), textcolor=#20180A, size=size.small)
     alert("⏳ أمر معلق " + f_side(sigDir) + " | " + syminfo.ticker + " فريم " + timeframe.period +
          " | حد " + str.tostring(pLimit, format.mintick) +
-         (useBracket ? " | اختراق " + str.tostring(pBreak, format.mintick) : "") +
+         (useBracket and not na(pBreak) ? " | اختراق " + str.tostring(pBreak, format.mintick) : "") +
          " | وقف " + str.tostring(pStop, format.mintick) +
          " | " + (strongImp ? "زخم عالٍ" : "سوق هادئ") + " | السبب: " + pWhy, alert.freq_once_per_bar)
 
@@ -486,8 +501,10 @@ if inTrade and barstate.isconfirmed and bar_index >= entryBar
     line.set_y2(lnStop, stopP)
     hardStop = hits < 1 and (tDir > 0 ? low <= stop0 : high >= stop0)
     softStop = hits >= 1 and (tDir > 0 ? close < stopP : close > stopP)
-    doneT   = hits >= maxT
-    if hardStop or softStop or doneT or mustFlat
+    doneT    = hits >= maxT
+    // لم تبلغ هدفها الأول في وقتها: العقد ينزف قيمة زمنية بلا حركة تعوّضها
+    deadTime = hits < 1 and (bar_index - entryBar) >= timeStop
+    if hardStop or softStop or doneT or mustFlat or deadTime
         slHit := true
         risk  = math.abs(entryP - stop0)
         gapped = tDir > 0 ? open < stop0 : open > stop0
@@ -522,7 +539,8 @@ if inTrade and barstate.isconfirmed and bar_index >= entryBar
              style=tDir > 0 ? label.style_label_up : label.style_label_down,
              color=win ? color.new(cUp, 20) : color.new(cDn, 10),
              textcolor=win ? #04211D : #2B0606, size=size.normal)
-        alert((win ? "✅" : "🔴") + " خروج — " + (mustFlat ? "إغلاق عقد اليوم" : doneT ? "الهدف الأخير" : "الوقف") +
+        lossRunDay := win ? 0 : lossRunDay + 1
+        alert((win ? "✅" : "🔴") + " خروج — " + (mustFlat ? "إغلاق عقد اليوم" : doneT ? "الهدف الأخير" : deadTime ? "انتهاء المهلة" : "الوقف") +
              " | " + syminfo.ticker + " | النتيجة " + (win ? "+" : "") + str.tostring(rMult, "#.#") + "R", alert.freq_once_per_bar)
         inTrade := false
         lastExit := bar_index
@@ -684,7 +702,8 @@ if barstate.islast
     qCol = q >= 80 ? cUp : q >= 60 ? cYel : cDn
     sCol = inTrade ? (tDir > 0 ? cUp : cDn) : pDir != 0 ? cYel : liveDir > 0 ? cUp : cDn
     blocked = qualityMode and (lead > 0 ? not qGateUp : not qGateDn)
-    action = inTrade ? (hits >= 2 ? "💰 مؤمّنة — احجز جزءاً ودع الباقي" : hits >= 1 ? "🏃 تجري خلف الوقف" : "✊ امسك — خسارتك محدودة بـ 1R") :
+    action = not dayOpen and not inTrade ? "🛑 توقف اليوم — " + str.tostring(lossRunDay) + " خسائر متتالية" :
+         inTrade ? (hits >= 2 ? "💰 مؤمّنة — احجز جزءاً ودع الباقي" : hits >= 1 ? "🏃 تجري خلف الوقف" : "✊ امسك — خسارتك محدودة بـ 1R") :
          pDir != 0 ? ("⏳ " + (useBracket ? (pStrong ? "زخم — الأرجح اختراق " + str.tostring(pBreak, format.mintick) + " · وحد " + str.tostring(pLimit, format.mintick) : "هادئ — الأرجح حد " + str.tostring(pLimit, format.mintick) + " · واختراق " + str.tostring(pBreak, format.mintick)) : "ضع أمر " + f_side(pDir) + " عند " + str.tostring(pLimit, format.mintick))) :
          earlyTxt != "" ? (earlyTxt + " — ينتظر الإغلاق " + (na(secsLeft) ? "" : str.tostring(math.round(secsLeft)) + "ث")) :
          (bar_index - lastExit) <= coolEff ? "😴 راحة بعد الصفقة السابقة" :
