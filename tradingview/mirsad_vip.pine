@@ -107,9 +107,11 @@ tp2x = prof == "حارق" ? 0.9 : prof == "سريع" ? 1.5 : prof == "نصف ي�
 tp3x = prof == "حارق" ? 1.4 : prof == "سريع" ? 2.5 : prof == "نصف يوم" ? 3.2 : prof == "يوم" ? 4.5 : 6.0
 tp4x = prof == "حارق" ? 2.0 : prof == "سريع" ? 3.5 : prof == "نصف يوم" ? 4.5 : prof == "يوم" ? 6.0 : 8.0
 stopX  = prof == "حارق" ? 0.5 : prof == "سريع" ? 0.7 : prof == "نصف يوم" ? 1.0 : prof == "يوم" ? 1.3 : 1.8
-trailX = prof == "حارق" ? 0.8 : prof == "سريع" ? 1.2 : prof == "نصف يوم" ? 1.6 : prof == "يوم" ? 2.2 : 3.0
+trailX = prof == "حارق" ? 1.2 : prof == "سريع" ? 2.0 : prof == "نصف يوم" ? 2.5 : prof == "يوم" ? 3.0 : 4.0
 // الحارق يخرج كاملاً عند الهدف الثاني: لا وقت لمطاردة أهداف بعيدة
-maxT  = prof == "حارق" ? 2 : prof == "سريع" ? 3 : 4
+// الرابح لا يُقفل بعدد أهداف بل بالوقف المتحرك. الحارق وحده يخرج مبكراً
+// لأن عقده يموت خلال ساعات.
+maxT  = prof == "حارق" ? 2 : 4
 coolN = prof == "حارق" ? 3 : prof == "سريع" ? 6 : prof == "نصف يوم" ? 6 : 8
 // العقد يفقد قيمته بمرور الوقت وحده. صفقة لم تصل هدفها الأول خلال هذه المدة
 // ليست صفقة بطيئة — هي صفقة ميتة تنزف قيمة زمنية، والخروج منها ربح.
@@ -492,11 +494,15 @@ if inTrade and barstate.isconfirmed and bar_index >= entryBar
             hits := 4
             tpHit4 := true
             alert("🔺 الهدف الممتد | " + syminfo.ticker, alert.freq_once_per_bar)
+        // الهدف الأول يؤمّن التكلفة فقط — ولا يُطارَد الوقف بعد بشيء، فالمطاردة
+        // المبكرة هي التي كانت تُخرج صفقة بلغت 2R عند 0.4R
         if hits >= 1
+            be = tDir > 0 ? entryP + costR * math.abs(entryP - stop0) : entryP - costR * math.abs(entryP - stop0)
+            stopP := tDir > 0 ? math.max(stopP, be) : math.min(stopP, be)
+        // ولا يبدأ التتبع إلا بعد الهدف الثاني، وبمسافة تسمح للموجة أن تتنفس
+        if hits >= 2
             chand = tDir > 0 ? close - trailX * atr : close + trailX * atr
             stopP := tDir > 0 ? math.max(stopP, chand) : math.min(stopP, chand)
-        if hits >= 2
-            stopP := tDir > 0 ? math.max(stopP, entryP) : math.min(stopP, entryP)
     line.set_y1(lnStop, stopP)
     line.set_y2(lnStop, stopP)
     hardStop = hits < 1 and (tDir > 0 ? low <= stop0 : high >= stop0)
