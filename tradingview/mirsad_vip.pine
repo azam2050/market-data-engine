@@ -56,6 +56,19 @@ trailX = input.float(1.8, "الوقف المتحرك بعد TP2 (ATR)", minval=1
 coolN  = input.int(6, "شموع انتظار بعد كل صفقة", minval=0, maxval=100, group=grpM)
 grpO = "لوحة العقد"
 optLev  = input.float(10.0, "الرافعة التقديرية (٪ العقد لكل ١٪ سهم)", minval=3, maxval=30, step=1, group=grpO)
+grpW = "شاشة المراقبة — أسماء أخرى بفريم كل واحد"
+showWatch = input.bool(true, "إظهار شاشة المراقبة", group=grpW)
+wPosS = input.string("أسفل يسار", "مكان الشاشة", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpW)
+w1s = input.symbol("NASDAQ:AAPL", "١ الرمز", group=grpW)
+w1t = input.timeframe("60", "١ الفريم", group=grpW)
+w2s = input.symbol("NASDAQ:NVDA", "٢ الرمز", group=grpW)
+w2t = input.timeframe("30", "٢ الفريم", group=grpW)
+w3s = input.symbol("NASDAQ:QQQ", "٣ الرمز", group=grpW)
+w3t = input.timeframe("5", "٣ الفريم", group=grpW)
+w4s = input.symbol("NASDAQ:TSLA", "٤ الرمز", group=grpW)
+w4t = input.timeframe("15", "٤ الفريم", group=grpW)
+w5s = input.symbol("AMEX:SPY", "٥ الرمز", group=grpW)
+w5t = input.timeframe("5", "٥ الفريم", group=grpW)
 grpD = "العرض"
 keepTrail = input.bool(true, "إبقاء آثار الصفقات الماضية (للمراجعة)", group=grpD)
 dashPosS  = input.string("أعلى يمين", "مكان اللوحة", options=["أعلى يمين", "أعلى يسار", "أسفل يمين", "أسفل يسار"], group=grpD)
@@ -479,81 +492,126 @@ f_pos(s) => s == "أعلى يمين" ? position.top_right : s == "أعلى يس�
 f_tfCell(d) => d > 0 ? "▲" : d < 0 ? "▼" : "•"
 f_tfCol(d) => d > 0 ? cUp : d < 0 ? cDn : cMut
 
-var table dash = table.new(f_pos(dashPosS), 6, 9, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+// اسم الفريم بالعربي — يُستعمل في اللوحة وفي شاشة المراقبة
+f_tfName(t) => t == "D" ? "يومي" : t == "W" ? "أسبوعي" : t == "1" ? "1د" : t == "3" ? "3د" :
+     t == "5" ? "5د" : t == "15" ? "15د" : t == "30" ? "30د" : t == "60" ? "1س" :
+     t == "120" ? "2س" : t == "240" ? "4س" : t
+// شريط جودة مرئي بدل رقم جاف
+f_bar(v) =>
+    n = math.round(v / 20.0)
+    s = ""
+    for i = 1 to 5
+        s := s + (i <= n ? "▮" : "▯")
+    s
+// اسم الرمز بلا اسم السوق: NASDAQ:AAPL تصير AAPL
+f_short(s) => str.contains(s, ":") ? array.get(str.split(s, ":"), 1) : s
+
+// لوحة واحدة، سطران في كل صف، وكل سطر يجيب على سؤال واحد
+var table dash = table.new(f_pos(dashPosS), 2, 10, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
 if barstate.islast
     q = math.max(qUp, qDn)
     qCol = q >= 80 ? cUp : q >= 60 ? cYel : cDn
-    sCol = liveDir > 0 ? cUp : cDn
-    tot = winsAll + lossAll
-    wr  = tot > 0 ? 100.0 * winsAll / tot : 0.0
-    guide = inTrade ? (h2 ? "💰 مؤمّنة — احجز جزءاً ودع الباقي يجري" : h1 ? "🏃 تجري خلف الوقف المتحرك — لا تستعجل" : "✊ امسك — الخسارة محدودة بـ 1R") :
-         q >= minQeff and (trigUp or trigDn) ? "⚡ ادخل الآن" : q >= minQeff ? "👀 جاهز — بانتظار الشرارة" : "⏸ انتظر"
-    table.cell(dash, 0, 0, "مرصاد VIP", text_color=cGold, bgcolor=cHead, text_size=size.small)
-    table.cell(dash, 1, 0, syminfo.ticker, text_color=cTxt, bgcolor=cHead, text_size=size.small)
-    table.cell(dash, 2, 0, "", bgcolor=cHead)
-    table.cell(dash, 3, 0, "", bgcolor=cHead)
-    table.cell(dash, 4, 0, "الإشارة", text_color=cMut, bgcolor=cHead, text_size=size.tiny)
-    table.cell(dash, 5, 0, inTrade ? f_side(tDir) : f_side(liveDir), text_color=#0B0E13, bgcolor=sCol, text_size=size.small)
-    table.cell(dash, 0, 1, "سكور الجودة", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 1, str.tostring(q) + "/100", text_color=qCol, bgcolor=color.new(qCol, 85), text_size=size.small)
-    table.cell(dash, 2, 1, "", text_size=size.tiny)
-    table.cell(dash, 3, 1, "", text_size=size.tiny)
-    table.cell(dash, 4, 1, "الإرشاد", text_color=cMut, text_size=size.tiny)
-    table.cell(dash, 5, 1, guide, text_color=cGold, text_size=size.small)
-    table.cell(dash, 0, 2, "العقد المقترح", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 2, syminfo.ticker + " " + str.tostring(optStrk, format.mintick) + (liveDir > 0 ? "C" : "P"), text_color=sCol, text_size=size.small)
-    table.cell(dash, 2, 2, "", text_size=size.tiny)
-    table.cell(dash, 3, 2, "", text_size=size.tiny)
-    table.cell(dash, 4, 2, "الانتهاء", text_color=cMut, text_size=size.tiny)
-    table.cell(dash, 5, 2, isFund ? "اليوم 0DTE" : "جمعة الأسبوع", text_color=cTxt, text_size=size.small)
-    table.cell(dash, 0, 3, "أهداف العقد ≈", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 3, f_pct(oP1), text_color=h1 ? cUp : cGold, text_size=size.small)
-    table.cell(dash, 2, 3, f_pct(oP2), text_color=h2 ? cUp : cGold, text_size=size.small)
-    table.cell(dash, 3, 3, f_pct(oP3), text_color=h3 ? cUp : cGold, text_size=size.small)
-    table.cell(dash, 4, 3, f_pct(oP4), text_color=h4 ? cUp : cGold, text_size=size.small)
-    table.cell(dash, 5, 3, (h1 ? "✓" : "○") + (h2 ? "✓" : "○") + (h3 ? "✓" : "○") + (h4 ? "✓" : "○"), text_color=cUp, text_size=size.small)
-    table.cell(dash, 0, 4, "الفريمات", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 4, "1د " + f_tfCell(d01), text_color=f_tfCol(d01), text_size=size.small)
-    table.cell(dash, 2, 4, "3د " + f_tfCell(d03), text_color=f_tfCol(d03), text_size=size.small)
-    table.cell(dash, 3, 4, "5د " + f_tfCell(d05), text_color=f_tfCol(d05), text_size=size.small)
-    table.cell(dash, 4, 4, "15د " + f_tfCell(d15), text_color=f_tfCol(d15), text_size=size.small)
-    table.cell(dash, 5, 4, "1س " + f_tfCell(d60), text_color=f_tfCol(d60), text_size=size.small)
-    table.cell(dash, 0, 5, "الصفقة", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 5, inTrade ? str.tostring(entryP, format.mintick) : "—", text_color=cTxt, text_size=size.small)
-    table.cell(dash, 2, 5, "", text_size=size.tiny)
-    table.cell(dash, 3, 5, "", text_size=size.tiny)
-    table.cell(dash, 4, 5, "الوقف", text_color=cMut, text_size=size.tiny)
-    table.cell(dash, 5, 5, inTrade ? str.tostring(stopP, format.mintick) : "—", text_color=#FF9E45, text_size=size.small)
-    mktTxt = rsi >= 70 ? "تشبع شرائي — مخاطرة عالية" : rsi <= 30 ? "تشبع بيعي — مخاطرة عالية" :
-         absorption ? "امتصاص حجم مؤسسي" : inCloud ? "غير واضح — احذر" :
-         cloudDir > 0 ? "زخم صاعد — آمن" : "زخم هابط — آمن"
-    mktCol = rsi >= 70 or rsi <= 30 ? cDn : absorption ? cCyan : inCloud ? cYel : cloudDir > 0 ? cUp : cDn
-    table.cell(dash, 0, 6, "حالة السوق", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 6, mktTxt, text_color=mktCol, text_size=size.small)
-    table.cell(dash, 2, 6, "", text_size=size.tiny)
-    table.cell(dash, 3, 6, "", text_size=size.tiny)
-    table.cell(dash, 4, 6, "السحابة", text_color=cMut, text_size=size.tiny)
-    table.cell(dash, 5, 6, inCloud ? "داخلها ⚠" : cloudDir > 0 ? "فوقها ▲" : "تحتها ▼", text_color=inCloud ? cYel : cloudDir > 0 ? cUp : cDn, text_size=size.small)
-    table.cell(dash, 0, 7, "وايكوف", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 7, spring ? "سبرينق ✓" : upthrust ? "أبثراست ✓" : absorption ? "امتصاص" : "—", text_color=spring ? cUp : upthrust ? cDn : absorption ? cCyan : cMut, text_size=size.small)
-    table.cell(dash, 2, 7, "", text_size=size.tiny)
-    table.cell(dash, 3, 7, "", text_size=size.tiny)
-    table.cell(dash, 4, 7, "المنطقة", text_color=cMut, text_size=size.tiny)
-    table.cell(dash, 5, 7, inFib ? "فيبو ذهبية" : nearSup ? "على الدعم" : nearRes ? "على المقاومة" : "—", text_color=inFib ? cGold : cTxt, text_size=size.small)
-    // لماذا لا توجد إشارة الآن؟ الجواب صريح بدل الصمت
+    sCol = inTrade ? (tDir > 0 ? cUp : cDn) : pDir != 0 ? cYel : liveDir > 0 ? cUp : cDn
+    // السطر الوحيد الذي يجب أن يقرأه المتداول: ماذا أفعل الآن؟
     blockedByGate = qualityMode and (lead > 0 ? not qGateUp : not qGateDn)
-    whyIdle = inTrade ? "صفقة قائمة — لا دخول جديد" :
-         pDir != 0 ? "⏳ أمر " + f_side(pDir) + " معلق عند " + str.tostring(pLimit, format.mintick) + " — لا تطارد" :
-         (bar_index - lastExit) <= coolEff ? "راحة بعد الصفقة السابقة" :
-         leadScore < minQeff ? "ينقص: " + f_miss(lead > 0) :
-         blockedByGate ? "سوق بلا قوة اتجاه (ADX " + str.tostring(adx, "#") + ") وبعيد عن المناطق" :
-         (lead > 0 ? not trigUp : not trigDn) ? "الإجماع جاهز — بانتظار الشرارة" : "جاهز للدخول"
-    table.cell(dash, 0, 8, "لماذا لا إشارة؟", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 8, whyIdle, text_color=cYel, text_size=size.small)
-    table.cell(dash, 2, 8, "", text_size=size.tiny)
-    table.cell(dash, 3, 8, "", text_size=size.tiny)
-    table.cell(dash, 4, 8, "اليوم", text_color=cMut, text_size=size.tiny)
-    table.cell(dash, 5, 8, "دخل " + str.tostring(tradesToday) + " · ألغي " + str.tostring(missedToday), text_color=cTxt, text_size=size.small)
+    action = inTrade ? (h2 ? "💰 مؤمّنة — احجز جزءاً ودع الباقي يجري" : h1 ? "🏃 تجري خلف الوقف — لا تستعجل" : "✊ امسك — خسارتك محدودة بـ 1R") :
+         pDir != 0 ? "⏳ ضع أمر " + f_side(pDir) + " عند " + str.tostring(pLimit, format.mintick) + " — ولا تطارد" :
+         (bar_index - lastExit) <= coolEff ? "😴 راحة بعد الصفقة السابقة" :
+         leadScore < minQeff ? "⏸ انتظر — ينقص: " + f_miss(lead > 0) :
+         blockedByGate ? "⏸ انتظر — سوق بلا قوة اتجاه (ADX " + str.tostring(adx, "#") + ")" :
+         (lead > 0 ? not trigUp : not trigDn) ? "👀 جاهز — بانتظار الشرارة" : "⚡ ادخل الآن"
+    actCol = inTrade ? cUp : pDir != 0 ? cYel : action == "⚡ ادخل الآن" ? cUp : cMut
+    stateTxt = inTrade ? "صفقة " + f_side(tDir) + " قائمة" : pDir != 0 ? "أمر " + f_side(pDir) + " معلق" : "ميل السوق " + (liveDir > 0 ? "كول" : "بوت")
+    // ١ العنوان
+    table.cell(dash, 0, 0, "مرصاد VIP", text_color=cGold, bgcolor=cHead, text_size=size.normal)
+    table.cell(dash, 1, 0, syminfo.ticker + " · " + f_tfName(timeframe.period), text_color=cTxt, bgcolor=cHead, text_size=size.normal)
+    // ٢ الحالة الآن
+    table.cell(dash, 0, 1, "الحالة", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 1, stateTxt, text_color=#0B0E13, bgcolor=sCol, text_size=size.normal)
+    // ٣ ماذا أفعل
+    table.cell(dash, 0, 2, "ماذا أفعل؟", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 2, action, text_color=actCol, text_size=size.normal)
+    // ٤ الجودة
+    table.cell(dash, 0, 3, "قوة الفرصة", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 3, f_bar(q) + "  " + str.tostring(q) + "/100", text_color=qCol, text_size=size.small)
+    // ٥ العقد
+    table.cell(dash, 0, 4, "العقد", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 4, syminfo.ticker + " " + str.tostring(optStrk, format.mintick) + (liveDir > 0 ? "C" : "P") + " · " + (isFund ? "اليوم" : "جمعة الأسبوع"), text_color=sCol, text_size=size.small)
+    // ٦ الأهداف
+    table.cell(dash, 0, 5, "الأهداف", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 5, (h1 ? "✅" : "①") + f_pct(oP1) + "  " + (h2 ? "✅" : "②") + f_pct(oP2) + "  " + (h3 ? "✅" : "③") + f_pct(oP3) + "  " + (h4 ? "✅" : "④") + f_pct(oP4), text_color=cGold, text_size=size.small)
+    // ٧ الدخول والوقف
+    table.cell(dash, 0, 6, "دخول ← وقف", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 6, inTrade ? str.tostring(entryP, format.mintick) + "  ←  " + str.tostring(stopP, format.mintick) : "—", text_color=inTrade ? #FF9E45 : cMut, text_size=size.small)
+    // ٨ الفريمات
+    table.cell(dash, 0, 7, "الفريمات", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 7, "1د" + f_tfCell(d01) + " 3د" + f_tfCell(d03) + " 5د" + f_tfCell(d05) + " 15د" + f_tfCell(d15) + " 1س" + f_tfCell(d60), text_color=bias > 0 ? cUp : bias < 0 ? cDn : cMut, text_size=size.small)
+    // ٩ السوق
+    mktTxt = rsi >= 70 ? "تشبع شرائي ⚠" : rsi <= 30 ? "تشبع بيعي ⚠" : absorption ? "امتصاص مؤسسي" :
+         inCloud ? "داخل السحابة — غير واضح" : cloudDir > 0 ? "زخم صاعد" : "زخم هابط"
+    mktCol = rsi >= 70 or rsi <= 30 ? cDn : absorption ? cCyan : inCloud ? cYel : cloudDir > 0 ? cUp : cDn
+    zoneTxt = inFib ? " · فيبو ذهبية" : nearSup ? " · على الدعم" : nearRes ? " · على المقاومة" : ""
+    table.cell(dash, 0, 8, "السوق", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 8, mktTxt + zoneTxt, text_color=mktCol, text_size=size.small)
+    // ١٠ عداد اليوم
+    table.cell(dash, 0, 9, "اليوم", text_color=cMut, text_size=size.small)
+    table.cell(dash, 1, 9, "دخل " + str.tostring(tradesToday) + " · ألغي " + str.tostring(missedToday) + " · " + aggro, text_color=cTxt, text_size=size.small)
+
+// ------------------------------------------------------- شاشة المراقبة
+// خمسة أسماء أخرى، كل واحد بالفريم الذي تختاره له، وأنت ثابت على شارتك.
+// تُقرأ بنفس منطق المحرك: ميل السحابة + قوة الاتجاه + الحجم + القرب من
+// منطقة الارتداد — فتعرف أيها "تحت المراقبة" وأيها صار "كول/بوت جاهز".
+f_scan() =>
+    a  = ta.atr(14)
+    cf = ta.hma(close, cloudFastLen)
+    cs = ta.ema(close, cloudSlowLen)
+    e9 = ta.ema(close, 9)
+    inC = close <= math.max(cf, cs) and close >= math.min(cf, cs)
+    cd  = cf > cs ? 1 : -1
+    [dp, dm, ax] = ta.dmi(14, 14)
+    hv = not na(volume) and ta.sma(volume, 20) > 0
+    vs = hv ? volume > volX * ta.sma(volume, 20) : math.abs(close - open) > 0.7 * a
+    up = cd > 0 and close > cs
+    dn = cd < 0 and close < cs
+    d  = up ? 1 : dn ? -1 : 0
+    near = math.abs(close - math.max(cf, e9)) < 0.5 * a or math.abs(close - math.min(cf, e9)) < 0.5 * a
+    sc = 0
+    sc := sc + (d != 0 ? 25 : 0)
+    sc := sc + (ax >= adxMin ? 25 : 0)
+    sc := sc + (vs ? 25 : 0)
+    sc := sc + (not inC ? 25 : 0)
+    [d, sc, close, a, near, inC]
+
+[s1d, s1q, s1p, s1a, s1n, s1c] = request.security(w1s, w1t, f_scan(), lookahead=barmerge.lookahead_off)
+[s2d, s2q, s2p, s2a, s2n, s2c] = request.security(w2s, w2t, f_scan(), lookahead=barmerge.lookahead_off)
+[s3d, s3q, s3p, s3a, s3n, s3c] = request.security(w3s, w3t, f_scan(), lookahead=barmerge.lookahead_off)
+[s4d, s4q, s4p, s4a, s4n, s4c] = request.security(w4s, w4t, f_scan(), lookahead=barmerge.lookahead_off)
+[s5d, s5q, s5p, s5a, s5n, s5c] = request.security(w5s, w5t, f_scan(), lookahead=barmerge.lookahead_off)
+
+f_wState(d, q, near, inC) => d == 0 ? "خارج اللعب" : inC ? "👁 تحت المراقبة" :
+     q >= 75 and near ? (d > 0 ? "⚡ كول جاهز" : "⚡ بوت جاهز") :
+     q >= 75 ? (d > 0 ? "▲ صاعد قوي" : "▼ هابط قوي") : (d > 0 ? "▲ صاعد" : "▼ هابط")
+f_wCol(d, q, inC) => d == 0 ? cMut : inC ? cYel : q >= 75 ? (d > 0 ? cUp : cDn) : color.new(d > 0 ? cUp : cDn, 35)
+
+var table wt = table.new(f_pos(wPosS), 5, 6, bgcolor=cPanl, border_width=1, border_color=color.new(#2A3245, 0))
+f_wRow(r, sym, tf, d, q, p, a, near, inC) =>
+    table.cell(wt, 0, r, f_short(sym), text_color=cTxt, text_size=size.small)
+    table.cell(wt, 1, r, f_tfName(tf), text_color=cMut, text_size=size.small)
+    table.cell(wt, 2, r, f_wState(d, q, near, inC), text_color=f_wCol(d, q, inC), text_size=size.small)
+    table.cell(wt, 3, r, f_bar(q), text_color=q >= 75 ? cUp : q >= 50 ? cYel : cMut, text_size=size.small)
+    table.cell(wt, 4, r, d == 0 ? "—" : f_short(sym) + " " + str.tostring(d > 0 ? math.ceil(p / f_step(p)) * f_step(p) : math.floor(p / f_step(p)) * f_step(p), format.mintick) + (d > 0 ? "C" : "P"), text_color=d == 0 ? cMut : d > 0 ? cUp : cDn, text_size=size.small)
+
+if barstate.islast and showWatch
+    table.cell(wt, 0, 0, "الاسم", text_color=cGold, bgcolor=cHead, text_size=size.small)
+    table.cell(wt, 1, 0, "الفريم", text_color=cGold, bgcolor=cHead, text_size=size.small)
+    table.cell(wt, 2, 0, "الحالة", text_color=cGold, bgcolor=cHead, text_size=size.small)
+    table.cell(wt, 3, 0, "القوة", text_color=cGold, bgcolor=cHead, text_size=size.small)
+    table.cell(wt, 4, 0, "العقد", text_color=cGold, bgcolor=cHead, text_size=size.small)
+    f_wRow(1, w1s, w1t, s1d, s1q, s1p, s1a, s1n, s1c)
+    f_wRow(2, w2s, w2t, s2d, s2q, s2p, s2a, s2n, s2c)
+    f_wRow(3, w3s, w3t, s3d, s3q, s3p, s3a, s3n, s3c)
+    f_wRow(4, w4s, w4t, s4d, s4q, s4p, s4a, s4n, s4c)
+    f_wRow(5, w5s, w5t, s5d, s5q, s5p, s5a, s5n, s5c)
 
 // -------------------------------------------------- جدول الاختبار الحي
 // أداء المحرك على هذا الشارت خلال نافذة الأيام المختارة: صفقات، نسبة
