@@ -22,8 +22,10 @@ accepted cost for the first live week.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
+import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -43,6 +45,33 @@ MIN_LIQUIDITY = 25  # volume or open interest, whichever saves it
 
 _TICKER = re.compile(r"\b([A-Z]{1,6})\b")
 _NUM = re.compile(r"(\d+(?:\.\d+)?)")
+
+# the operator-owned key that opens the webhook, stored in the database so
+# it can be replaced from the bot without a redeploy
+TV_SECRET_KEY = "tv_webhook_secret"
+
+
+def tv_webhook_secret(settings: object, memory: object) -> str:
+    """The one secret the webhook accepts right now.
+
+    A secret issued from the bot wins. Until one is issued, the value derived
+    from the bot token stands in, so the very first deployment already has a
+    working link and nothing has to be configured by hand. Issuing a new
+    secret therefore retires the derived one too — which is the point: the
+    old link stops working the moment a new one is handed out.
+    """
+    stored = memory.app_setting(TV_SECRET_KEY)
+    if stored:
+        return stored
+    token = getattr(settings, "telegram_bot_token", "") or ""
+    return hashlib.sha256(f"{token}:tv-webhook".encode()).hexdigest()[:24]
+
+
+def rotate_tv_webhook_secret(memory: object) -> str:
+    """Issue a brand-new secret and make it the only one accepted."""
+    fresh = secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24]
+    memory.set_app_setting(TV_SECRET_KEY, fresh)
+    return fresh
 
 
 @dataclass

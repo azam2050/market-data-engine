@@ -8,8 +8,8 @@ reply. Nothing here can place, close, or alter a trade.
 
 from __future__ import annotations
 
-import hashlib
 import logging
+import secrets
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -26,6 +26,7 @@ from qqq_alpha.config import Settings
 from qqq_alpha.dashboard import data
 from qqq_alpha.dashboard.auth import require_login
 from qqq_alpha.learning import apply_lesson, with_applied_lessons
+from qqq_alpha.live.tvbridge import tv_webhook_secret
 from qqq_alpha.memory import Memory
 
 log = logging.getLogger(__name__)
@@ -187,15 +188,19 @@ def create_app(
     # -------------------------------------------------- TradingView webhook
     # the indicator's eyes reach the engine here: the operator pastes this
     # secret URL once into each TradingView alert, and every signal the
-    # indicator fires lands in this process within a second. The secret is
-    # derived from the bot token, so no new environment variable to manage.
-    tv_secret = hashlib.sha256(
-        f"{settings.telegram_bot_token}:tv-webhook".encode()
-    ).hexdigest()[:24]
-
+    # indicator fires lands in this process within a second.
+    #
+    # Two secrets can open this door, and only ever one at a time. The
+    # operator can issue a fresh one from the bot; the moment they do, it is
+    # stored and the derived fallback below stops being accepted — so a link
+    # that reached the wrong hands, or an account no longer in use, is
+    # revoked by issuing a new one rather than by a redeploy.
     @app.post("/tv/{secret}")
     async def tradingview_signal(secret: str, request: Request):
-        if not settings.telegram_bot_token or secret != tv_secret:
+        if not settings.telegram_bot_token:
+            return JSONResponse({"ok": False}, status_code=404)
+        expected = tv_webhook_secret(settings, Memory(settings.data_dir / "memory.db"))
+        if not secrets.compare_digest(secret, expected):
             return JSONResponse({"ok": False}, status_code=404)
         raw = (await request.body())[:2000].decode("utf-8", errors="replace").strip()
         if raw and on_tv_signal is not None:

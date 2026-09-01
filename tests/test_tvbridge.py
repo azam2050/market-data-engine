@@ -252,3 +252,39 @@ def test_bridge_channel_failure_reports_card_to_admin() -> None:
     bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
     _run(bridge.handle(ENTRY))
     assert any("تعذر النشر" in m and "352.5C" in m for m in wire.admin)
+
+
+def test_a_fresh_secret_replaces_the_derived_one(tmp_path):
+    """Issuing a new link revokes the old one — that is the whole point."""
+    from qqq_alpha.live.tvbridge import rotate_tv_webhook_secret, tv_webhook_secret
+    from qqq_alpha.memory import Memory
+
+    class _S:
+        telegram_bot_token = "12345:abcdef"
+
+    mem = Memory(tmp_path / "m.db")
+    settings = _S()
+
+    derived = tv_webhook_secret(settings, mem)
+    assert derived and len(derived) == 24
+
+    fresh = rotate_tv_webhook_secret(mem)
+    assert fresh != derived
+    assert tv_webhook_secret(settings, mem) == fresh
+
+    # and rotating again retires the one before it
+    newer = rotate_tv_webhook_secret(mem)
+    assert newer not in {derived, fresh}
+    assert tv_webhook_secret(settings, mem) == newer
+
+
+def test_the_stored_secret_survives_reopening_the_database(tmp_path):
+    """A container restart must not silently resurrect the old link."""
+    from qqq_alpha.live.tvbridge import rotate_tv_webhook_secret, tv_webhook_secret
+    from qqq_alpha.memory import Memory
+
+    class _S:
+        telegram_bot_token = "12345:abcdef"
+
+    fresh = rotate_tv_webhook_secret(Memory(tmp_path / "m.db"))
+    assert tv_webhook_secret(_S(), Memory(tmp_path / "m.db")) == fresh

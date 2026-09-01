@@ -157,6 +157,15 @@ CREATE TABLE IF NOT EXISTS missed_opportunities (
 
 CREATE INDEX IF NOT EXISTS idx_missed_day    ON missed_opportunities(session_day);
 CREATE INDEX IF NOT EXISTS idx_missed_regime ON missed_opportunities(regime);
+
+-- small operator-owned settings that must survive a restart and be
+-- changeable from the bot: the TradingView webhook secret lives here so a
+-- leaked or retired link can be revoked without touching the deployment
+CREATE TABLE IF NOT EXISTS app_settings (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
 """
 
 # how much each dimension counts when judging "did the market look like this?"
@@ -869,6 +878,25 @@ class Memory:
             )
             conn.commit()
         return self.subscriber(chat_id)
+
+    def app_setting(self, key: str) -> str:
+        """Read an operator setting. Empty string when never set."""
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = ?", (key,)
+            ).fetchone()
+        return str(row["value"]) if row else ""
+
+    def set_app_setting(self, key: str, value: str) -> None:
+        """Write an operator setting, replacing whatever was there."""
+        with closing(self._connect()) as conn:
+            conn.execute(
+                "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+                "updated_at = excluded.updated_at",
+                (key, value, datetime.now(UTC).isoformat()),
+            )
+            conn.commit()
 
     def set_tv_username(self, chat_id: str, username: str) -> bool:
         """Attach the subscriber's TradingView username. False if unknown chat."""
