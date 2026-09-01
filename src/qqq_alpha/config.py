@@ -145,7 +145,7 @@ class Settings(BaseSettings):
     post_trial_channel_url: str = ""
     # the three monthly plans, priced independently so Railway can reprice
     # without a deploy. Codes: indicator | channel | vip (both products).
-    price_indicator_sar: int = 149
+    price_indicator_sar: int = 199
     price_channel_sar: int = 249
     price_vip_sar: int = 299
     # Moyasar direct integration. Keys live ONLY in Railway env vars — the

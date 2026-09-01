@@ -343,7 +343,15 @@ async def test_subscriber_can_ask_for_their_pay_link(tmp_path):
     await engine._handle_subscriber(InboundMessage("555", "اشتراك"))
     assert engine.commands.buttoned, "the offer must carry the plan buttons"
     _, text, buttons = engine.commands.buttoned[-1]
-    assert "149" in text and "249" in text and "299" in text and "ريال" in text
+    # the three prices come from settings, so a repricing does not need a
+    # test edit — what matters is that each plan quotes its own number
+    for price in (
+        engine_settings.price_indicator_sar,
+        engine_settings.price_channel_sar,
+        engine_settings.price_vip_sar,
+    ):
+        assert str(price) in text
+    assert "ريال" in text
     # three plans, three signed personal links, each naming its plan
     plan_urls = [value for _label, value in buttons if "/pay?u=555&t=" in value]
     assert len(plan_urls) == 3
