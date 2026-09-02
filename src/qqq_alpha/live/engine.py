@@ -1893,6 +1893,37 @@ class LiveEngine:
                 f"⚠️ تعطل جسر TradingView على إشارة: {exc}\n{raw[:300]}"
             )
 
+    async def _run_v3(self, symbols: list[str], frames: list[int], months: int) -> None:
+        """Replay the three-engine build and report each engine separately."""
+        from qqq_alpha.backtest.mirsad3 import Res3, format3, run3
+
+        try:
+            end = datetime.now(UTC).date()
+            start = end - timedelta(days=round(months * 30.4))
+            rows: list[Res3] = []
+            async with MassiveClient(self.settings) as client:
+                for frame in frames:
+                    pooled = Res3(symbol="+".join(symbols), minutes=frame)
+                    chunk = 20 if frame < 5 else 90
+                    for sym in symbols:
+                        bars: list = []
+                        s = start
+                        while s <= end:
+                            e = min(s + timedelta(days=chunk - 1), end)
+                            bars.extend(await client.range_minute_bars(sym, frame, s, e))
+                            s = e + timedelta(days=1)
+                        one = await asyncio.to_thread(run3, bars, sym, frame)
+                        pooled.trades.extend(one.trades)
+                        pooled.rejected_by_law += one.rejected_by_law
+                        pooled.brk_gate += one.brk_gate
+                        pooled.brk_beyond += one.brk_beyond
+                        pooled.trap_seen += one.trap_seen
+                        pooled.wave_armed += one.wave_armed
+                    rows.append(pooled)
+            await self.notifier.note(format3(rows, len(symbols), months))
+        except Exception as exc:  # noqa: BLE001 - report, never kill the loop
+            await self.notifier.note(f"⚠️ تعطل اختبار مرصاد ٣: {exc}")
+
     async def _run_autopsy(self, symbols: list[str], frame: int, months: int) -> None:
         """Cut one timeframe every way an edge could be hiding, and report."""
         from qqq_alpha.backtest.mirsad import Outcome, format_autopsy, run
@@ -2166,6 +2197,22 @@ class LiveEngine:
                 self._run_indicator_backtest(
                     symbols, frame, months, diagnose=True, mode=mode, profile=profile
                 )
+            )
+            return
+        if parts and parts[0].strip().lower() in {"مرصاد٣", "مرصاد3", "ثلاثة", "v3"}:
+            # the three-engine build, judged one engine at a time: pooling them
+            # is what hid which of them actually works
+            syms = [t.upper() for t in parts[1:] if t.isascii() and t.isalpha()]
+            nums = [int(t) for t in parts[1:] if t.isdigit()]
+            frames = [n for n in nums if n in (1, 3, 5, 15, 30, 60)] or [5, 15, 60]
+            months = next((n for n in nums if n not in (1, 3, 5, 15, 30, 60)), 12)
+            await self.notifier.note(
+                "🧭 بدأ اختبار مرصاد ٣ على الفريمات "
+                + "، ".join(str(f) for f in frames)
+                + f" — {months} شهر. كل محرك يُحاسب وحده."
+            )
+            asyncio.create_task(
+                self._run_v3(syms or ["QQQ", "NVDA", "AAPL", "TSLA", "MSFT"], frames, months)
             )
             return
         if parts and parts[0].strip().lower() in {"تشريح", "التشريح", "autopsy"}:

@@ -98,3 +98,42 @@ def test_the_autopsy_reports_a_real_slice_when_one_survives():
     late.trades = list(early.trades)
     text = format_autopsy(early, late)
     assert "شريحة صمدت" in text
+
+
+def test_each_engine_only_fires_in_the_state_it_was_built_for():
+    """The whole point of the split: a wave engine must not trade a range."""
+    from qqq_alpha.backtest.mirsad3 import BREAK, TRAP, WAVE, run3
+
+    rnd = random.Random(5)
+    ts = datetime(2025, 1, 2, 14, 30, tzinfo=UTC)
+    px, bars = 100.0, []
+    for i in range(4000):
+        phase = (i // 250) % 4
+        drift, vol = ((0.06, 0.25), (0.0, 0.30), (0.0, 0.06), (-0.06, 0.25))[phase]
+        px = max(5.0, px + drift + rnd.gauss(0, vol))
+        hi, lo = px + abs(rnd.gauss(0, vol)), px - abs(rnd.gauss(0, vol))
+        bars.append(Bar(symbol="SYN", ts=ts + timedelta(minutes=5 * i),
+                        open=rnd.uniform(lo, hi), high=max(hi, px), low=min(lo, px),
+                        close=px, volume=1000))
+    r = run3(bars, "SYN", 5)
+    # all three must be reachable — a silent engine is a broken one
+    assert r.of(TRAP), "the trap engine never fired"
+    assert r.of(WAVE), "the wave engine never fired"
+    assert r.of(BREAK), "the squeeze engine never fired"
+
+
+def test_no_trade_may_break_the_risk_law():
+    from qqq_alpha.backtest.mirsad3 import run3
+
+    rnd = random.Random(9)
+    ts = datetime(2025, 1, 2, 14, 30, tzinfo=UTC)
+    px, bars = 100.0, []
+    for i in range(3000):
+        px = max(5.0, px + rnd.gauss(0, 0.3))
+        hi, lo = px + abs(rnd.gauss(0, 0.2)), px - abs(rnd.gauss(0, 0.2))
+        bars.append(Bar(symbol="SYN", ts=ts + timedelta(minutes=5 * i),
+                        open=rnd.uniform(lo, hi), high=max(hi, px), low=min(lo, px),
+                        close=px, volume=1000))
+    r = run3(bars, "SYN", 5)
+    for t in r.trades:
+        assert abs(t.entry - t.stop0) > 0, "a trade with no risk is not a trade"
