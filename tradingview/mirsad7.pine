@@ -3,8 +3,9 @@
 //
 //  ثلاث حالات، بُنيت من شرح صاحبها على الشارت لا من كتاب:
 //
-//    الشمع الخضر/الحمر  شمعتان لا أكثر: صاعدة قوية تُغلق فوق قمة التي قبلها
-//                       = إشارة، والتي بعدها = دخول على افتتاحها.
+//    الشمع الخضر/الحمر  شمعتان لا أكثر: أول شمعة صاعدة بعد هبوط، تُغلق فوق
+//                       قمة التي قبلها بأي حجم = إشارة، والتي بعدها = دخول.
+//                       لا شرط قوة — ذاك كان يُدخلنا في نهاية الحركة لا بدايتها.
 //    كسر التجميع        بعد كل حركة تجميع: مستطيل أو مثلث أو فوضى. يُرسم،
 //                       ولا يُكسر قبل أن ينضج. كسره بشمعة واحدة إن كانت قوية
 //                       ومع ميل الصندوق، وبشمعتين إن كانت ضعيفة أو ضد الميل.
@@ -27,7 +28,8 @@ gM = "الوضع"
 dirIn   = input.string("الاتجاهان", "الاتجاه", options = ["الاتجاهان", "كول فقط", "بوت فقط"], group = gM)
 withBig = input.bool(true, "مع الاتجاه الأكبر فقط (متوسط ٥٠)", group = gM)
 nGrn    = input.int(1, "الشمعة الصاعدة تُغلق فوق قمة آخر N شمعة", minval = 1, maxval = 8, group = gM)
-kStrong = input.float(1.2, "الشمعة القوية = × متوسط المدى", minval = 0.8, maxval = 2.5, step = 0.1, group = gM)
+kStrong = input.float(1.2, "كسر الصندوق بشمعة واحدة إن كان مداها ≥ × المتوسط", minval = 0.8, maxval = 2.5, step = 0.1, group = gM)
+kClimax = input.float(2.5, "شمعة ضخمة (× المتوسط): لا دخول في طرفها", minval = 1.5, maxval = 5.0, step = 0.25, group = gM)
 
 gC = "الحالات"
 useGrn  = input.bool(true, "الشمع الخضر / الحمر", group = gC)
@@ -76,9 +78,11 @@ f_core() =>
     rng = high - low
     rngAvg = ta.sma(rng, 20)
     e50 = ta.ema(close, 50)
-    // الشمعة القوية: مدى كبير وإغلاق في الربع الأخير من اتجاهها
+    // الشمعة القوية — تُستخدم فقط لتقرير كسر الصندوق بشمعة أم بشمعتين
     strongUp = rng >= kStrong * rngAvg and close > open and (close - low) >= 0.75 * rng
     strongDn = rng >= kStrong * rngAvg and close < open and (high - close) >= 0.75 * rng
+    // الشمعة الضخمة: الدخول بعدها = الدخول في طرف الحركة. لا.
+    climax = rng >= kClimax * rngAvg
     // القمم والقيعان — للميل وقصور العزم، تبقى في المطبخ
     phv = ta.pivothigh(high, 3, 3)
     plv = ta.pivotlow(low, 3, 3)
@@ -155,20 +159,33 @@ f_core() =>
     // الكسر: شمعة واحدة إن كانت قوية ومع الميل، وإلا شمعتان
     needUp = (strongUp and not leanDn) ? 1 : 2
     needDn = (strongDn and not leanUp) ? 1 : 2
-    boxL = useBox and boxOk and not retest and upCnt >= needUp and not brokeUp
-    boxS = useBox and boxOk and not retest and dnCnt >= needDn and not brokeDn
-    // إعادة الاختبار: بعد الكسر يعود يلمس الحافة ويثبت فوقها
-    rtL = useBox and boxOk and retest and brokeUp and low <= bxHi and close > bxHi and close > open
-    rtS = useBox and boxOk and retest and brokeDn and high >= bxLo and close < bxLo and close < open
-    if inBox and upCnt >= needUp
+    var bool waitUp = false
+    var bool waitDn = false
+    boxL = useBox and boxOk and not retest and not climax and upCnt >= needUp and not brokeUp
+    boxS = useBox and boxOk and not retest and not climax and dnCnt >= needDn and not brokeDn
+    // إعادة الاختبار: بعد الكسر يعود يلمس الحافة ويثبت فوقها.
+    // تُفرض تلقائياً حين تكون شمعة الكسر ضخمة — فلا ندخل في قمتها.
+    rtL = useBox and boxOk and (retest or waitUp) and brokeUp and low <= bxHi and close > bxHi and close > open
+    rtS = useBox and boxOk and (retest or waitDn) and brokeDn and high >= bxLo and close < bxLo and close < open
+    if inBox and upCnt >= needUp and not brokeUp
         brokeUp := true
-    if inBox and dnCnt >= needDn
+        waitUp := climax
+    if inBox and dnCnt >= needDn and not brokeDn
         brokeDn := true
-    // الشمع الخضر / الحمر — شمعة صاعدة قوية فوق قمة السابقة. خارج الصندوق فقط
+        waitDn := climax
+    if rtL
+        waitUp := false
+    if rtS
+        waitDn := false
+    // الشمع الخضر / الحمر — "شمعة صاعدة والتي بعدها دخول". بأي حجم.
+    // الشرط الوحيد: أن تكون أول شمعة صاعدة بعد هبوط — تُغلق فوق قمة التي قبلها
+    // وقد سبقها تراجع — لا شمعة في وسط صعود قائم، ولا شمعة ضخمة ندخل في قمتها.
     dirL = not withBig or close > e50
     dirS = not withBig or close < e50
-    grnL = useGrn and not inBox and strongUp and dirL and close > ta.highest(high, nGrn)[1]
-    redS = useGrn and not inBox and strongDn and dirS and close < ta.lowest(low, nGrn)[1]
+    dippedL = close[1] < open[1] or low[1] < low[2]
+    dippedS = close[1] > open[1] or high[1] > high[2]
+    grnL = useGrn and not inBox and dirL and dippedL and not climax and close > open and close > ta.highest(high, nGrn)[1]
+    redS = useGrn and not inBox and dirS and dippedS and not climax and close < open and close < ta.lowest(low, nGrn)[1]
     // قصور العزم: قمة أدنى ثم أول إغلاق تحت قاع الشمعة السابقة
     // فشل حقيقي (ربع ATR على الأقل)، ومع الاتجاه الأكبر — لا بيع داخل صعود قائم
     failS = useFail and not inBox and dirS and not na(ph1) and not na(ph2) and ph1 < ph2 - 0.25 * a and bar_index - ph1b <= 6 and close < low[1] and close < open
