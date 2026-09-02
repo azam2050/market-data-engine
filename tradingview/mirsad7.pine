@@ -40,8 +40,9 @@ retest  = input.bool(false, "كسر التجميع: انتظر إعادة الا
 boxMin  = input.int(10, "الصندوق ينضج بعد N شمعة — لا كسر قبلها", minval = 5, maxval = 30, group = gC)
 
 gS = "الوقف والأهداف"
-trapX = input.float(0.15, "المصيدة: هامش تحت القاع (ATR)", minval = 0.0, maxval = 0.6, step = 0.05, group = gS)
-minX  = input.float(0.50, "أدنى مسافة وقف (ATR)", minval = 0.2, maxval = 2.0, step = 0.1, group = gS)
+trapX = input.float(0.25, "المصيدة: هامش تحت القاع (ATR)", minval = 0.0, maxval = 0.6, step = 0.05, group = gS)
+minX  = input.float(1.00, "أدنى مسافة وقف (ATR) — الظل لا يضربك", minval = 0.2, maxval = 2.0, step = 0.1, group = gS)
+coolN = input.int(6, "بعد وقف: شموع راحة قبل إشارة بنفس الاتجاه", minval = 0, maxval = 20, group = gS)
 maxX  = input.float(3.00, "أقصى مسافة وقف (ATR)", minval = 1.0, maxval = 6.0, step = 0.25, group = gS)
 w1 = input.float(0.5, "هدف ١ = × قوة الموجة", minval = 0.2, step = 0.1, group = gS)
 w2 = input.float(1.0, "هدف ٢ = × قوة الموجة", minval = 0.5, step = 0.1, group = gS)
@@ -111,7 +112,7 @@ f_core() =>
     sqz = bbAvg > 0 and bbW < 0.85 * bbAvg
     spanHi = ta.highest(high, boxMin)
     spanLo = ta.lowest(low, boxMin)
-    tight = (spanHi - spanLo) <= 2.0 * a
+    tight = (spanHi - spanLo) <= 3.0 * a
     var bool inBox = false
     var float bxHi = na
     var float bxLo = na
@@ -183,8 +184,10 @@ f_core() =>
     dirL = not withBig or close > e50
     dirS = not withBig or close < e50
     // "شمعتان حمراوان ثم كسر — ثلاث شموع سلبية = بوت". وعكسها كول.
-    runUp = true
-    runDn = true
+    // والشمعة التي قبل الحمراوين خضراء: أي أن الثلاث انعكاسٌ من قمة، لا الشموع
+    // الرابعة والخامسة والسادسة من نزول ممتد — ذاك يُدخلك في القاع.
+    runUp = close[nRun + 1] < open[nRun + 1]
+    runDn = close[nRun + 1] > open[nRun + 1]
     for k = 1 to nRun
         runUp := runUp and close[k] > open[k]
         runDn := runDn and close[k] < open[k]
@@ -241,6 +244,8 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
     var string exitTxt = ""
     var float lastR = na
     var float unit = na
+    var int coolL = 0
+    var int coolS = 0
     closed = false
     if pend != 0 and pos == 0 and not na(a[1]) and not na(wave[1])
         pos := pend
@@ -270,6 +275,12 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
         if hitStop
             lastR := (sP - eP) / unit * pos
             exitTxt := secured ? (hit > 0 ? "خروج بربح" : "خروج على التعادل") : "وقف"
+            // بعد وقف خاسر: راحة قبل إشارة بنفس الاتجاه — لا خمس بوتات في نطاق واحد
+            if not secured
+                if pos == 1
+                    coolL := bar_index + coolN
+                else
+                    coolS := bar_index + coolN
             pos := 0
             closed := true
         else
@@ -296,10 +307,10 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
                     if hit >= 2
                         sP := pos == 1 ? math.max(sP, t1) : math.min(sP, t1)
     if barstate.isconfirmed and pos == 0 and pend == 0 and not closed
-        if sigL
+        if sigL and bar_index >= coolL
             pend := 1
             pwhy := why
-        else if sigS
+        else if sigS and bar_index >= coolS
             pend := -1
             pwhy := why
     [pos, pend, pwhy, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR]
