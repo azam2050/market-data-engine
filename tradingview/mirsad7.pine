@@ -43,7 +43,8 @@ maxX  = input.float(3.00, "أقصى مسافة وقف (ATR)", minval = 1.0, maxv
 w1 = input.float(0.5, "هدف ١ = × قوة الموجة", minval = 0.2, step = 0.1, group = gS)
 w2 = input.float(1.0, "هدف ٢ = × قوة الموجة", minval = 0.5, step = 0.1, group = gS)
 w3 = input.float(1.6, "هدف ٣ = × قوة الموجة", minval = 1.0, step = 0.1, group = gS)
-trailN = input.int(7, "الوقف يتبع قاع آخر N شمعة", minval = 3, maxval = 15, group = gS)
+secX   = input.float(1.0, "أمّن (الوقف على الدخول) عند +R", minval = 0.3, maxval = 2.0, step = 0.1, group = gS)
+trailN = input.int(3, "بعد التأمين: الوقف يتبع قاع آخر N شمعة", minval = 2, maxval = 15, group = gS)
 
 gV = "العرض"
 showLv = input.bool(true, "الوقف والأهداف", group = gV)
@@ -112,6 +113,7 @@ f_core() =>
     var int dnCnt = 0
     var bool brokeUp = false
     var bool brokeDn = false
+    var int inside = 0
     if sqz and not inBox and moved[3]
         inBox := true
         bxHi := high
@@ -137,8 +139,15 @@ f_core() =>
             if not outUp and not outDn
                 bxHi := math.max(bxHi, high)
                 bxLo := math.min(bxLo, low)
+                inside += 1
+            else
+                inside := 0
             upCnt := outUp ? upCnt + 1 : 0
             dnCnt := outDn ? dnCnt + 1 : 0
+            // كسر فشل ورجع داخل ثلاث شموع: الصندوق مستمر، والقفل يُفتح لكسر قادم
+            if inside >= 3
+                brokeUp := false
+                brokeDn := false
     // الميل داخل الصندوق: قيعان ترتفع = ضغط للأعلى، قمم تنخفض = ضغط للأسفل
     leanUp = inBox and not na(pl1) and not na(pl2) and pl1b >= bxStart and pl1 > pl2
     leanDn = inBox and not na(ph1) and not na(ph2) and ph1b >= bxStart and ph1 < ph2
@@ -161,19 +170,28 @@ f_core() =>
     grnL = useGrn and not inBox and strongUp and dirL and close > ta.highest(high, nGrn)[1]
     redS = useGrn and not inBox and strongDn and dirS and close < ta.lowest(low, nGrn)[1]
     // قصور العزم: قمة أدنى ثم أول إغلاق تحت قاع الشمعة السابقة
-    failS = useFail and not inBox and not na(ph1) and not na(ph2) and ph1 < ph2 and bar_index - ph1b <= 6 and close < low[1] and close < open
-    failL = useFail and not inBox and not na(pl1) and not na(pl2) and pl1 > pl2 and bar_index - pl1b <= 6 and close > high[1] and close > open
-    sigL = allowL and (grnL or boxL or rtL or failL)
-    sigS = allowS and (redS or boxS or rtS or failS)
+    // فشل حقيقي (ربع ATR على الأقل)، ومع الاتجاه الأكبر — لا بيع داخل صعود قائم
+    failS = useFail and not inBox and dirS and not na(ph1) and not na(ph2) and ph1 < ph2 - 0.25 * a and bar_index - ph1b <= 6 and close < low[1] and close < open
+    failL = useFail and not inBox and dirL and not na(pl1) and not na(pl2) and pl1 > pl2 + 0.25 * a and bar_index - pl1b <= 6 and close > high[1] and close > open
+    // شمعة افتتاح الجلسة فجوة لا حركة — إشارتها تدخلك في قمتها بوقف بعيد
+    firstBar = session.isfirstbar_regular
+    sigL = allowL and not firstBar and (grnL or boxL or rtL or failL)
+    sigS = allowS and not firstBar and (redS or boxS or rtS or failS)
     why = grnL ? "شمعة صاعدة" : boxL or rtL ? "كسر التجميع" : failL ? "قصور العزم" : redS ? "شمعة هابطة" : boxS or rtS ? "كسر التجميع" : failS ? "قصور العزم" : ""
     // قوة الموجة: مدى آخر ٢٠ شمعة — الأهداف تُقاس عليها
-    wave = math.max(ta.highest(high, 20) - ta.lowest(low, 20), 2.0 * a)
+    // قوة الموجة = الاندفاعة التي صنعت الإشارة (من قاع آخر ١٠ شموع إلى الإغلاق)،
+    // لا مدى عشرين شمعة — ذاك أعطى أهدافاً لا تُبلغ فلا يُؤمَّن شيء
+    legUp = close - ta.lowest(low, 10)
+    legDn = ta.highest(high, 10) - close
+    wave = math.max(sigL ? legUp : sigS ? legDn : math.max(legUp, legDn), 1.5 * a)
     lean = leanUp ? 1 : leanDn ? -1 : 0
     // الصندوق ينتهي لحظة كسره، أو حين يهجره السعر بعيداً، أو حين يشيخ —
     // فلا يبقى شبحاً يحجب الدخول ويُرسم ساعات بعد أن مات
     ibRet = inBox
-    abandoned = inBox and (close > bxHi + 1.0 * a or close < bxLo - 1.0 * a)
-    if boxL or boxS or rtL or rtS or abandoned or bxAge > 80
+    // لا ينتهي على الإشارة — كثير من الكسور ترجع، فيصير الصندوق نفسه صندوقاً جديداً
+    // وتُؤخذ صفقة "داخل الصندوق". ينتهي حين يبتعد السعر عنه ATR كاملة.
+    abandoned = inBox and (close > bxHi + 1.0 * a or close < bxLo - 1.0 * a) and (close[1] > bxHi + 0.5 * a or close[1] < bxLo - 0.5 * a)
+    if abandoned or bxAge > 80
         inBox := false
     [sigL, sigS, why, ibRet, bxHi, bxLo, bxAge, lean, wave, a]
 
@@ -210,9 +228,10 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
         unit := d
         sP := pos == 1 ? eP - d : eP + d
         wv = wave[1]
-        t1 := pos == 1 ? eP + w1 * wv : eP - w1 * wv
-        t2 := pos == 1 ? eP + w2 * wv : eP - w2 * wv
-        t3 := pos == 1 ? eP + w3 * wv : eP - w3 * wv
+        // هدف ١ لا يقل عن +1R، وإلا كان الوقف أبعد من الهدف
+        t1 := pos == 1 ? eP + math.max(w1 * wv, d) : eP - math.max(w1 * wv, d)
+        t2 := pos == 1 ? eP + math.max(w2 * wv, 2.0 * d) : eP - math.max(w2 * wv, 2.0 * d)
+        t3 := pos == 1 ? eP + math.max(w3 * wv, 3.0 * d) : eP - math.max(w3 * wv, 3.0 * d)
         hit := 0
         secured := false
         barsIn := 0
@@ -237,14 +256,18 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
                 pos := 0
                 closed := true
             else
-                // "من أول صعود أمّن": أول إغلاق فوق قمة شمعة الإشارة
-                if not secured and (pos == 1 ? close > sigHi : close < sigLo)
+                // "من أول صعود أمّن" — لكن الصعود الحقيقي لا أول تكّة فوق قمة الإشارة:
+                // ذاك كان يحوّل الصفقات إلى تعادلات صفرية على أول تنفّس عادي
+                if not secured and barsIn >= 2 and (pos == 1 ? high >= eP + secX * unit : low <= eP - secX * unit)
                     secured := true
                     sP := eP
                 if secured
                     tl = ta.lowest(low, trailN) - trapX * a
                     th = ta.highest(high, trailN) + trapX * a
                     sP := pos == 1 ? math.max(sP, tl) : math.min(sP, th)
+                    // تأمين الأهداف: كل هدف يُلمس يصير الوقف عند الذي قبله
+                    if hit >= 2
+                        sP := pos == 1 ? math.max(sP, t1) : math.min(sP, t1)
     if barstate.isconfirmed and pos == 0 and pend == 0 and not closed
         if sigL
             pend := 1
