@@ -47,8 +47,9 @@ maxX  = input.float(3.00, "أقصى مسافة وقف (ATR)", minval = 1.0, maxv
 w1 = input.float(0.5, "هدف ١ = × قوة الموجة", minval = 0.2, step = 0.1, group = gS)
 w2 = input.float(1.0, "هدف ٢ = × قوة الموجة", minval = 0.5, step = 0.1, group = gS)
 w3 = input.float(1.6, "هدف ٣ = × قوة الموجة", minval = 1.0, step = 0.1, group = gS)
-secX   = input.float(1.0, "أمّن (الوقف على الدخول) عند +R", minval = 0.3, maxval = 2.0, step = 0.1, group = gS)
-trailN = input.int(3, "بعد التأمين: الوقف يتبع قاع آخر N شمعة", minval = 2, maxval = 15, group = gS)
+trailN = input.int(3, "الوقف يتبع قاع/قمة آخر N شمعة", minval = 2, maxval = 15, group = gS)
+adxGate = input.bool(true, "حجب إشارات الشموع في العرضي (ADX)", group = gS)
+adxLvl  = input.float(18, "تحته عرضي", minval = 10, maxval = 30, group = gS)
 
 gV = "العرض"
 showLv = input.bool(true, "الوقف والأهداف", group = gV)
@@ -109,10 +110,13 @@ f_core() =>
     bbD = 2.0 * ta.stdev(close, 20)
     bbW = bbB > 0 ? 2.0 * bbD / bbB : 0.0
     bbAvg = ta.sma(bbW, 100)
-    sqz = bbAvg > 0 and bbW < 0.85 * bbAvg
-    spanHi = ta.highest(high, boxMin)
-    spanLo = ta.lowest(low, boxMin)
-    tight = (spanHi - spanLo) <= 3.0 * a
+    // يُقاس على الإغلاقات: ظل واحد كان يكسر الشرط عشر شموع ويمنع الصندوق.
+    // الحواف = الإغلاقات مع هامش صغير؛ ما يطلع من الظلال خارجها هو الزنبرك والدفعة.
+    spanHi = ta.highest(close, boxMin) + 0.25 * a
+    spanLo = ta.lowest(close, boxMin) - 0.25 * a
+    tight = (ta.highest(close, boxMin) - ta.lowest(close, boxMin)) <= 2.0 * a
+    [dip, dim, adx] = ta.dmi(14, 14)
+    sideways = adxGate and adx < adxLvl
     var bool inBox = false
     var float bxHi = na
     var float bxLo = na
@@ -125,7 +129,7 @@ f_core() =>
     var bool brokeDn = false
     var int inside = 0
     cool := math.max(cool - 1, 0)
-    if not inBox and cool == 0 and tight and sqz
+    if not inBox and cool == 0 and tight
         inBox := true
         bxHi := spanHi
         bxLo := spanLo
@@ -142,8 +146,8 @@ f_core() =>
         outUp = close > bxHi + margin
         outDn = close < bxLo - margin
         if not outUp and not outDn
-            bxHi := math.max(bxHi, high)
-            bxLo := math.min(bxLo, low)
+            bxHi := math.max(bxHi, close + 0.25 * a)
+            bxLo := math.min(bxLo, close - 0.25 * a)
             inside += 1
         else
             inside := 0
@@ -191,8 +195,9 @@ f_core() =>
     for k = 1 to nRun
         runUp := runUp and close[k] > open[k]
         runDn := runDn and close[k] < open[k]
-    grnL = useGrn and not inBox and dirL and not climax and runUp and close > open and close > ta.highest(high, nRun)[1]
-    redS = useGrn and not inBox and dirS and not climax and runDn and close < open and close < ta.lowest(low, nRun)[1]
+    // كاشف ثانٍ مستقل للعرضي: لو قال "عرضي" تُحجب الشموع حتى بلا صندوق مرسوم
+    grnL = useGrn and not inBox and not sideways and dirL and not climax and runUp and close > open and close > ta.highest(high, nRun)[1]
+    redS = useGrn and not inBox and not sideways and dirS and not climax and runDn and close < open and close < ta.lowest(low, nRun)[1]
     // قصور العزم: قمة أدنى ثم أول إغلاق تحت قاع الشمعة السابقة
     // فشل حقيقي (ربع ATR على الأقل)، ومع الاتجاه الأكبر — لا بيع داخل صعود قائم
     failS = useFail and not inBox and dirS and not na(ph1) and not na(ph2) and ph1 < ph2 - 0.25 * a and bar_index - ph1b <= 6 and close < low[1] and close < open
@@ -211,7 +216,7 @@ f_core() =>
     legUp = close - ta.lowest(low, 10)
     legDn = ta.highest(high, 10) - close
     wave = math.max(sigL ? legUp : sigS ? legDn : math.max(legUp, legDn), 1.5 * a)
-    lean = leanUp ? 1 : leanDn ? -1 : 0
+    lean = leanUp ? 1 : leanDn ? -1 : sideways ? 9 : 0
     // الصندوق ينتهي لحظة كسره، أو حين يهجره السعر بعيداً، أو حين يشيخ —
     // فلا يبقى شبحاً يحجب الدخول ويُرسم ساعات بعد أن مات
     ibRet = inBox
@@ -274,7 +279,7 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
         hitStop = pos == 1 ? low <= sP : high >= sP
         if hitStop
             lastR := (sP - eP) / unit * pos
-            exitTxt := secured ? (hit > 0 ? "خروج بربح" : "خروج على التعادل") : "وقف"
+            exitTxt := (sP - eP) * pos > 0 ? "خروج بربح" : (sP - eP) * pos == 0 ? "خروج على التعادل" : "وقف"
             // بعد وقف خاسر: راحة قبل إشارة بنفس الاتجاه — لا خمس بوتات في نطاق واحد
             if not secured
                 if pos == 1
@@ -294,18 +299,18 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
                 pos := 0
                 closed := true
             else
-                // "من أول صعود أمّن" — لكن الصعود الحقيقي لا أول تكّة فوق قمة الإشارة:
-                // ذاك كان يحوّل الصفقات إلى تعادلات صفرية على أول تنفّس عادي
-                if not secured and barsIn >= 2 and (pos == 1 ? high >= eP + secX * unit : low <= eP - secX * unit)
-                    secured := true
-                    sP := eP
-                if secured
+                // الوقف يتبع الهيكل فقط: أدنى قاع (أعلى قمة) لآخر شموع. لا يُنقل إلى
+                // سعر الدخول أبداً — سعر الدخول ليس مستوى في الشارت، والنقل إليه كان
+                // يُخرج صفقة عند +1.5R بصفر على ظل واحد ثم تمضي بدوننا.
+                if barsIn >= 2
                     tl = ta.lowest(low, trailN) - trapX * a
                     th = ta.highest(high, trailN) + trapX * a
                     sP := pos == 1 ? math.max(sP, tl) : math.min(sP, th)
                     // تأمين الأهداف: كل هدف يُلمس يصير الوقف عند الذي قبله
                     if hit >= 2
                         sP := pos == 1 ? math.max(sP, t1) : math.min(sP, t1)
+                // "مؤمَّنة" = الوقف صار عند الدخول أو أفضل — بالهيكل، لا بالقرار
+                secured := pos == 1 ? sP >= eP : sP <= eP
     if barstate.isconfirmed and pos == 0 and pend == 0 and not closed
         if sigL and bar_index >= coolL
             pend := 1
@@ -368,7 +373,7 @@ f_hits(int h) =>
     (h >= 1 ? "✓" : "—") + " " + (h >= 2 ? "✓" : "—") + " " + (h >= 3 ? "✓" : "—")
 
 f_stateTxt(int p, int pd, bool sec, bool ib, int ln) =>
-    p == 1 ? (sec ? "كول · مؤمَّنة" : "كول قائمة") : p == -1 ? (sec ? "بوت · مؤمَّنة" : "بوت قائمة") : pd == 1 ? "كول على الافتتاح" : pd == -1 ? "بوت على الافتتاح" : ib ? (ln == 1 ? "تجميع · ميل للصعود" : ln == -1 ? "تجميع · ميل للهبوط" : "تجميع") : "مراقبة"
+    p == 1 ? (sec ? "كول · مؤمَّنة" : "كول قائمة") : p == -1 ? (sec ? "بوت · مؤمَّنة" : "بوت قائمة") : pd == 1 ? "كول على الافتتاح" : pd == -1 ? "بوت على الافتتاح" : ib ? (ln == 1 ? "تجميع · ميل للصعود" : ln == -1 ? "تجميع · ميل للهبوط" : "تجميع") : ln == 9 ? "عرضي — انتظار" : "مراقبة"
 
 var table pt = na
 f_kv(int r, string k, string v, color c) =>
