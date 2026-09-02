@@ -59,13 +59,13 @@ showWatch = input.bool(true, "شاشة المراقبة", group = gV)
 
 gW = "رموز المراقبة"
 w1s = input.symbol("NASDAQ:QQQ", "١", group = gW)
-w1t = input.timeframe("5", "فريم ١", group = gW)
+w1t = input.timeframe("60", "فريم ١", group = gW)
 w2s = input.symbol("AMEX:SPY", "٢", group = gW)
-w2t = input.timeframe("5", "فريم ٢", group = gW)
+w2t = input.timeframe("60", "فريم ٢", group = gW)
 w3s = input.symbol("NASDAQ:AAPL", "٣", group = gW)
-w3t = input.timeframe("15", "فريم ٣", group = gW)
+w3t = input.timeframe("60", "فريم ٣", group = gW)
 w4s = input.symbol("NASDAQ:NVDA", "٤", group = gW)
-w4t = input.timeframe("15", "فريم ٤", group = gW)
+w4t = input.timeframe("60", "فريم ٤", group = gW)
 w5s = input.symbol("NASDAQ:TSLA", "٥", group = gW)
 w5t = input.timeframe("60", "فريم ٥", group = gW)
 w6s = input.symbol("NASDAQ:META", "٦", group = gW)
@@ -326,6 +326,9 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
 
 cUp = #0E9F6E
 cDn = #E02424
+// الساعة هي الفريم الموصى به: الوحيد الذي تعادل وصمد خارج العينة على ٣٠ رمز.
+// الأقصر متاح، لكن الاختبار يقول إنه يخسر بعد التكلفة — واللوحة تقولها.
+tfWarn = timeframe.in_seconds() < 3600
 
 // كول / بوت — كلمة على الشمعة، تُختم على إغلاقها
 if barstate.isconfirmed and pend == 1
@@ -384,7 +387,7 @@ if showPnl and barstate.islast
     if na(pt)
         pt := table.new(position.bottom_right, 2, 7, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
     table.cell(pt, 0, 0, "مِرصاد ٧", text_color = color.white, bgcolor = color.new(#111827, 0), text_size = size.small)
-    table.cell(pt, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color = color.new(#D1D5DB, 0), bgcolor = color.new(#111827, 0), text_size = size.small)
+    table.cell(pt, 1, 0, syminfo.ticker + " · " + timeframe.period + (tfWarn ? "  ⚠ الموصى به: ساعة" : ""), text_color = tfWarn ? color.new(#FCD34D, 0) : color.new(#D1D5DB, 0), bgcolor = color.new(#111827, 0), text_size = size.small)
     st = f_stateTxt(pos, pend, secured, inBox, lean)
     f_kv(1, "الحالة", st, pos != 0 or pend != 0 ? color.new(pos == -1 or pend == -1 ? #FCA5A5 : #86EFAC, 0) : color.new(#FCD34D, 0))
     f_kv(2, "السبب", pos != 0 ? pwhy : "—", color.new(#D1D5DB, 0))

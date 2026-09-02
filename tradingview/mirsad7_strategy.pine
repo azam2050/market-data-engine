@@ -312,6 +312,9 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
 
 cUp = #0E9F6E
 cDn = #E02424
+// الساعة هي الفريم الموصى به: الوحيد الذي تعادل وصمد خارج العينة على ٣٠ رمز.
+// الأقصر متاح، لكن الاختبار يقول إنه يخسر بعد التكلفة — واللوحة تقولها.
+tfWarn = timeframe.in_seconds() < 3600
 
 // الأوامر — تطابق إدارة المؤشر تماماً:
 //   الإشارة تُختم على الإغلاق، فيدخل الاختبار على افتتاح الشمعة التالية
@@ -383,7 +386,7 @@ if showPnl and barstate.islast
     if na(pt)
         pt := table.new(position.bottom_right, 2, 8, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
     table.cell(pt, 0, 0, "مِرصاد ٧ — اختبار", text_color = color.white, bgcolor = color.new(#111827, 0), text_size = size.small)
-    table.cell(pt, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color = color.new(#D1D5DB, 0), bgcolor = color.new(#111827, 0), text_size = size.small)
+    table.cell(pt, 1, 0, syminfo.ticker + " · " + timeframe.period + (tfWarn ? "  ⚠ الموصى به: ساعة" : ""), text_color = tfWarn ? color.new(#FCD34D, 0) : color.new(#D1D5DB, 0), bgcolor = color.new(#111827, 0), text_size = size.small)
     f_kv(1, "الصفقات", str.tostring(nT), color.new(#D1D5DB, 0))
     f_kv(2, "عامل الربح", str.tostring(pf, "#.##") + (nT < 30 ? "  (عينة صغيرة)" : ""), pf >= 1.2 ? color.new(#86EFAC, 0) : pf >= 1.0 ? color.new(#FCD34D, 0) : color.new(#FCA5A5, 0))
     f_kv(3, "متوسط الصفقة", (avgR >= 0 ? "+" : "") + str.tostring(avgR, "#.##") + "R", avgR >= 0 ? color.new(#86EFAC, 0) : color.new(#FCA5A5, 0))
