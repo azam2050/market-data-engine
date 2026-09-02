@@ -6,8 +6,9 @@
 //    الشمع الخضر/الحمر  شمعتان لا أكثر: صاعدة قوية تُغلق فوق قمة التي قبلها
 //                       = إشارة، والتي بعدها = دخول على افتتاحها.
 //    كسر التجميع        بعد كل حركة تجميع: مستطيل أو مثلث أو فوضى. يُرسم،
-//                       ويُنتظر كسره — بشمعة واحدة إن كانت قوية ومع ميل
-//                       الصندوق، وبشمعتين إن كانت ضعيفة أو ضد الميل.
+//                       ولا يُكسر قبل أن ينضج. كسره بشمعة واحدة إن كانت قوية
+//                       ومع ميل الصندوق، وبشمعتين إن كانت ضعيفة أو ضد الميل.
+//                       ولا دخول داخله أبداً.
 //    قصور العزم         قمة لم تبلغ سابقتها ثم أول إغلاق تحت قاع الشمعة
 //                       السابقة — بوت من أول شمعة. والعكس كول.
 //
@@ -33,6 +34,7 @@ useGrn  = input.bool(true, "الشمع الخضر / الحمر", group = gC)
 useBox  = input.bool(true, "كسر التجميع", group = gC)
 useFail = input.bool(true, "قصور العزم", group = gC)
 retest  = input.bool(false, "كسر التجميع: انتظر إعادة الاختبار", group = gC)
+boxMin  = input.int(10, "الصندوق ينضج بعد N شمعة — لا كسر قبلها", minval = 5, maxval = 30, group = gC)
 
 gS = "الوقف والأهداف"
 trapX = input.float(0.15, "المصيدة: هامش تحت القاع (ATR)", minval = 0.0, maxval = 0.6, step = 0.05, group = gS)
@@ -122,22 +124,25 @@ f_core() =>
         brokeDn := false
     else if inBox
         bxAge += 1
-        margin = 0.20 * a
+        margin = 0.30 * a
         outUp = close > bxHi + margin
         outDn = close < bxLo - margin
-        if not outUp and not outDn
+        if bxAge < boxMin
+            // ما زال يتكوّن: حوافه تتوسّع، ولا يُحسب أي كسر — أرضيته لم تُعرف بعد
             bxHi := math.max(bxHi, high)
             bxLo := math.min(bxLo, low)
             upCnt := 0
             dnCnt := 0
-        upCnt := outUp ? upCnt + 1 : 0
-        dnCnt := outDn ? dnCnt + 1 : 0
-        if bxAge > 80
-            inBox := false
+        else
+            if not outUp and not outDn
+                bxHi := math.max(bxHi, high)
+                bxLo := math.min(bxLo, low)
+            upCnt := outUp ? upCnt + 1 : 0
+            dnCnt := outDn ? dnCnt + 1 : 0
     // الميل داخل الصندوق: قيعان ترتفع = ضغط للأعلى، قمم تنخفض = ضغط للأسفل
     leanUp = inBox and not na(pl1) and not na(pl2) and pl1b >= bxStart and pl1 > pl2
     leanDn = inBox and not na(ph1) and not na(ph2) and ph1b >= bxStart and ph1 < ph2
-    boxOk = inBox and bxAge >= 5
+    boxOk = inBox and bxAge >= boxMin
     // الكسر: شمعة واحدة إن كانت قوية ومع الميل، وإلا شمعتان
     needUp = (strongUp and not leanDn) ? 1 : 2
     needDn = (strongDn and not leanUp) ? 1 : 2
@@ -164,7 +169,13 @@ f_core() =>
     // قوة الموجة: مدى آخر ٢٠ شمعة — الأهداف تُقاس عليها
     wave = math.max(ta.highest(high, 20) - ta.lowest(low, 20), 2.0 * a)
     lean = leanUp ? 1 : leanDn ? -1 : 0
-    [sigL, sigS, why, inBox, bxHi, bxLo, bxStart, lean, wave, a]
+    // الصندوق ينتهي لحظة كسره، أو حين يهجره السعر بعيداً، أو حين يشيخ —
+    // فلا يبقى شبحاً يحجب الدخول ويُرسم ساعات بعد أن مات
+    ibRet = inBox
+    abandoned = inBox and (close > bxHi + 1.0 * a or close < bxLo - 1.0 * a)
+    if boxL or boxS or rtL or rtS or abandoned or bxAge > 80
+        inBox := false
+    [sigL, sigS, why, ibRet, bxHi, bxLo, bxAge, lean, wave, a]
 
 // ═══════════════════════════ إدارة الصفقة ═════════════════════════════
 // الدخول على افتتاح الشمعة التالية للإشارة. الوقف تحت قاع شمعة الإشارة
@@ -244,7 +255,7 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
     [pos, pend, pwhy, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR]
 
 // ═══════════════════════════ الشارت ═══════════════════════════════════
-[sigL, sigS, why, inBox, bxHi, bxLo, bxStart, lean, wave, atrv] = f_core()
+[sigL, sigS, why, inBox, bxHi, bxLo, bxAge, lean, wave, atrv] = f_core()
 [pos, pend, pwhy, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR] = f_trade(sigL, sigS, why, wave, atrv)
 
 cUp = #0E9F6E
@@ -265,6 +276,9 @@ if showBox
         box.set_right(bx, bar_index)
         box.set_top(bx, bxHi)
         box.set_bottom(bx, bxLo)
+    // صندوق لم ينضج وهُجر — يُمسح، لأنه لم يكن تجميعاً أصلاً
+    if not inBox and inBox[1] and bxAge[1] < boxMin and not na(bx)
+        box.delete(bx)
 
 // الوقف والأهداف
 var line lnS = na
