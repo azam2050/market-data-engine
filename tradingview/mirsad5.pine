@@ -98,9 +98,11 @@ dipS = useDip and allowS and dn and rsi > 100 - dipLvl and rsi[1] <= 100 - dipLv
 brkOk = useBrk and not quiet and sinceQuiet <= 3 and quietN[1] >= 4 and calm > 1.2
 brkL  = brkOk and allowL and not na(boxHi) and close > boxHi and close > open
 brkS  = brkOk and allowS and not na(boxLo) and close < boxLo and close < open
-// ٣ · انهيار امتداد — ابتعد أكثر مما يحتمل ثم بدأ يرتد
-exhS = useExh and allowS and stretch > exhX and close < close[1] and high > high[1]
-exhB = useExh and allowL and stretch < -exhX and close > close[1] and low < low[1]
+// ٣ · انهيار امتداد — ابتعد أكثر مما يحتمل ثم بدأ يرتد.
+// ومعه شرط الاتجاه: لا نبيع قوةً داخل صعود، ولا نشتري ضعفاً داخل هبوط.
+// بدون هذا الشرط كان يدخل عكس الحركة الصحيحة ويُضرب فوراً.
+exhS = useExh and allowS and dn and stretch > exhX and close < close[1] and high > high[1]
+exhB = useExh and allowL and up and stretch < -exhX and close > close[1] and low < low[1]
 
 sigL  = dipL or brkL or exhB
 sigS  = dipS or brkS or exhS
