@@ -40,6 +40,9 @@ brkX       = input.float(0.10, "مسافة الاختراق (ATR)", minval=0.02,
 pExpire    = input.int(3, "صلاحية الأمرين (شموع)", minval=1, maxval=12, group=gE)
 minRiskX   = input.float(0.5, "أدنى مسافة وقف (ATR)", minval=0.2, maxval=2.0, step=0.1, group=gE)
 anticipate = input.bool(true, "دخول مبكر من منطقة التصحيح (بلا انتظار شمعة الاستئناف)", group=gE)
+// الخسائر على الشارت لها شكل واحد: دخول على قمة شمعة انفجارية بعيدة عن
+// المتوسط. الجسم الضخم البعيد ليس بداية حركة بل نهايتها — تشتري ممن يبيع.
+stretchX = input.float(2.0, "أقصى بُعد عن السحابة للدخول (ATR)", minval=0.5, maxval=6.0, step=0.25, group=gE)
 
 gO = "العقود اليومية"
 dteCut   = input.int(90, "امنع عقد اليوم قبل الإغلاق بـ (دقيقة)", minval=0, maxval=240, group=gO)
@@ -73,6 +76,11 @@ coolN = prof == "حارق" ? 3 : prof == "سريع" ? 6 : prof == "نصف يوم
 // جُرّب تقصير هذه المهلة فقصّت الخاسرة بثُمنها والرابحة بربعها، فرُدّت.
 // الصفقة الراكدة تكلّف، لكن قتل الرابحة الناشئة يكلّف أكثر.
 timeStop = prof == "حارق" ? 6 : prof == "سريع" ? 10 : prof == "نصف يوم" ? 12 : prof == "يوم" ? 14 : 20
+// الرابحة على الساعة تعيش نحو ثمانٍ وخمسين شمعة — تسعة أيام تداول. عقد
+// جمعة هذا الأسبوع يموت قبل أن تنضج، فتخسر في محفظتك صفقة ربحت على الشارت.
+// هذا الخطأ لا يظهر في أي اختبار يقيس R على السهم، ولذلك يُكتب هنا صراحة.
+holdBars = prof == "حارق" ? 12 : prof == "سريع" ? 35 : prof == "نصف يوم" ? 46 : prof == "يوم" ? 58 : 40
+holdDays = holdBars * tfMin / 390.0
 
 // ============================ الحسابات ======================================
 atr   = ta.atr(14)
@@ -279,7 +287,8 @@ qGateUp = not qualityMode or contUp or atZoneUp or (adx >= adxMin and cloudDir >
 qGateDn = not qualityMode or contDn or atZoneDn or (adx >= adxMin and cloudDir <= 0)
 flat = strategy.position_size == 0
 dayOpen = maxLossDay == 0 or lossRunDay < maxLossDay
-canEnter = barstate.isconfirmed and inWin and flat and pDir == 0 and dayOpen and (bar_index - lastExit) > coolEff and bar_index > 60
+stretched = math.abs(close - cloudSlow) > stretchX * atr
+canEnter = not stretched and barstate.isconfirmed and inWin and flat and pDir == 0 and dayOpen and (bar_index - lastExit) > coolEff and bar_index > 60
 longSig  = canEnter and trigUp and qUp >= minQeff and qGateUp and (not h1Veto or d60 >= 0)
 shortSig = canEnter and not longSig and trigDn and qDn >= minQeff and qGateDn and (not h1Veto or d60 <= 0)
 sigDir = longSig ? 1 : shortSig ? -1 : 0

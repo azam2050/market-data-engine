@@ -52,6 +52,9 @@ brkX       = input.float(0.10, "مسافة أمر الاختراق (ATR)", minva
 pExpire    = input.int(3, "صلاحية الأمرين (شموع)", minval=1, maxval=12, group=gE)
 minRiskX   = input.float(0.5, "أدنى مسافة وقف (ATR)", minval=0.2, maxval=2.0, step=0.1, group=gE)
 anticipate = input.bool(true, "دخول مبكر من منطقة التصحيح (بلا انتظار شمعة الاستئناف)", group=gE)
+// الخسائر على الشارت لها شكل واحد: دخول على قمة شمعة انفجارية بعيدة عن
+// المتوسط. الجسم الضخم البعيد ليس بداية حركة بل نهايتها — تشتري ممن يبيع.
+stretchX = input.float(2.0, "أقصى بُعد عن السحابة للدخول (ATR)", minval=0.5, maxval=6.0, step=0.25, group=gE)
 
 gO = "العقود اليومية"
 dteCut  = input.int(90, "امنع عقد اليوم قبل الإغلاق بـ (دقيقة)", minval=0, maxval=240, group=gO, tooltip="بعد هذا الوقت يتحول العقد المقترح إلى عقد الغد وتُوسم الإشارة بمخاطرة الفجوة")
@@ -123,6 +126,11 @@ coolN = prof == "حارق" ? 3 : prof == "سريع" ? 6 : prof == "نصف يوم
 // جُرّب تقصير هذه المهلة فقصّت الخاسرة بثُمنها والرابحة بربعها، فرُدّت.
 // الصفقة الراكدة تكلّف، لكن قتل الرابحة الناشئة يكلّف أكثر.
 timeStop = prof == "حارق" ? 6 : prof == "سريع" ? 10 : prof == "نصف يوم" ? 12 : prof == "يوم" ? 14 : 20
+// الرابحة على الساعة تعيش نحو ثمانٍ وخمسين شمعة — تسعة أيام تداول. عقد
+// جمعة هذا الأسبوع يموت قبل أن تنضج، فتخسر في محفظتك صفقة ربحت على الشارت.
+// هذا الخطأ لا يظهر في أي اختبار يقيس R على السهم، ولذلك يُكتب هنا صراحة.
+holdBars = prof == "حارق" ? 12 : prof == "سريع" ? 35 : prof == "نصف يوم" ? 46 : prof == "يوم" ? 58 : 40
+holdDays = holdBars * tfMin / 390.0
 
 // ============================ حسابات أساسية =================================
 atr   = ta.atr(14)
@@ -330,7 +338,12 @@ minsLeft = na(sessEnd) ? na : (sessEnd - time) / 60000.0
 lateSession = not na(minsLeft) and minsLeft <= dteCut
 atBell = timeframe.isintraday and session.islastbar_regular
 // عقد اليوم قبل النافذة، وعقد الغد بعدها — وهي حينها مخاطرة فجوة صريحة
-expiryTxt = not isFund ? "جمعة الأسبوع" : lateSession ? "الغد ⚠️" : "اليوم 0DTE"
+// تاريخ الانتهاء يُشتق من مدة الصفقة المتوقعة لا من العادة: عقد يجب أن
+// يعيش ثلاثة أضعاف ما تحتاجه الصفقة، وإلا مات قبل أن تنضج.
+needDays = math.ceil(holdDays * 3.0)
+expiryTxt = isFund and holdDays <= 1.0 ? (lateSession ? "الغد ⚠️" : "اليوم 0DTE") :
+     needDays <= 5 ? "جمعة الأسبوع" : needDays <= 12 ? "بعد أسبوعين" :
+     needDays <= 25 ? "بعد شهر" : "بعد شهرين"
 gapRisk = isFund and lateSession
 
 // ============================ قياس الاندفاع =================================
@@ -398,7 +411,8 @@ coolEff = aggro == "هادئ" ? coolN * 2 : aggro == "نشط" ? math.max(1, cool
 qGateUp = not qualityMode or contUp or atZoneUp or (adx >= adxMin and cloudDir >= 0)
 qGateDn = not qualityMode or contDn or atZoneDn or (adx >= adxMin and cloudDir <= 0)
 dayOpen = maxLossDay == 0 or lossRunDay < maxLossDay
-canEnter = barstate.isconfirmed and not inTrade and pDir == 0 and dayOpen and (bar_index - lastExit) > coolEff and bar_index > 60
+stretched = math.abs(close - cloudSlow) > stretchX * atr
+canEnter = not stretched and barstate.isconfirmed and not inTrade and pDir == 0 and dayOpen and (bar_index - lastExit) > coolEff and bar_index > 60
 longSig  = canEnter and trigUp and qUp >= minQeff and qGateUp and (not h1Veto or d60 >= 0)
 shortSig = canEnter and not longSig and trigDn and qDn >= minQeff and qGateDn and (not h1Veto or d60 <= 0)
 sigDir = longSig ? 1 : shortSig ? -1 : 0
@@ -742,7 +756,8 @@ if barstate.islast
     table.cell(dash, 0, 3, "قوة الفرصة", text_color=cMut, text_size=size.small)
     table.cell(dash, 1, 3, f_bar5(q) + "  " + str.tostring(q) + "/100" + (strongImp ? "  ⚡زخم" : ""), text_color=qCol, text_size=size.small)
     table.cell(dash, 0, 4, "العقد", text_color=cMut, text_size=size.small)
-    table.cell(dash, 1, 4, syminfo.ticker + " " + str.tostring(optStrk, format.mintick) + (liveDir > 0 ? "C" : "P") + " · " + expiryTxt,
+    table.cell(dash, 1, 4, syminfo.ticker + " " + str.tostring(optStrk, format.mintick) + (liveDir > 0 ? "C" : "P") + " · " + expiryTxt +
+         "  (الصفقة تحتاج ~" + str.tostring(holdDays, "#.#") + " يوم)",
          text_color=gapRisk ? cYel : sCol, text_size=size.small)
     table.cell(dash, 0, 5, "الأهداف", text_color=cMut, text_size=size.small)
     table.cell(dash, 1, 5, f_marks(hits) + "  " + f_pct(oP1) + " " + f_pct(oP2) + " " + f_pct(oP3) + " " + f_pct(oP4), text_color=cGold, text_size=size.small)

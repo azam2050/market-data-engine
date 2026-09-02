@@ -256,7 +256,7 @@ def _adx(bars: list[Bar], length: int = 14) -> list[float]:
 
 
 def run(bars: list[Bar], symbol: str, minutes: int, *, min_quality: int = 60,
-        anticipate: bool = True, max_loss_day: int = 3) -> Outcome:
+        anticipate: bool = True, max_loss_day: int = 3, stretch: float = 2.0) -> Outcome:
     """Replay the engine over one symbol's bars on one timeframe."""
     prof = profile_for(minutes)
     res = Outcome(symbol=symbol, minutes=minutes, profile=prof.name)
@@ -401,6 +401,9 @@ def run(bars: list[Bar], symbol: str, minutes: int, *, min_quality: int = 60,
 
         # ------------------------------------------------------------- arming
         if p_dir != 0 or (i - last_exit) <= prof.cool:
+            continue
+        # price already far from the mean is a move ending, not starting
+        if stretch and abs(b.close - slow[i]) > stretch * a:
             continue
         if max_loss_day and loss_run_day >= max_loss_day:
             continue
