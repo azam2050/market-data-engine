@@ -196,8 +196,11 @@ f_core() =>
     failL = useFail and not inBox and dirL and not na(pl1) and not na(pl2) and pl1 > pl2 + 0.25 * a and bar_index - pl1b <= 6 and close > high[1] and close > open
     // شمعة افتتاح الجلسة فجوة لا حركة — إشارتها تدخلك في قمتها بوقف بعيد
     firstBar = session.isfirstbar_regular
-    sigL = allowL and not firstBar and (grnL or boxL or rtL or failL)
-    sigS = allowS and not firstBar and (redS or boxS or rtS or failS)
+    // لا إشارة قبل أن تكتمل الحسابات — وإلا دخلنا من أول شمعة في التاريخ بوقف
+    // غير محسوب (NaN) لا يُضرب أبداً، وبقيت الصفقة مفتوحة شهراً تحجب كل ما بعدها
+    ready = bar_index >= 120 and not na(a) and not na(rngAvg) and not na(bbAvg) and not na(e50)
+    sigL = ready and allowL and not firstBar and (grnL or boxL or rtL or failL)
+    sigS = ready and allowS and not firstBar and (redS or boxS or rtS or failS)
     why = grnL ? "شمعة صاعدة" : boxL or rtL ? "كسر التجميع" : failL ? "قصور العزم" : redS ? "شمعة هابطة" : boxS or rtS ? "كسر التجميع" : failS ? "قصور العزم" : ""
     // قوة الموجة: مدى آخر ٢٠ شمعة — الأهداف تُقاس عليها
     // قوة الموجة = الاندفاعة التي صنعت الإشارة (من قاع آخر ١٠ شموع إلى الإغلاق)،
@@ -239,7 +242,7 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
     var float lastR = na
     var float unit = na
     closed = false
-    if pend != 0 and pos == 0
+    if pend != 0 and pos == 0 and not na(a[1]) and not na(wave[1])
         pos := pend
         eP := open
         sigHi := high[1]
@@ -258,6 +261,8 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
         secured := false
         barsIn := 0
         exitTxt := ""
+        pend := 0
+    else if pend != 0 and pos == 0
         pend := 0
     if pos != 0
         barsIn += 1
