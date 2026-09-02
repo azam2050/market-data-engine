@@ -1,0 +1,380 @@
+// ══════════════════════════════════════════════════════════════════════════
+//  مِرصاد ٧  ·  MIRSAD 7
+//
+//  ثلاث حالات، بُنيت من شرح صاحبها على الشارت لا من كتاب:
+//
+//    الشمع الخضر/الحمر  شمعتان لا أكثر: صاعدة قوية تُغلق فوق قمة التي قبلها
+//                       = إشارة، والتي بعدها = دخول على افتتاحها.
+//    كسر التجميع        بعد كل حركة تجميع: مستطيل أو مثلث أو فوضى. يُرسم،
+//                       ويُنتظر كسره — بشمعة واحدة إن كانت قوية ومع ميل
+//                       الصندوق، وبشمعتين إن كانت ضعيفة أو ضد الميل.
+//    قصور العزم         قمة لم تبلغ سابقتها ثم أول إغلاق تحت قاع الشمعة
+//                       السابقة — بوت من أول شمعة. والعكس كول.
+//
+//  الوقف: تحت قاع الشمعة التي قبل الدخول، وأبعد قليلاً منه — لأن القاع
+//  الظاهر هو حيث تقف الناس والسوق يصيدها. وأول صعود: أمّن.
+//  الأهداف: من قوة الموجة، والوقف يمشي معها.
+//
+//  على الشارت للعميل: كول / بوت، الأهداف، الأحمر وقف، والصندوق. لا أدوات.
+//  لا إعادة رسم: الإشارة تُختم على الإغلاق، والدخول على افتتاح التالية.
+// ══════════════════════════════════════════════════════════════════════════
+//@version=5
+indicator("مِرصاد ٧", "MIRSAD 7", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 200)
+
+// ─────────────────────────────────────────────────────────── الإعدادات
+gM = "الوضع"
+dirIn   = input.string("الاتجاهان", "الاتجاه", options = ["الاتجاهان", "كول فقط", "بوت فقط"], group = gM)
+withBig = input.bool(true, "مع الاتجاه الأكبر فقط (متوسط ٥٠)", group = gM)
+nGrn    = input.int(1, "الشمعة الصاعدة تُغلق فوق قمة آخر N شمعة", minval = 1, maxval = 8, group = gM)
+kStrong = input.float(1.2, "الشمعة القوية = × متوسط المدى", minval = 0.8, maxval = 2.5, step = 0.1, group = gM)
+
+gC = "الحالات"
+useGrn  = input.bool(true, "الشمع الخضر / الحمر", group = gC)
+useBox  = input.bool(true, "كسر التجميع", group = gC)
+useFail = input.bool(true, "قصور العزم", group = gC)
+retest  = input.bool(false, "كسر التجميع: انتظر إعادة الاختبار", group = gC)
+
+gS = "الوقف والأهداف"
+trapX = input.float(0.15, "المصيدة: هامش تحت القاع (ATR)", minval = 0.0, maxval = 0.6, step = 0.05, group = gS)
+minX  = input.float(0.50, "أدنى مسافة وقف (ATR)", minval = 0.2, maxval = 2.0, step = 0.1, group = gS)
+maxX  = input.float(3.00, "أقصى مسافة وقف (ATR)", minval = 1.0, maxval = 6.0, step = 0.25, group = gS)
+w1 = input.float(0.5, "هدف ١ = × قوة الموجة", minval = 0.2, step = 0.1, group = gS)
+w2 = input.float(1.0, "هدف ٢ = × قوة الموجة", minval = 0.5, step = 0.1, group = gS)
+w3 = input.float(1.6, "هدف ٣ = × قوة الموجة", minval = 1.0, step = 0.1, group = gS)
+trailN = input.int(7, "الوقف يتبع قاع آخر N شمعة", minval = 3, maxval = 15, group = gS)
+
+gV = "العرض"
+showLv = input.bool(true, "الوقف والأهداف", group = gV)
+showBox = input.bool(true, "صندوق التجميع", group = gV)
+showPnl = input.bool(true, "لوحة الصفقة", group = gV)
+showWatch = input.bool(true, "شاشة المراقبة", group = gV)
+
+gW = "رموز المراقبة"
+w1s = input.symbol("NASDAQ:QQQ", "١", group = gW)
+w1t = input.timeframe("5", "فريم ١", group = gW)
+w2s = input.symbol("AMEX:SPY", "٢", group = gW)
+w2t = input.timeframe("5", "فريم ٢", group = gW)
+w3s = input.symbol("NASDAQ:AAPL", "٣", group = gW)
+w3t = input.timeframe("15", "فريم ٣", group = gW)
+w4s = input.symbol("NASDAQ:NVDA", "٤", group = gW)
+w4t = input.timeframe("15", "فريم ٤", group = gW)
+w5s = input.symbol("NASDAQ:TSLA", "٥", group = gW)
+w5t = input.timeframe("60", "فريم ٥", group = gW)
+w6s = input.symbol("NASDAQ:META", "٦", group = gW)
+w6t = input.timeframe("60", "فريم ٦", group = gW)
+
+allowL = dirIn != "بوت فقط"
+allowS = dirIn != "كول فقط"
+
+// ═══════════════════════════ المطبخ — يُحسب هنا ولا يُذكر للعميل ═══════════
+// كل شيء في دالة واحدة كي تعمل على الشارت وعلى رموز المراقبة بالمنطق نفسه.
+f_core() =>
+    a = ta.atr(14)
+    rng = high - low
+    rngAvg = ta.sma(rng, 20)
+    e50 = ta.ema(close, 50)
+    // الشمعة القوية: مدى كبير وإغلاق في الربع الأخير من اتجاهها
+    strongUp = rng >= kStrong * rngAvg and close > open and (close - low) >= 0.75 * rng
+    strongDn = rng >= kStrong * rngAvg and close < open and (high - close) >= 0.75 * rng
+    // القمم والقيعان — للميل وقصور العزم، تبقى في المطبخ
+    phv = ta.pivothigh(high, 3, 3)
+    plv = ta.pivotlow(low, 3, 3)
+    var float ph1 = na
+    var float ph2 = na
+    var float pl1 = na
+    var float pl2 = na
+    var int ph1b = 0
+    var int pl1b = 0
+    if not na(phv)
+        ph2 := ph1
+        ph1 := phv
+        ph1b := bar_index - 3
+    if not na(plv)
+        pl2 := pl1
+        pl1 := plv
+        pl1b := bar_index - 3
+    // التجميع: انضغاط البولنجر بعد حركة — مستطيل أو مثلث أو فوضى، لا يهم
+    bbB = ta.sma(close, 20)
+    bbD = 2.0 * ta.stdev(close, 20)
+    bbW = bbB > 0 ? 2.0 * bbD / bbB : 0.0
+    bbAvg = ta.sma(bbW, 100)
+    moved = math.abs(close - close[25]) > 2.5 * a
+    sqz = bbAvg > 0 and bbW < 0.80 * bbAvg
+    var bool inBox = false
+    var float bxHi = na
+    var float bxLo = na
+    var int bxAge = 0
+    var int bxStart = 0
+    var int since = 999
+    var int upCnt = 0
+    var int dnCnt = 0
+    var bool brokeUp = false
+    var bool brokeDn = false
+    if sqz and not inBox and moved[3]
+        inBox := true
+        bxHi := high
+        bxLo := low
+        bxAge := 1
+        bxStart := bar_index
+        upCnt := 0
+        dnCnt := 0
+        brokeUp := false
+        brokeDn := false
+    else if inBox
+        bxAge += 1
+        margin = 0.20 * a
+        outUp = close > bxHi + margin
+        outDn = close < bxLo - margin
+        if not outUp and not outDn
+            bxHi := math.max(bxHi, high)
+            bxLo := math.min(bxLo, low)
+            upCnt := 0
+            dnCnt := 0
+        upCnt := outUp ? upCnt + 1 : 0
+        dnCnt := outDn ? dnCnt + 1 : 0
+        if bxAge > 80
+            inBox := false
+    // الميل داخل الصندوق: قيعان ترتفع = ضغط للأعلى، قمم تنخفض = ضغط للأسفل
+    leanUp = inBox and not na(pl1) and not na(pl2) and pl1b >= bxStart and pl1 > pl2
+    leanDn = inBox and not na(ph1) and not na(ph2) and ph1b >= bxStart and ph1 < ph2
+    boxOk = inBox and bxAge >= 5
+    // الكسر: شمعة واحدة إن كانت قوية ومع الميل، وإلا شمعتان
+    needUp = (strongUp and not leanDn) ? 1 : 2
+    needDn = (strongDn and not leanUp) ? 1 : 2
+    boxL = useBox and boxOk and not retest and upCnt >= needUp and not brokeUp
+    boxS = useBox and boxOk and not retest and dnCnt >= needDn and not brokeDn
+    // إعادة الاختبار: بعد الكسر يعود يلمس الحافة ويثبت فوقها
+    rtL = useBox and boxOk and retest and brokeUp and low <= bxHi and close > bxHi and close > open
+    rtS = useBox and boxOk and retest and brokeDn and high >= bxLo and close < bxLo and close < open
+    if inBox and upCnt >= needUp
+        brokeUp := true
+    if inBox and dnCnt >= needDn
+        brokeDn := true
+    // الشمع الخضر / الحمر — شمعة صاعدة قوية فوق قمة السابقة. خارج الصندوق فقط
+    dirL = not withBig or close > e50
+    dirS = not withBig or close < e50
+    grnL = useGrn and not inBox and strongUp and dirL and close > ta.highest(high, nGrn)[1]
+    redS = useGrn and not inBox and strongDn and dirS and close < ta.lowest(low, nGrn)[1]
+    // قصور العزم: قمة أدنى ثم أول إغلاق تحت قاع الشمعة السابقة
+    failS = useFail and not inBox and not na(ph1) and not na(ph2) and ph1 < ph2 and bar_index - ph1b <= 6 and close < low[1] and close < open
+    failL = useFail and not inBox and not na(pl1) and not na(pl2) and pl1 > pl2 and bar_index - pl1b <= 6 and close > high[1] and close > open
+    sigL = allowL and (grnL or boxL or rtL or failL)
+    sigS = allowS and (redS or boxS or rtS or failS)
+    why = grnL ? "شمعة صاعدة" : boxL or rtL ? "كسر التجميع" : failL ? "قصور العزم" : redS ? "شمعة هابطة" : boxS or rtS ? "كسر التجميع" : failS ? "قصور العزم" : ""
+    // قوة الموجة: مدى آخر ٢٠ شمعة — الأهداف تُقاس عليها
+    wave = math.max(ta.highest(high, 20) - ta.lowest(low, 20), 2.0 * a)
+    lean = leanUp ? 1 : leanDn ? -1 : 0
+    [sigL, sigS, why, inBox, bxHi, bxLo, bxStart, lean, wave, a]
+
+// ═══════════════════════════ إدارة الصفقة ═════════════════════════════
+// الدخول على افتتاح الشمعة التالية للإشارة. الوقف تحت قاع شمعة الإشارة
+// (وهي الشمعة التي قبل الدخول) ناقص المصيدة. التأمين عند أول إغلاق فوق
+// قمتها. ثم الوقف يتبع قاع آخر شموع ولا ينزل.
+f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
+    var int pos = 0
+    var int pend = 0
+    var string pwhy = ""
+    var float eP = na
+    var float sP = na
+    var float sigHi = na
+    var float sigLo = na
+    var float t1 = na
+    var float t2 = na
+    var float t3 = na
+    var int hit = 0
+    var bool secured = false
+    var int barsIn = 0
+    var string exitTxt = ""
+    var float lastR = na
+    var float unit = na
+    closed = false
+    if pend != 0 and pos == 0
+        pos := pend
+        eP := open
+        sigHi := high[1]
+        sigLo := low[1]
+        rawS = pos == 1 ? sigLo - trapX * a[1] : sigHi + trapX * a[1]
+        d = math.abs(eP - rawS)
+        d := math.min(math.max(d, minX * a[1]), maxX * a[1])
+        unit := d
+        sP := pos == 1 ? eP - d : eP + d
+        wv = wave[1]
+        t1 := pos == 1 ? eP + w1 * wv : eP - w1 * wv
+        t2 := pos == 1 ? eP + w2 * wv : eP - w2 * wv
+        t3 := pos == 1 ? eP + w3 * wv : eP - w3 * wv
+        hit := 0
+        secured := false
+        barsIn := 0
+        exitTxt := ""
+        pend := 0
+    if pos != 0
+        barsIn += 1
+        hitStop = pos == 1 ? low <= sP : high >= sP
+        if hitStop
+            lastR := (sP - eP) / unit * pos
+            exitTxt := secured ? (hit > 0 ? "خروج بربح" : "خروج على التعادل") : "وقف"
+            pos := 0
+            closed := true
+        else
+            if pos == 1
+                hit := high >= t3 ? 3 : high >= t2 ? 2 : high >= t1 ? 1 : hit
+            else
+                hit := low <= t3 ? 3 : low <= t2 ? 2 : low <= t1 ? 1 : hit
+            if hit >= 3
+                lastR := (t3 - eP) / unit * pos
+                exitTxt := "هدف ٣"
+                pos := 0
+                closed := true
+            else
+                // "من أول صعود أمّن": أول إغلاق فوق قمة شمعة الإشارة
+                if not secured and (pos == 1 ? close > sigHi : close < sigLo)
+                    secured := true
+                    sP := eP
+                if secured
+                    tl = ta.lowest(low, trailN) - trapX * a
+                    th = ta.highest(high, trailN) + trapX * a
+                    sP := pos == 1 ? math.max(sP, tl) : math.min(sP, th)
+    if barstate.isconfirmed and pos == 0 and pend == 0 and not closed
+        if sigL
+            pend := 1
+            pwhy := why
+        else if sigS
+            pend := -1
+            pwhy := why
+    [pos, pend, pwhy, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR]
+
+// ═══════════════════════════ الشارت ═══════════════════════════════════
+[sigL, sigS, why, inBox, bxHi, bxLo, bxStart, lean, wave, atrv] = f_core()
+[pos, pend, pwhy, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR] = f_trade(sigL, sigS, why, wave, atrv)
+
+cUp = #0E9F6E
+cDn = #E02424
+
+// كول / بوت — كلمة على الشمعة، تُختم على إغلاقها
+if barstate.isconfirmed and pend == 1
+    label.new(bar_index, low, "كول", style = label.style_label_up, color = color.new(cUp, 0), textcolor = color.white, size = size.small)
+if barstate.isconfirmed and pend == -1
+    label.new(bar_index, high, "بوت", style = label.style_label_down, color = color.new(cDn, 0), textcolor = color.white, size = size.small)
+
+// الصندوق
+var box bx = na
+if showBox
+    if inBox and not inBox[1]
+        bx := box.new(bar_index, bxHi, bar_index, bxLo, border_color = color.new(#B7791F, 40), bgcolor = color.new(#B7791F, 90))
+    if inBox and not na(bx)
+        box.set_right(bx, bar_index)
+        box.set_top(bx, bxHi)
+        box.set_bottom(bx, bxLo)
+
+// الوقف والأهداف
+var line lnS = na
+var line ln1 = na
+var line ln2 = na
+var line ln3 = na
+inTr = pos != 0
+if showLv and inTr and not inTr[1]
+    lnS := line.new(bar_index, sP, bar_index + 1, sP, color = color.new(cDn, 10), width = 2)
+    ln1 := line.new(bar_index, t1, bar_index + 1, t1, color = color.new(cUp, 55), style = line.style_dashed)
+    ln2 := line.new(bar_index, t2, bar_index + 1, t2, color = color.new(cUp, 35), style = line.style_dashed)
+    ln3 := line.new(bar_index, t3, bar_index + 1, t3, color = color.new(cUp, 10), width = 2)
+if showLv and inTr and not na(lnS)
+    line.set_y1(lnS, sP)
+    line.set_xy2(lnS, bar_index + 1, sP)
+    line.set_xy2(ln1, bar_index + 1, t1)
+    line.set_xy2(ln2, bar_index + 1, t2)
+    line.set_xy2(ln3, bar_index + 1, t3)
+
+if closed
+    label.new(bar_index, close, exitTxt + "  " + str.tostring(lastR, "#.##") + "R", style = label.style_label_left, size = size.small, color = color.new(lastR >= 0 ? cUp : cDn, 15), textcolor = color.white)
+
+// ═══════════════════════════ اللوحة والمراقبة ═════════════════════════
+f_dur(int bars, simple string tf) =>
+    m = bars * timeframe.in_seconds(tf) / 60
+    m < 60 ? str.tostring(m) + " د" : m < 1440 ? str.tostring(math.round(m / 60.0, 1)) + " س" : str.tostring(math.round(m / 1440.0, 1)) + " ي"
+
+f_hits(int h) =>
+    (h >= 1 ? "✓" : "—") + " " + (h >= 2 ? "✓" : "—") + " " + (h >= 3 ? "✓" : "—")
+
+f_stateTxt(int p, int pd, bool sec, bool ib, int ln) =>
+    p == 1 ? (sec ? "كول · مؤمَّنة" : "كول قائمة") : p == -1 ? (sec ? "بوت · مؤمَّنة" : "بوت قائمة") : pd == 1 ? "كول على الافتتاح" : pd == -1 ? "بوت على الافتتاح" : ib ? (ln == 1 ? "تجميع · ميل للصعود" : ln == -1 ? "تجميع · ميل للهبوط" : "تجميع") : "مراقبة"
+
+var table pt = na
+f_kv(int r, string k, string v, color c) =>
+    table.cell(pt, 0, r, k, text_color = color.new(#9CA3AF, 0), bgcolor = color.new(#1F2937, 10), text_size = size.tiny)
+    table.cell(pt, 1, r, v, text_color = c, bgcolor = color.new(#1F2937, 10), text_size = size.small)
+
+if showPnl and barstate.islast
+    if na(pt)
+        pt := table.new(position.bottom_right, 2, 7, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
+    table.cell(pt, 0, 0, "مِرصاد ٧", text_color = color.white, bgcolor = color.new(#111827, 0), text_size = size.small)
+    table.cell(pt, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color = color.new(#D1D5DB, 0), bgcolor = color.new(#111827, 0), text_size = size.small)
+    st = f_stateTxt(pos, pend, secured, inBox, lean)
+    f_kv(1, "الحالة", st, pos != 0 or pend != 0 ? color.new(pos == -1 or pend == -1 ? #FCA5A5 : #86EFAC, 0) : color.new(#FCD34D, 0))
+    f_kv(2, "السبب", pos != 0 ? pwhy : "—", color.new(#D1D5DB, 0))
+    f_kv(3, "المدة", pos != 0 ? f_dur(barsIn, timeframe.period) : "—", color.new(#D1D5DB, 0))
+    f_kv(4, "الدخول", pos != 0 ? str.tostring(eP, format.mintick) : "—", color.new(#D1D5DB, 0))
+    f_kv(5, "الوقف", pos != 0 ? str.tostring(sP, format.mintick) + (secured ? "  (مؤمَّن)" : "") : "—", color.new(#FCA5A5, 0))
+    f_kv(6, "الأهداف", pos != 0 ? f_hits(hit) + "   " + str.tostring(t1, format.mintick) + " · " + str.tostring(t2, format.mintick) + " · " + str.tostring(t3, format.mintick) : "—", color.new(#86EFAC, 0))
+
+// شاشة المراقبة — المنطق نفسه على كل رمز بفريمه
+f_watch() =>
+    [sL, sS, wy, ib, bh, bl, bs, ln, wv, av] = f_core()
+    [p, pd, pw, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr] = f_trade(sL, sS, wy, wv, av)
+    [p, pd, sec ? 1 : 0, ib ? 1 : 0, ln, bi, h, s, q3]
+
+[p1, d1, c1, b1, l1, n1, h1, s1, g1] = request.security(w1s, w1t, f_watch(), lookahead = barmerge.lookahead_off)
+[p2, d2, c2, b2, l2, n2, h2, s2, g2] = request.security(w2s, w2t, f_watch(), lookahead = barmerge.lookahead_off)
+[p3, d3, c3, b3, l3, n3, h3, s3, g3] = request.security(w3s, w3t, f_watch(), lookahead = barmerge.lookahead_off)
+[p4, d4, c4, b4, l4, n4, h4, s4, g4] = request.security(w4s, w4t, f_watch(), lookahead = barmerge.lookahead_off)
+[p5, d5, c5, b5, l5, n5, h5, s5, g5] = request.security(w5s, w5t, f_watch(), lookahead = barmerge.lookahead_off)
+[p6, d6, c6, b6, l6, n6, h6, s6, g6] = request.security(w6s, w6t, f_watch(), lookahead = barmerge.lookahead_off)
+
+f_short(string s) =>
+    parts = str.split(s, ":")
+    array.size(parts) > 1 ? array.get(parts, 1) : s
+
+blink = bar_index % 2 == 0 ? 0 : 30
+
+var table wt = na
+f_row(int r, string sym, simple string tf, int p, int pd, int sec, int ib, int ln, int bi, int h, float s, float q3) =>
+    unavailable = na(p)
+    st = unavailable ? "غير متاح" : f_stateTxt(p, pd, sec == 1, ib == 1, ln)
+    bg = unavailable ? color.new(#1F2937, 45) : pd != 0 ? color.new(pd == 1 ? cUp : cDn, blink) : p != 0 ? color.new(p == 1 ? cUp : cDn, 55) : ib == 1 ? color.new(#B7791F, 30) : color.new(#1F2937, 20)
+    dim = color.new(#1F2937, 20)
+    table.cell(wt, 0, r, f_short(sym), text_color = color.white, bgcolor = dim, text_size = size.small)
+    table.cell(wt, 1, r, tf, text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = size.tiny)
+    table.cell(wt, 2, r, st, text_color = color.white, bgcolor = bg, text_size = size.small)
+    table.cell(wt, 3, r, unavailable or p == 0 ? "—" : f_dur(bi, tf), text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = size.tiny)
+    table.cell(wt, 4, r, unavailable or p == 0 ? "—" : f_hits(h), text_color = color.new(#86EFAC, 0), bgcolor = dim, text_size = size.tiny)
+    table.cell(wt, 5, r, unavailable or p == 0 ? "—" : str.tostring(s, format.mintick), text_color = color.new(#FCA5A5, 0), bgcolor = dim, text_size = size.tiny)
+
+if showWatch and barstate.islast
+    if na(wt)
+        wt := table.new(position.middle_left, 6, 7, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
+    hdr = color.new(#111827, 0)
+    table.cell(wt, 0, 0, "الرمز", text_color = color.white, bgcolor = hdr, text_size = size.small)
+    table.cell(wt, 1, 0, "الفريم", text_color = color.white, bgcolor = hdr, text_size = size.small)
+    table.cell(wt, 2, 0, "الصفقة", text_color = color.white, bgcolor = hdr, text_size = size.small)
+    table.cell(wt, 3, 0, "المدة", text_color = color.white, bgcolor = hdr, text_size = size.small)
+    table.cell(wt, 4, 0, "الأهداف", text_color = color.white, bgcolor = hdr, text_size = size.small)
+    table.cell(wt, 5, 0, "الوقف", text_color = color.white, bgcolor = hdr, text_size = size.small)
+    f_row(1, w1s, w1t, p1, d1, c1, b1, l1, n1, h1, s1, g1)
+    f_row(2, w2s, w2t, p2, d2, c2, b2, l2, n2, h2, s2, g2)
+    f_row(3, w3s, w3t, p3, d3, c3, b3, l3, n3, h3, s3, g3)
+    f_row(4, w4s, w4t, p4, d4, c4, b4, l4, n4, h4, s4, g4)
+    f_row(5, w5s, w5t, p5, d5, c5, b5, l5, n5, h5, s5, g5)
+    f_row(6, w6s, w6t, p6, d6, c6, b6, l6, n6, h6, s6, g6)
+
+// ═══════════════════════════ التنبيهات ════════════════════════════════
+alertcondition(pend == 1 and barstate.isconfirmed, "كول", "مِرصاد ٧ — كول")
+alertcondition(pend == -1 and barstate.isconfirmed, "بوت", "مِرصاد ٧ — بوت")
+alertcondition(closed, "خروج", "مِرصاد ٧ — خروج")
+
+if barstate.isconfirmed and pend != 0
+    sideTxt = pend == 1 ? "CALL" : "PUT"
+    rawS = pend == 1 ? low - trapX * atrv : high + trapX * atrv
+    d0 = math.min(math.max(math.abs(close - rawS), minX * atrv), maxX * atrv)
+    alert('{"src":"mirsad7","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","side":"' + sideTxt + '","why":"' + pwhy + '","ref":' + str.tostring(close, format.mintick) + ',"stop":' + str.tostring(pend == 1 ? close - d0 : close + d0, format.mintick) + ',"t1":' + str.tostring(pend == 1 ? close + w1 * wave : close - w1 * wave, format.mintick) + ',"t2":' + str.tostring(pend == 1 ? close + w2 * wave : close - w2 * wave, format.mintick) + ',"t3":' + str.tostring(pend == 1 ? close + w3 * wave : close - w3 * wave, format.mintick) + '}', alert.freq_once_per_bar_close)
+
+if closed
+    alert('{"src":"mirsad7","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"exit","why":"' + exitTxt + '","r":' + str.tostring(lastR, "#.##") + '}', alert.freq_once_per_bar)
