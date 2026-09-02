@@ -25,10 +25,14 @@ gM = "الوضع"
 dirIn = input.string("الاتجاهان", "الاتجاه", options = ["الاتجاهان", "كول فقط", "بوت فقط"], group = gM)
 pvLen = input.int(3, "حساسية القمم والقيعان", minval = 2, maxval = 10, group = gM)
 adxMin = input.float(20, "فوقها يُعدّ اتجاهاً", minval = 12, maxval = 35, group = gM)
-flipOn = input.bool(true, "اقلب الاتجاه عند كسر الهيكل", group = gM)
-// قاعدته: إغلاق يكسر طرف الشمعة السابقة = خروج وانقلاب، فوراً لا بعد حين.
-// تأجيلها إلى ما بعد تأمين الصفقة يعني أن الموجة تفوتنا — وهذا ما كان يحدث.
-structNow = input.bool(true, "الخروج والانقلاب على كسر الشمعة السابقة فوراً", group = gM)
+// "لا تجلب دايركت بوت" — بعد الخروج ننتظر كسر التجميع، لا ننقلب على الشمعة نفسها
+flipOn = input.bool(false, "اقلب الاتجاه مباشرة عند الخروج", group = gM)
+// "السحبات كلها ممتازة" — الخروج على كسر الشمعة الواحدة يُخرجنا على كل سحبة
+// عادية، ونجاحه المقيس ٢٥٪. الأصل أن يتبع الوقفُ آخرَ قاع للموجة، وهذا خيار.
+structNow = input.bool(false, "خروج على كسر الشمعة السابقة (بدل تتبّع القاع)", group = gM)
+brkN = input.int(3, "الدخول: كسر أعلى/أدنى آخر N شمعة", minval = 1, maxval = 10, group = gM)
+strongK = input.float(1.2, "بشمعة قوية (× متوسط المدى)", minval = 0.8, maxval = 2.5, step = 0.1, group = gM)
+withBig = input.bool(true, "مع الاتجاه الأكبر فقط (فوق/تحت متوسط ٥٠)", group = gM)
 
 gH = "الحالات"
 useTrend = input.bool(true, "اتجاه — الهيكل والمتوسطات", group = gH)
@@ -68,6 +72,7 @@ allowS = dirIn != "كول فقط"
 
 // ──────────────────────────────────────────────────────── الأساسيات
 atr = ta.atr(14)
+rng = high - low
 ema20 = ta.ema(close, 20)
 ema50 = ta.ema(close, 50)
 [diP, diM, adx] = ta.dmi(14, 14)
@@ -126,9 +131,15 @@ sinceBox := accum ? 0 : sinceBox + 1
 boxReady = not accum and sinceBox <= 3 and boxAge[1] >= 5
 
 // ───────────────────────────────────────────────────────── الإشارات
-// ١ · اتجاه — نشتري القاع الأعلى، لا القمة بعد أن مضت. الاستوكاستك صامت هنا.
-trendL = useTrend and trending and structUp and close > ema50 and low <= ema20 and close > high[1]
-trendS = useTrend and trending and structDn and close < ema50 and high >= ema20 and close < low[1]
+// ١ · "الشمع الخضر" — دخول مبكر: إغلاق قوي يكسر أعلى آخر N شمعة، من أول
+// شمعتين بعد القاع، لا بعد أن تتأكد قمتان وقاعان. الاستوكاستك صامت هنا،
+// والدخول ممنوع داخل صندوق التجميع.
+rngAvg = ta.sma(rng, 20)
+bigBar = rng >= strongK * rngAvg
+dirOkL = not withBig or close > ema50
+dirOkS = not withBig or close < ema50
+trendL = useTrend and not accum and bigBar and dirOkL and close > ta.highest(high, brkN)[1] and close > open
+trendS = useTrend and not accum and bigBar and dirOkS and close < ta.lowest(low, brkN)[1] and close < open
 // ٢ · مراوحة — الحواف فقط، ومع تأكيد ارتداد الشمعة. المتوسطات صامتة هنا.
 rangeL = useRange and ranging and low <= bbLo and kSt < 20 and close > high[1]
 rangeS = useRange and ranging and high >= bbUp and kSt > 80 and close < low[1]
@@ -143,8 +154,8 @@ accS = boxReady and not na(boxLo) and close < boxLo and close < open
 
 sigL = allowL and (trendL or rangeL or accL or spring)
 sigS = allowS and (trendS or rangeS or accS or upthr)
-caseL = trendL ? "هيكل صاعد" : rangeL ? "حافة مراوحة" : spring ? "زنبرك وايكوف" : "خروج من التجميع"
-caseS = trendS ? "هيكل هابط" : rangeS ? "حافة مراوحة" : upthr ? "دفعة كاذبة" : "كسر التجميع"
+caseL = trendL ? "شمع خضر — كسر" : rangeL ? "حافة مراوحة" : spring ? "زنبرك وايكوف" : "خروج من التجميع"
+caseS = trendS ? "شمع حمر — كسر" : rangeS ? "حافة مراوحة" : upthr ? "دفعة كاذبة" : "كسر التجميع"
 
 // وقف الهيكل: أدنى قاع في الموجة للشراء، وأعلى قمة للبيع
 swLo = math.min(nz(pl1, low), ta.lowest(low, pvLen * 2 + 1))
@@ -213,11 +224,10 @@ if pos != 0
     else
         if reach1 and not safe
             safe := true
-            sP := eP
-        // ورفع الوقف مع كل قاع أعلى — الوقف يتبع الهيكل، لا الوقت
-        if safe
-            nS = pos == 1 ? swLo - bufX * atr : swHi + bufX * atr
-            sP := pos == 1 ? math.max(sP, nS) : math.min(sP, nS)
+        // "طلع الشمع الخضر بعدها؟ ارفع وقفك" — الوقف يتبع آخر قاع للموجة،
+        // دائماً، من الشمعة الأولى. لا ينزل أبداً.
+        nS = pos == 1 ? swLo - bufX * atr : swHi + bufX * atr
+        sP := pos == 1 ? math.max(sP, nS) : math.min(sP, nS)
 
 if barstate.isconfirmed and pos == 0 and pending == 0
     if sigL or flipL
