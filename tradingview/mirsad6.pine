@@ -224,10 +224,12 @@ if pos != 0
     else
         if reach1 and not safe
             safe := true
-        // "طلع الشمع الخضر بعدها؟ ارفع وقفك" — الوقف يتبع آخر قاع للموجة،
-        // دائماً، من الشمعة الأولى. لا ينزل أبداً.
-        nS = pos == 1 ? swLo - bufX * atr : swHi + bufX * atr
-        sP := pos == 1 ? math.max(sP, nS) : math.min(sP, nS)
+        // "طلع الشمع الخضر بعدها؟ ارفع وقفك" — بعد الدخول يتبع الوقفُ أدنى قاع
+        // لآخر شموع قليلة، فيطلع مع كل قاع أعلى ولا ينزل أبداً.
+        // (ربطه بآخر قاع مؤكّد كان يعلّقه عند القاع القديم ساعتين والسعر طاير)
+        trailLo = ta.lowest(low, pvLen * 2 + 1) - bufX * atr
+        trailHi = ta.highest(high, pvLen * 2 + 1) + bufX * atr
+        sP := pos == 1 ? math.max(sP, trailLo) : math.min(sP, trailHi)
 
 if barstate.isconfirmed and pos == 0 and pending == 0
     if sigL or flipL
