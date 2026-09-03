@@ -45,9 +45,9 @@ minX  = input.float(1.00, "أدنى مسافة وقف (ATR) — الظل لا ي
 coolN = input.int(6, "بعد وقف: شموع راحة قبل إشارة بنفس الاتجاه", minval = 0, maxval = 20, group = gS)
 maxX  = input.float(3.00, "أقصى مسافة وقف (ATR)", minval = 1.0, maxval = 6.0, step = 0.25, group = gS)
 tgtMode = input.string("قوة الموجة", "الأهداف تُحسب من", options = ["قوة الموجة", "بالدولار"], group = gS, tooltip = "بالدولار: هدف ١ و٢ و٣ مسافات ثابتة من سعر الدخول، مثل ٢ و٣ و٤ دولار")
-d1 = input.float(2.0, "هدف ١ بالدولار", minval = 0.1, step = 0.5, group = gS)
-d2 = input.float(3.0, "هدف ٢ بالدولار", minval = 0.1, step = 0.5, group = gS)
-d3 = input.float(4.0, "هدف ٣ بالدولار", minval = 0.1, step = 0.5, group = gS)
+usd1 = input.float(2.0, "هدف ١ بالدولار", minval = 0.1, step = 0.5, group = gS)
+usd2 = input.float(3.0, "هدف ٢ بالدولار", minval = 0.1, step = 0.5, group = gS)
+usd3 = input.float(4.0, "هدف ٣ بالدولار", minval = 0.1, step = 0.5, group = gS)
 w1 = input.float(0.5, "هدف ١ = × قوة الموجة", minval = 0.2, step = 0.1, group = gS)
 w2 = input.float(1.0, "هدف ٢ = × قوة الموجة", minval = 0.5, step = 0.1, group = gS)
 w3 = input.float(1.6, "هدف ٣ = × قوة الموجة", minval = 1.0, step = 0.1, group = gS)
@@ -271,9 +271,9 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
         sP := pos == 1 ? eP - d : eP + d
         wv = wave[1]
         // هدف ١ لا يقل عن +1R، وإلا كان الوقف أبعد من الهدف
-        m1 = tgtMode == "بالدولار" ? d1 : math.max(w1 * wv, d)
-        m2 = tgtMode == "بالدولار" ? d2 : math.max(w2 * wv, 2.0 * d)
-        m3 = tgtMode == "بالدولار" ? d3 : math.max(w3 * wv, 3.0 * d)
+        m1 = tgtMode == "بالدولار" ? usd1 : math.max(w1 * wv, d)
+        m2 = tgtMode == "بالدولار" ? usd2 : math.max(w2 * wv, 2.0 * d)
+        m3 = tgtMode == "بالدولار" ? usd3 : math.max(w3 * wv, 3.0 * d)
         t1 := pos == 1 ? eP + m1 : eP - m1
         t2 := pos == 1 ? eP + m2 : eP - m2
         t3 := pos == 1 ? eP + m3 : eP - m3
@@ -462,9 +462,9 @@ if barstate.isconfirmed and pend != 0
     sideTxt = pend == 1 ? "CALL" : "PUT"
     rawS = pend == 1 ? low - trapX * atrv : high + trapX * atrv
     d0 = math.min(math.max(math.abs(close - rawS), minX * atrv), maxX * atrv)
-    a1 = tgtMode == "بالدولار" ? d1 : math.max(w1 * wave, d0)
-    a2 = tgtMode == "بالدولار" ? d2 : math.max(w2 * wave, 2.0 * d0)
-    a3 = tgtMode == "بالدولار" ? d3 : math.max(w3 * wave, 3.0 * d0)
+    a1 = tgtMode == "بالدولار" ? usd1 : math.max(w1 * wave, d0)
+    a2 = tgtMode == "بالدولار" ? usd2 : math.max(w2 * wave, 2.0 * d0)
+    a3 = tgtMode == "بالدولار" ? usd3 : math.max(w3 * wave, 3.0 * d0)
     alert('{"src":"mirsad7","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","side":"' + sideTxt + '","why":"' + pwhy + '","ref":' + str.tostring(close, format.mintick) + ',"stop":' + str.tostring(pend == 1 ? close - d0 : close + d0, format.mintick) + ',"t1":' + str.tostring(pend == 1 ? close + a1 : close - a1, format.mintick) + ',"t2":' + str.tostring(pend == 1 ? close + a2 : close - a2, format.mintick) + ',"t3":' + str.tostring(pend == 1 ? close + a3 : close - a3, format.mintick) + '}', alert.freq_once_per_bar_close)
 
 if closed
