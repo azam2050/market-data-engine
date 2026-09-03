@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 from qqq_alpha.domain import OptionContract, OptionType
 from qqq_alpha.live.tvbridge import (
@@ -213,12 +214,15 @@ def test_bridge_entry_posts_card_then_follows_up() -> None:
     _run(flow())
     card = wire.channel[0]
     assert "⭐️ صفقة كول 🟢 — TSLA" in card
-    assert "TSLA 352.5C" in card and "1.95$" in card
+    # the card quotes the ask: that is what a buyer pays, not the mid
+    assert "TSLA 352.5C" in card and "2.00$" in card
     assert "351" in card and "349.5" in card and "اختراق" in card
     t1 = wire.channel[1]
-    assert "الهدف الأول" in t1 and "3.00$" in t1 and "+54%" in t1
+    assert "الهدف الأول" in t1 and "3.00$" in t1 and "+50%" in t1
     exit_msg = wire.channel[2]
-    assert exit_msg.startswith("✅") and "+1.8R" in exit_msg and "أقفل على" in exit_msg
+    # the exit report prices the close at the bid and remembers the peak
+    assert exit_msg.startswith("✅") and "+1.8R" in exit_msg
+    assert "دخول 2.00$ ← خروج 2.95$ (+48%)" in exit_msg and "أعلى ما بلغه العقد: 3.00$" in exit_msg
     # the exit cleared the trade: nothing left to follow up on
     assert not bridge._open
 
@@ -311,3 +315,96 @@ def test_the_pay_branch_no_longer_swallows_the_webhook_link_request():
     assert _wants_pay("دفع")
     assert _wants_pay("رابط الدفع")
     assert LiveEngine is not None  # the module imports cleanly with the branch
+
+
+# ------------------------------------------------------ MIRSAD json alerts
+
+
+def test_parse_mirsad_json_entry_exit_and_zone() -> None:
+    from qqq_alpha.live.tvbridge import parse_signal as ps
+
+    entry = ps('{"src":"mirsad8","sym":"QQQ","tf":"60","side":"CALL","why":"كسر التجميع",'
+               '"ref":711.9,"stop":709.4,"t1":714.0,"t2":716.1,"t3":718.5}')
+    assert entry is not None and entry.kind == "entry" and entry.symbol == "QQQ"
+    assert entry.side == 1 and entry.price == 711.9 and entry.stop == 709.4
+    assert entry.targets == (714.0, 716.1, 718.5) and entry.tf == "60"
+    zone = ps('{"src":"mirsad8","sym":"AAPL","tf":"60","event":"zone","side":"PUT","level":230.1}')
+    assert zone is not None and zone.kind == "pending" and zone.side == -1 and zone.price == 230.1
+    ex = ps('{"src":"mirsad8","sym":"QQQ","tf":"60","event":"exit","why":"وقف","r":-1.0}')
+    assert ex is not None and ex.kind == "exit" and ex.win is False and ex.r_text == "-1.00R"
+    win = ps('{"src":"mirsad7","sym":"NVDA","tf":"60","event":"exit","why":"هدف ٣","r":3.2}')
+    assert win is not None and win.win and win.r_text == "+3.20R"
+
+
+def test_spy_gets_daily_expiry_and_spx_routes_to_spy() -> None:
+    from qqq_alpha.live.tvbridge import resolve_underlying
+
+    assert next_expiry("SPY", _ny(2026, 8, 31, 10, 30), moon=False) == date(2026, 8, 31)
+    assert next_expiry("SPX", _ny(2026, 8, 31, 10, 30), moon=False) == date(2026, 8, 31)
+    assert resolve_underlying("SPX", 6480.0) == ("SPY", 648.0)
+    assert resolve_underlying("TSLA", 351.0) == ("TSLA", 351.0)
+
+
+def test_late_session_signal_books_next_expiry() -> None:
+    from qqq_alpha.live.tvbridge import is_late_session
+
+    assert is_late_session(_ny(2026, 8, 31, 15, 40))
+    assert not is_late_session(_ny(2026, 8, 31, 14, 59))
+
+
+ENTRY_JSON = ('{"src":"mirsad8","sym":"TSLA","tf":"60","side":"CALL","why":"شمعة صاعدة",'
+              '"ref":351.0,"stop":349.5,"t1":353.0,"t2":355.0,"t3":358.0}')
+
+
+def test_bridge_tracks_peak_and_reports_the_trade_and_the_day() -> None:
+    wire = _Wire([_c(352.5, 1.9, 2.0), _c(355, 1.0, 1.06)])
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
+
+    async def flow() -> None:
+        await bridge.handle(ENTRY_JSON)
+        # the contract rallies to 3.00, the minute clock records the peak
+        wire.chain = [_c(352.5, 2.95, 3.05), _c(355, 1.6, 1.7)]
+        await bridge.tick(_ny(2026, 8, 31, 11, 0))
+        # then fades to 2.40 by the exit alert
+        wire.chain = [_c(352.5, 2.40, 2.50), _c(355, 1.3, 1.4)]
+        await bridge.handle('{"src":"mirsad8","sym":"TSLA","tf":"60","event":"exit","why":"خروج بربح","r":0.8}')
+
+    _run(flow())
+    card = wire.channel[0]
+    assert "TSLA 352.5C" in card and "2.00$" in card and "353" in card and "شمعة صاعدة" in card
+    exit_msg = wire.channel[1]
+    assert exit_msg.startswith("✅") and "+0.80R" in exit_msg
+    assert "دخول 2.00$ ← خروج 2.40$ (+20%)" in exit_msg
+    assert "أعلى ما بلغه العقد: 3.00$ (+50%)" in exit_msg
+    assert not bridge._open
+    report = bridge.daily_report(datetime.now(UTC).astimezone(ZoneInfo("America/New_York")).date())
+    assert report is not None and "الصفقات: 1 · رابحة 1" in report and "+20%" in report and "+50%" in report
+
+
+def test_bridge_retires_a_contract_that_expired_without_an_exit() -> None:
+    wire = _Wire([_c(352.5, 1.9, 2.0)])
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
+
+    async def flow() -> None:
+        await bridge.handle(ENTRY_JSON)
+        # the Friday expiry passed at the bell with no exit alert
+        await bridge.tick(_ny(2026, 9, 4, 16, 5))
+
+    _run(flow())
+    assert not bridge._open
+    assert any("انتهى العقد بلا إشارة خروج" in m for m in wire.channel)
+
+
+def test_spx_signal_is_traded_through_spy() -> None:
+    seen: list[str] = []
+
+    class _W(_Wire):
+        async def chain_fetch(self, symbol: str, expiry: date, want: OptionType):
+            seen.append(symbol)
+            return self.chain
+
+    wire = _W([_c(650, 1.9, 2.0), _c(652, 1.0, 1.06)])
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
+    _run(bridge.handle('{"src":"mirsad8","sym":"SPX","tf":"60","side":"CALL","why":"x","ref":6480.0,"stop":6460.0}'))
+    assert seen == ["SPY"]
+    assert "SPY 650C" in wire.channel[0] and "الأرخص" in wire.channel[0]

@@ -802,6 +802,11 @@ class LiveEngine:
         """One watchdog evaluation. Alerts on the edges only — an outage is
         announced once when it starts and once when it clears, never every
         minute in between."""
+        # the TradingView bridge marks its open contracts on the same minute
+        # clock, so the exit report knows what the contract reached
+        if self._tv_bridge is not None:
+            with contextlib.suppress(Exception):
+                await self._tv_bridge.tick(now.astimezone(UTC))
         in_session = now.weekday() < 5 and REGULAR_OPEN <= now.time() <= REGULAR_CLOSE
         last_bar = self.status.last_bar_at
         age = (
@@ -1118,6 +1123,11 @@ class LiveEngine:
             closed = list(self.manager.closed_trades)
             for channel in targets:
                 await channel.post_daily_report(day, closed)
+            # the indicator's trades have their own report: contract entry,
+            # peak and exit for every signal that closed today
+            if self._tv_bridge is not None:
+                with contextlib.suppress(Exception):
+                    await self._tv_bridge.post_daily_report(day)
             # the concept lesson rides the bell's attention: minutes after the
             # numbers, while the audience is still reading them
             await self._post_daily_concept_lesson(day, targets)
