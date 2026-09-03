@@ -235,20 +235,59 @@ def test_bridge_quiet_kinds_go_to_admin_only() -> None:
     assert wire.channel == [] and len(wire.admin) == 2
 
 
-def test_bridge_no_contract_stays_off_the_channel() -> None:
+def test_bridge_no_contract_is_recorded_in_the_channel() -> None:
     wire = _Wire([])  # empty chain: nothing to pick
     bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
     _run(bridge.handle(ENTRY))
-    assert wire.channel == []
-    assert any("تعذر اختيار عقد" in m for m in wire.admin)
+    # the signal is still a record: the channel hears it got no contract,
+    # and the day's report lists it
+    assert len(wire.channel) == 1 and "لم يُعثر على عقد صالح" in wire.channel[0]
+    assert "TSLA" in wire.channel[0] and "351" in wire.channel[0]
+    assert not bridge._open
+    report = bridge.daily_report()
+    assert "إشارات بلا عقد متتبَّع" in report and "TSLA" in report
 
 
-def test_bridge_orphan_target_never_reaches_channel() -> None:
+def test_bridge_orphan_target_is_recorded_without_a_contract() -> None:
     # a target alert with no tracked entry (restart, or entry never posted)
     wire = _Wire([_c(352.5, 1.9, 2.0)])
     bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
     _run(bridge.handle("🔺 هدف 1 تحقق والصفقة مؤمّنة (الوقف = الدخول) | TSLA"))
-    assert wire.channel == [] and len(wire.admin) == 1
+    assert len(wire.channel) == 1 and "بدون عقد متتبَّع" in wire.channel[0]
+    assert "الهدف الأول" in wire.channel[0]
+
+
+def test_bridge_orphan_exit_is_recorded_and_listed_in_the_day() -> None:
+    wire = _Wire([_c(352.5, 1.9, 2.0)])
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
+    _run(bridge.handle("✅ خروج — كسر الوقف المتحرك | TSLA | النتيجة +1.8R"))
+    assert len(wire.channel) == 1
+    assert wire.channel[0].startswith("✅") and "+1.8R" in wire.channel[0] and "بدون عقد" in wire.channel[0]
+    assert "TSLA: خروج" in bridge.daily_report()
+
+
+def test_bridge_ignores_a_resent_alert() -> None:
+    # TradingView re-sends when the webhook answers slowly: same text, same trade
+    wire = _Wire([_c(352.5, 1.9, 2.0)])
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
+    _run(bridge.handle(ENTRY))
+    _run(bridge.handle(ENTRY))
+    assert len(wire.channel) == 1
+
+
+def test_daily_report_is_posted_even_on_a_quiet_day() -> None:
+    wire = _Wire([_c(352.5, 1.9, 2.0)])
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
+    assert _run(bridge.post_daily_report()) is True
+    assert len(wire.channel) == 1 and "لا صفقات مقفلة اليوم" in wire.channel[0]
+
+
+def test_daily_report_lists_what_is_still_open() -> None:
+    wire = _Wire([_c(352.5, 1.9, 2.0)])
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
+    _run(bridge.handle(ENTRY))
+    report = bridge.daily_report()
+    assert "ما زال مفتوحاً" in report and "TSLA 352.5C" in report and "2.00$" in report
 
 
 def test_bridge_channel_failure_reports_card_to_admin() -> None:
@@ -406,5 +445,121 @@ def test_spx_signal_is_traded_through_spy() -> None:
     wire = _W([_c(650, 1.9, 2.0), _c(652, 1.0, 1.06)])
     bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
     _run(bridge.handle('{"src":"mirsad8","sym":"SPX","tf":"60","side":"CALL","why":"x","ref":6480.0,"stop":6460.0}'))
-    assert seen == ["SPY"]
+    # both expiries are fetched for the shortlist, always on SPY
+    assert seen and set(seen) == {"SPY"}
     assert "SPY 650C" in wire.channel[0] and "الأرخص" in wire.channel[0]
+
+
+# ------------------------------------------------- the brain picks the contract
+
+
+def _c_on(strike: float, bid: float, ask: float, expiry: date, typ: OptionType = OptionType.CALL) -> OptionContract:
+    c = _c(strike, bid, ask, typ=typ)
+    return OptionContract(
+        occ_symbol=f"TST{expiry:%y%m%d}{'C' if typ is OptionType.CALL else 'P'}{int(strike * 1000):08d}",
+        underlying="TST", option_type=typ, strike=strike, expiry=expiry,
+        bid=c.bid, ask=c.ask, volume=c.volume, open_interest=c.open_interest,
+    )
+
+
+class _TwoExpiries(_Wire):
+    """Serves a different chain per expiry, like the real market does."""
+
+    def __init__(self, chains: dict[date, list[OptionContract]]):
+        super().__init__([])
+        self.chains = chains
+        self.asked: list[date] = []
+
+    async def chain_fetch(self, symbol: str, expiry: date, want: OptionType):
+        self.asked.append(expiry)
+        return self.chains.get(expiry, [])
+
+
+def test_analyst_sees_both_expiries_and_its_pick_is_used() -> None:
+    from qqq_alpha.live.tvbridge import later_expiry
+
+    this_fri = next_expiry("TSLA", datetime.now(UTC), moon=False)
+    next_fri = later_expiry("TSLA", this_fri)
+    wire = _TwoExpiries({
+        this_fri: [_c_on(352.5, 1.9, 2.0, this_fri), _c_on(355, 1.0, 1.06, this_fri)],
+        next_fri: [_c_on(352.5, 3.9, 4.0, next_fri), _c_on(355, 2.9, 3.0, next_fri)],
+    })
+    seen_ctx: list[dict] = []
+
+    async def analyst(ctx: dict) -> dict:
+        seen_ctx.append(ctx)
+        # the brain prefers the extra week of time
+        return {"occ": f"TST{next_fri:%y%m%d}C00355000", "why": "وقت أطول والهدف بعيد", "caution": "فارق سعر واسع"}
+
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch, analyst=analyst)
+    _run(bridge.handle(ENTRY_JSON))
+    ctx = seen_ctx[0]
+    assert ctx["signal"]["symbol"] == "TSLA" and ctx["signal"]["side"] == 1
+    assert ctx["rule_pick"] == f"TST{this_fri:%y%m%d}C00352500"
+    assert {row["expiry"] for row in ctx["candidates"]} == {this_fri.isoformat(), next_fri.isoformat()}
+    assert wire.asked == [this_fri, next_fri]
+    card = wire.channel[0]
+    assert "TSLA 355C" in card and "3.00$" in card and f"ينتهي {next_fri:%d-%m}" in card
+    assert "🤖 اختيار العقد: وقت أطول والهدف بعيد" in card and "⚠️ تنبيه: فارق سعر واسع" in card
+    assert bridge._open["TSLA"].expiry == next_fri
+
+
+def test_analyst_off_list_answer_falls_back_to_the_rules() -> None:
+    async def analyst(ctx: dict) -> dict:
+        return {"occ": "TST260904C00999000", "why": "invented"}
+
+    wire = _Wire([_c(352.5, 1.9, 2.0), _c(355, 1.0, 1.06)])
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch, analyst=analyst)
+    _run(bridge.handle(ENTRY_JSON))
+    card = wire.channel[0]
+    assert "TSLA 352.5C" in card and "حسب القواعد" in card and "invented" not in card
+
+
+def test_analyst_failure_never_loses_the_signal() -> None:
+    async def analyst(ctx: dict) -> dict:
+        raise RuntimeError("model down")
+
+    wire = _Wire([_c(352.5, 1.9, 2.0)])
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch, analyst=analyst)
+    _run(bridge.handle(ENTRY_JSON))
+    assert len(wire.channel) == 1 and "TSLA 352.5C" in wire.channel[0]
+
+
+def test_contract_analyst_parses_the_tool_call_and_rejects_strays() -> None:
+    from types import SimpleNamespace
+
+    from qqq_alpha.config import Settings
+    from qqq_alpha.live.tvbrain import ContractAnalyst, parse_choice, render_context
+
+    class _Messages:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        async def create(self, **kw):
+            self.calls.append(kw)
+            return SimpleNamespace(
+                stop_reason="tool_use",
+                content=[SimpleNamespace(type="tool_use", input={"occ": "tst260904c00352500", "why": "قريب", "confidence": 70})],
+            )
+
+    msgs = _Messages()
+    client = SimpleNamespace(messages=msgs)
+    settings = Settings(anthropic_api_key="k", anthropic_model="m")
+    analyst = ContractAnalyst(settings, client=client)
+    ctx = {
+        "signal": {"symbol": "TSLA", "side": 1, "price": 351.0, "stop": 349.5, "targets": [353.0], "reason": "x", "tf": "60"},
+        "now_ny": "2026-09-03 10:30", "minutes_to_close": 330, "late_session": False, "moon": False,
+        "underlying": "TSLA", "spot": 351.0, "rule_pick": "TST260904C00352500", "rule_expiry": "2026-09-04",
+        "candidates": [{"occ": "TST260904C00352500", "strike": 352.5}],
+    }
+    payload = _run(analyst.choose(ctx))
+    assert payload["occ"] == "tst260904c00352500"
+    call = msgs.calls[0]
+    assert call["tool_choice"] == {"type": "tool", "name": "choose_contract"}
+    assert "TSLA" in call["messages"][0]["content"] and "TST260904C00352500" in render_context(ctx)
+    choice = parse_choice(payload, {"TST260904C00352500"})
+    assert choice is not None and choice.occ == "TST260904C00352500" and choice.confidence == 70
+    assert parse_choice({"occ": "TST260904C00355000", "why": "no"}, {"TST260904C00352500"}) is None
+    # nothing configured: the analyst stays silent rather than raising
+    quiet = ContractAnalyst(Settings(anthropic_api_key="", anthropic_model=""))
+    assert not quiet.configured and _run(quiet.choose(ctx)) is None

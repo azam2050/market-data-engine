@@ -8,6 +8,7 @@ reply. Nothing here can place, close, or alter a trade.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 from collections.abc import Awaitable, Callable
@@ -195,6 +196,8 @@ def create_app(
     # stored and the derived fallback below stops being accepted — so a link
     # that reached the wrong hands, or an account no longer in use, is
     # revoked by issuing a new one rather than by a redeploy.
+    _tv_tasks: set[asyncio.Task[None]] = set()
+
     @app.post("/tv/{secret}")
     async def tradingview_signal(secret: str, request: Request):
         if not settings.telegram_bot_token:
@@ -204,7 +207,15 @@ def create_app(
             return JSONResponse({"ok": False}, status_code=404)
         raw = (await request.body())[:2000].decode("utf-8", errors="replace").strip()
         if raw and on_tv_signal is not None:
-            await on_tv_signal(raw)
+            # answer TradingView at once: the analysis and the chain lookups
+            # take seconds, and a slow answer makes TradingView re-send the
+            # same alert. The task set keeps the work alive until it is done.
+            task = asyncio.create_task(on_tv_signal(raw))
+            _tv_tasks.add(task)
+            task.add_done_callback(_tv_tasks.discard)
+            # let the handler take its first step (parse, dedupe) before the
+            # reply goes out; it carries on in the background from there
+            await asyncio.sleep(0)
         return {"ok": True}
 
     @app.post("/moyasar/webhook")

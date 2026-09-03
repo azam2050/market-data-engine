@@ -1890,10 +1890,17 @@ class LiveEngine:
                 async with MassiveClient(self.settings) as client:
                     return await client.option_chain(symbol, expiry, want)
 
+            # the brain reads every entry signal and names the contract from
+            # the live shortlist; without a configured model the rule pick
+            # stands on its own and the card says so
+            from qqq_alpha.live.tvbrain import ContractAnalyst
+
+            analyst = ContractAnalyst(self.settings)
             self._tv_bridge = TvBridge(
                 admin_send=self.notifier.note,
                 channel_send=channel_send,
                 chain_fetch=chain_fetch,
+                analyst=analyst.choose if analyst.configured else None,
             )
         try:
             await self._tv_bridge.handle(raw)

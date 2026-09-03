@@ -4,18 +4,26 @@ The indicator is the eyes; this module is the hands. Every alert the
 operator's TradingView account fires lands here through the secret webhook,
 gets parsed (the MIRSAD JSON alerts and the older v1.8 Arabic strings), and:
 
-- an entry makes the bridge open the LIVE option chain and pick a tradeable
-  contract by the operator's rules: single stocks get the nearest weekly
-  Friday and the nearest strike; QQQ and SPY get a same-day expiry; an SPX
-  signal is routed to SPY, the cheaper contract on the same index; a late
-  session signal (or a 🌙 tag) is pushed to the next expiry on purpose. The
-  card carries the real contract price, never an estimate;
+- an entry makes the bridge open the LIVE option chain and shortlist
+  tradeable contracts by the operator's rules: single stocks get the nearest
+  weekly Friday and the nearest strike; QQQ and SPY get a same-day expiry;
+  an SPX signal is routed to SPY, the cheaper contract on the same index; a
+  late session signal (or a 🌙 tag) is pushed to the next expiry on purpose.
+  The brain (``tvbrain``) then reads the signal, the clock and the shortlist
+  and names the contract; the rule pick stands whenever the brain is silent
+  or names something that was not on the list. The card carries the real
+  contract price, never an estimate;
 - while the trade is open the bridge marks the contract every minute and
   keeps its peak, so the exit report can say what the contract reached;
 - zone / pending / trap alerts go to the operator only, so the channel
-  carries decisions, not noise;
+  carries decisions, not noise — but every TRADE is recorded in the
+  private channel: the entry card, the target updates, the exit report,
+  and also the cases that used to stay with the operator (no contract
+  found, a contract that expired without an exit, an exit or target with
+  no tracked entry), so the channel's record is complete;
 - an exit posts the trade report (entry, peak, exit, duration on the
-  contract) and books it into the day; the bell posts the day's report.
+  contract) and books it into the day; the bell posts the day's report
+  even on a day with nothing to report, so the record has no gaps.
 
 State is per-symbol and in-memory: a container restart forgets open
 follow-ups (the entry cards themselves are already posted), which is an
@@ -32,9 +40,11 @@ import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from qqq_alpha.domain import OptionContract, OptionType
+from qqq_alpha.live.tvbrain import ContractChoice, parse_choice
 
 log = logging.getLogger(__name__)
 
@@ -284,6 +294,53 @@ def pick_contract(
     return None
 
 
+def later_expiry(symbol: str, expiry: date) -> date:
+    """The expiry after this one: the next trading day for daily-listed
+    products, the following Friday for everything else. This is the
+    alternative the brain is allowed to prefer when the clock is short."""
+    if symbol.upper() in DAILY_EXPIRY:
+        d = expiry + timedelta(days=1)
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+        return d
+    return expiry + timedelta(days=7)
+
+
+def candidate_rows(
+    chain: list[OptionContract], side: int, spot: float, count: int = 5
+) -> list[dict[str, Any]]:
+    """The tradeable strikes around the spot, rendered for the brain.
+
+    Same bar as ``pick_contract``'s relaxed pass — a real premium and a
+    price on the screen — nearest to the money first, at most ``count``.
+    """
+    want = OptionType.CALL if side > 0 else OptionType.PUT
+    pool = [
+        c for c in chain
+        if c.option_type == want and c.mid and MIN_PREMIUM <= (c.mid or 0.0) <= MAX_PREMIUM
+    ]
+    pool.sort(key=lambda c: abs(c.strike - spot))
+    rows = []
+    for c in pool[:count]:
+        rows.append(
+            {
+                "occ": c.occ_symbol,
+                "expiry": c.expiry.isoformat(),
+                "strike": c.strike,
+                "bid": c.bid,
+                "ask": c.ask,
+                "mid": c.mid,
+                "spread_pct": c.spread_pct,
+                "delta": c.delta,
+                "iv": c.implied_volatility,
+                "volume": c.volume,
+                "open_interest": c.open_interest,
+                "distance_pct": round((c.strike - spot) / spot * 100, 2) if spot else None,
+            }
+        )
+    return rows
+
+
 def _pct(now: float, entry: float) -> float:
     return 100.0 * (now - entry) / entry if entry > 0 else 0.0
 
@@ -344,20 +401,57 @@ class ClosedTrade:
         return _pct(self.peak, self.entry)
 
 
+@dataclass
+class _DayNote:
+    """A channel record that is not a contract trade: a signal with no
+    contract, an exit with no tracked entry. It belongs in the day's report
+    so the ledger shows every signal, not only the ones that got a card."""
+
+    symbol: str
+    text: str
+    at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+# TradingView re-sends an alert when the webhook answers slowly; the same
+# text inside this window is the same signal, not a second trade
+DUPLICATE_WINDOW_SEC = 90
+
+
 class TvBridge:
     def __init__(
         self,
         admin_send: Callable[[str], Awaitable[None]],
         channel_send: Callable[[str], Awaitable[bool]],
         chain_fetch: Callable[[str, date, OptionType], Awaitable[list[OptionContract]]],
+        analyst: Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]] | None = None,
     ):
         self._admin = admin_send
         self._channel = channel_send
         self._chain = chain_fetch
+        self._analyst = analyst
         self._open: dict[str, _OpenTrade] = {}
         self._closed: list[ClosedTrade] = []
+        self._notes: list[_DayNote] = []
+        self._recent: dict[str, datetime] = {}
+
+    def _is_duplicate(self, raw: str) -> bool:
+        now = datetime.now(UTC)
+        key = hashlib.sha1(raw.strip().encode()).hexdigest()  # noqa: S324 - dedupe key, not security
+        self._recent = {k: t for k, t in self._recent.items() if (now - t).total_seconds() < DUPLICATE_WINDOW_SEC}
+        if key in self._recent:
+            return True
+        self._recent[key] = now
+        return False
+
+    async def _record(self, text: str, admin_prefix: str = "📡 ") -> bool:
+        """Post to the private channel, and echo to the operator either way."""
+        posted = await self._channel(text)
+        await self._admin((admin_prefix if posted else "⚠️ تعذر النشر في القناة:\n") + text)
+        return posted
 
     async def handle(self, raw: str) -> None:
+        if self._is_duplicate(raw):
+            return
         sig = parse_signal(raw)
         if sig is None:
             await self._admin("📡 إشارة من TradingView (غير مصنّفة):\n" + raw[:500])
@@ -387,23 +481,45 @@ class TvBridge:
         moon = sig.moon or is_late_session(now)
         underlying, spot = resolve_underlying(sig.symbol, sig.price)
         expiry = next_expiry(underlying, now, moon)
+        want = OptionType.CALL if sig.side > 0 else OptionType.PUT
+
+        # the rule pick and the shortlist the brain is allowed to choose from:
+        # the rule expiry first, the one after it as the permitted alternative
         contract: OptionContract | None = None
+        by_occ: dict[str, OptionContract] = {}
+        candidates: list[dict[str, Any]] = []
         err = ""
         if spot:
-            try:
-                want = OptionType.CALL if sig.side > 0 else OptionType.PUT
-                chain = await self._chain(underlying, expiry, want)
-                contract = pick_contract(chain, sig.side, spot)
-            except Exception as exc:  # noqa: BLE001 - a data hiccup must not kill the card
-                err = str(exc)
+            for exp in (expiry, later_expiry(underlying, expiry)):
+                try:
+                    chain = await self._chain(underlying, exp, want)
+                except Exception as exc:  # noqa: BLE001 - a data hiccup must not kill the card
+                    err = err or str(exc)
+                    continue
+                if exp == expiry:
+                    contract = pick_contract(chain, sig.side, spot)
+                for row in candidate_rows(chain, sig.side, spot):
+                    row["expiry"] = exp.isoformat()
+                    candidates.append(row)
+                by_occ.update({c.occ_symbol: c for c in chain})
+
         if contract is None:
-            await self._admin(
-                f"⚠️ إشارة {sig.symbol} وصلت لكن تعذر اختيار عقد"
-                f" (انتهاء {expiry:%d-%m}) — لم تُنشر"
-                + (f"\nالسبب: {err[:200]}" if err else "")
-                + "\n" + sig.raw[:300]
+            note = (
+                f"⚠️ إشارة {side_txt} {sig.symbol}" + (f" · فريم {sig.tf}" if sig.tf else "")
+                + f" — لم يُعثر على عقد صالح (انتهاء {expiry:%d-%m})، لا صفقة على هذه الإشارة"
+                + (f"\n📍 سعر الإشارة {sig.price:g}" if sig.price else "")
+                + (f" · 🛑 وقف {sig.stop:g}" if sig.stop else "")
             )
+            self._notes.append(_DayNote(sig.symbol, f"{side_txt} بلا عقد"))
+            await self._record(note + (f"\nالسبب التقني: {err[:200]}" if err else ""))
             return
+
+        # the brain reads the signal and the shortlist, then names the contract
+        choice = await self._analyse(sig, now, moon, underlying, spot, expiry, contract, candidates, set(by_occ))
+        if choice is not None:
+            contract = by_occ[choice.occ]
+            expiry = contract.expiry
+
         entry_px = float(contract.ask or contract.mid or 0.0)
         trade = _OpenTrade(
             signal_symbol=sig.symbol, underlying=underlying, side=sig.side,
@@ -428,12 +544,59 @@ class TvBridge:
             lines.append("🎯 الأهداف: " + " · ".join(f"{t:g}" for t in sig.targets))
         if sig.reason:
             lines.append(f"🧠 السبب: {sig.reason}")
+        if choice is not None:
+            lines.append(f"🤖 اختيار العقد: {choice.why}" if choice.why else "🤖 العقد اختاره التحليل")
+            if choice.caution:
+                lines.append(f"⚠️ تنبيه: {choice.caution}")
+        else:
+            lines.append("📐 العقد بأقرب ستررايك حسب القواعد")
         if moon:
             lines.append("🌙 إشارة آخر الجلسة — العقد محجوز للانتهاء التالي عمداً")
         lines.append("🔔 الأهداف والوقف يُداران آلياً — التحديثات هنا أولاً بأول")
         card = "\n".join(lines)
-        posted = await self._channel(card)
-        await self._admin(("✅ نُشرت في القناة:\n" if posted else "⚠️ تعذر النشر في القناة — البطاقة:\n") + card)
+        await self._record(card, admin_prefix="✅ نُشرت في القناة:\n")
+
+    async def _analyse(
+        self,
+        sig: TvSignal,
+        now: datetime,
+        moon: bool,
+        underlying: str,
+        spot: float | None,
+        expiry: date,
+        rule_pick: OptionContract,
+        candidates: list[dict[str, Any]],
+        allowed: set[str],
+    ) -> ContractChoice | None:
+        """Show the brain what the desk sees; accept only a candidate it was shown."""
+        if self._analyst is None or not candidates:
+            return None
+        ny = now.astimezone(NY)
+        close = ny.replace(hour=16, minute=0, second=0, microsecond=0)
+        ctx = {
+            "signal": {
+                "symbol": sig.symbol, "side": sig.side, "price": sig.price, "stop": sig.stop,
+                "targets": list(sig.targets), "reason": sig.reason, "tf": sig.tf,
+            },
+            "now_ny": ny.strftime("%Y-%m-%d %H:%M"),
+            "minutes_to_close": max(0, int((close - ny).total_seconds() // 60)),
+            "late_session": is_late_session(now),
+            "moon": moon,
+            "underlying": underlying,
+            "spot": spot,
+            "rule_pick": rule_pick.occ_symbol,
+            "rule_expiry": expiry.isoformat(),
+            "candidates": candidates,
+        }
+        try:
+            payload = await self._analyst(ctx)
+        except Exception as exc:  # noqa: BLE001 - the rules stand in for a silent brain
+            log.warning("contract analyst failed for %s: %s", sig.symbol, exc)
+            return None
+        choice = parse_choice(payload, allowed)
+        if payload and choice is None:
+            log.warning("contract analyst named something off the list for %s: %r", sig.symbol, payload)
+        return choice
 
     # ------------------------------------------------------------ targets
     async def _on_target(self, sig: TvSignal) -> None:
@@ -446,10 +609,9 @@ class TvBridge:
         if trade is not None:
             trade.hits = max(trade.hits, {"t1": 1, "t2": 2, "t3": 3}[sig.kind])
         suffix = await self._contract_suffix(sig.symbol)
-        msg = f"{sig.symbol}: {label}{suffix}"
-        if trade is not None:
-            await self._channel(msg)
-        await self._admin("📡 " + msg)
+        if trade is None:
+            suffix = " — بدون عقد متتبَّع (الإشارة قبل تشغيل المتابعة)"
+        await self._record(f"{sig.symbol}: {label}{suffix}")
 
     # -------------------------------------------------------------- exit
     async def _on_exit(self, sig: TvSignal) -> None:
@@ -458,16 +620,15 @@ class TvBridge:
         r_part = f" — النتيجة {sig.r_text}" if sig.r_text else ""
         why = f" ({sig.reason})" if sig.reason else ""
         if trade is None:
-            await self._admin(f"📡 {head} {sig.symbol}: خروج{why}{r_part} — لا صفقة متتبَّعة")
+            self._notes.append(_DayNote(sig.symbol, f"خروج{why}{r_part} — بدون عقد متتبَّع"))
+            await self._record(
+                f"{head} {sig.symbol}: خروج{why}{r_part}\n"
+                "📄 بدون عقد متتبَّع — الإشارة سبقت تشغيل المتابعة، النتيجة أعلاه على السهم"
+            )
             return
         exit_px = await self._mark(trade, side="exit")
         closed = self._book(trade, exit_px, how=sig.reason or "خروج", r_text=sig.r_text)
-        msg = (
-            f"{head} {sig.symbol}: خروج{why}{r_part}\n"
-            + self._trade_report(closed)
-        )
-        await self._channel(msg)
-        await self._admin("📡 " + msg)
+        await self._record(f"{head} {sig.symbol}: خروج{why}{r_part}\n" + self._trade_report(closed))
 
     def _book(self, trade: _OpenTrade, exit_px: float | None, how: str, r_text: str = "") -> ClosedTrade:
         px = exit_px if exit_px is not None else (trade.last_mark or 0.0)
@@ -517,9 +678,7 @@ class TvBridge:
             if expired:
                 self._open.pop(sym, None)
                 closed = self._book(trade, trade.last_mark, how="انتهى العقد بلا إشارة خروج")
-                msg = f"⌛️ {sym}: انتهى العقد بلا إشارة خروج\n" + self._trade_report(closed)
-                await self._channel(msg)
-                await self._admin("📡 " + msg)
+                await self._record(f"⌛️ {sym}: انتهى العقد بلا إشارة خروج\n" + self._trade_report(closed))
                 continue
             if ny.weekday() < 5 and 9 <= ny.hour < 16:
                 await self._mark(trade)
@@ -539,40 +698,49 @@ class TvBridge:
     def open_trades(self) -> list[_OpenTrade]:
         return list(self._open.values())
 
-    def daily_report(self, day: date | None = None) -> str | None:
-        """The day's contract results, or None when nothing closed."""
+    def daily_report(self, day: date | None = None) -> str:
+        """The day's record: every closed contract, every signal that got no
+        contract, and what is still open. Never empty — a quiet day is a
+        line that says so, so the channel's ledger has no missing days."""
         day = day or datetime.now(NY).date()
         todays = [c for c in self._closed if c.closed.astimezone(NY).date() == day]
-        if not todays:
-            return None
-        wins = [c for c in todays if c.pct > 0]
-        best = max(todays, key=lambda c: c.pct)
-        worst = min(todays, key=lambda c: c.pct)
-        total = sum(c.pct for c in todays)
-        lines = [
-            f"📊 تقرير اليوم {day:%d-%m} — إشارات TradingView",
-            "━━━━━━━━━━━━━━",
-            f"الصفقات: {len(todays)} · رابحة {len(wins)} · خاسرة {len(todays) - len(wins)}",
-            f"مجموع نتائج العقود: {_signed(total)} · متوسط الصفقة {_signed(total / len(todays))}",
-            f"الأفضل: {best.signal_symbol} {best.label} {_signed(best.pct)} (أعلى {_signed(best.peak_pct)})",
-            f"الأسوأ: {worst.signal_symbol} {worst.label} {_signed(worst.pct)}",
-            "",
-        ]
-        for c in todays:
-            side = "كول" if c.side > 0 else "بوت"
-            lines.append(
-                f"• {c.signal_symbol} {side} {c.label}: {c.entry:.2f} ← {c.exit:.2f} ({_signed(c.pct)})"
-                f" · أعلى {_signed(c.peak_pct)} · {_dur((c.closed - c.opened).total_seconds())}"
-                + (f" · {c.r_text}" if c.r_text else "")
-            )
+        notes = [n for n in self._notes if n.at.astimezone(NY).date() == day]
+        lines = [f"📊 تقرير اليوم {day:%d-%m} — إشارات TradingView", "━━━━━━━━━━━━━━"]
+        if todays:
+            wins = [c for c in todays if c.pct > 0]
+            best = max(todays, key=lambda c: c.pct)
+            worst = min(todays, key=lambda c: c.pct)
+            total = sum(c.pct for c in todays)
+            lines += [
+                f"الصفقات: {len(todays)} · رابحة {len(wins)} · خاسرة {len(todays) - len(wins)}",
+                f"مجموع نتائج العقود: {_signed(total)} · متوسط الصفقة {_signed(total / len(todays))}",
+                f"الأفضل: {best.signal_symbol} {best.label} {_signed(best.pct)} (أعلى {_signed(best.peak_pct)})",
+                f"الأسوأ: {worst.signal_symbol} {worst.label} {_signed(worst.pct)}",
+                "",
+            ]
+            for c in todays:
+                side = "كول" if c.side > 0 else "بوت"
+                lines.append(
+                    f"• {c.signal_symbol} {side} {c.label}: {c.entry:.2f} ← {c.exit:.2f} ({_signed(c.pct)})"
+                    f" · أعلى {_signed(c.peak_pct)} · {_dur((c.closed - c.opened).total_seconds())}"
+                    + (f" · {c.r_text}" if c.r_text else "")
+                )
+        else:
+            lines.append("لا صفقات مقفلة اليوم")
+        if notes:
+            lines += ["", "إشارات بلا عقد متتبَّع:"]
+            lines += [f"• {n.symbol}: {n.text}" for n in notes]
+        if self._open:
+            lines += ["", "ما زال مفتوحاً:"]
+            for t in self._open.values():
+                mark = f" · الآن {t.last_mark:.2f}$ ({_signed(_pct(t.last_mark, t.contract_entry))})" if t.last_mark else ""
+                lines.append(f"• {t.signal_symbol} {t.label()} · دخول {t.contract_entry:.2f}${mark}")
         return "\n".join(lines)
 
     async def post_daily_report(self, day: date | None = None) -> bool:
-        text = self.daily_report(day)
-        if text is None:
-            return False
-        posted = await self._channel(text)
-        await self._admin(("📊 " if posted else "⚠️ تعذر نشر التقرير في القناة:\n") + text)
         day = day or datetime.now(NY).date()
+        text = self.daily_report(day)
+        posted = await self._record(text, admin_prefix="📊 ")
         self._closed = [c for c in self._closed if c.closed.astimezone(NY).date() != day]
-        return True
+        self._notes = [n for n in self._notes if n.at.astimezone(NY).date() != day]
+        return posted
