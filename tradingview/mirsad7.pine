@@ -256,6 +256,9 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
     var int coolL = 0
     var int coolS = 0
     closed = false
+    // تُحسب كل شمعة خارج أي شرط، كما يوصي Pine
+    trailLo = ta.lowest(low, trailN) - trapX * a
+    trailHi = ta.highest(high, trailN) + trapX * a
     if pend != 0 and pos == 0 and not na(a[1]) and not na(wave[1])
         pos := pend
         eP := open
@@ -310,9 +313,7 @@ f_trade(bool sigL, bool sigS, string why, float wave, float a) =>
                 // سعر الدخول أبداً — سعر الدخول ليس مستوى في الشارت، والنقل إليه كان
                 // يُخرج صفقة عند +1.5R بصفر على ظل واحد ثم تمضي بدوننا.
                 if barsIn >= 2
-                    tl = ta.lowest(low, trailN) - trapX * a
-                    th = ta.highest(high, trailN) + trapX * a
-                    sP := pos == 1 ? math.max(sP, tl) : math.min(sP, th)
+                    sP := pos == 1 ? math.max(sP, trailLo) : math.min(sP, trailHi)
                     // تأمين الأهداف: كل هدف يُلمس يصير الوقف عند الذي قبله
                     if hit >= 2
                         sP := pos == 1 ? math.max(sP, t1) : math.min(sP, t1)
