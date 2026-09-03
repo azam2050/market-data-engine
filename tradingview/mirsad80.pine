@@ -1,18 +1,21 @@
 // This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// مِرصاد ٨٠ — مؤشر «نسبة النجاح العالية».
-// الفكرة بسيطة وصادقة في آن: وقف واسع (٣ ATR) وهدف قريب (١ ATR) يعطيان ٧٥ إلى ٨٥٪ صفقات ناجحة على أي رمز وأي فريم.
-// لكن الخسارة الواحدة تساوي ثلاثة أرباح، فالتعادل يحتاج ٧٥٪ نجاحاً قبل التكلفة. اللوحة تعرض النسبة والربح معاً، حتى لا تنخدع بالنسبة.
+// مِرصاد ٨٠ — مؤشر «نسبة النجاح العالية» مع الدخول المبكر.
+// وقف واسع (٣ ATR) وهدف قريب (١ ATR) يعطيان ٧٥ إلى ٨٥٪ صفقات ناجحة على أي رمز وأي فريم.
+// الدخول لا ينتظر إغلاق شمعة الكسر: عند اكتمال التهيئة يُرسم مستوى الدخول مسبقاً، ويُعتبر الدخول لحظة لمسه (أمر معلّق).
+// اللوحة تعرض النسبة والربح معاً، لأن الخسارة الواحدة تساوي ثلاثة أرباح والتعادل يحتاج ٧٥٪ قبل التكلفة.
 //@version=5
 indicator("مِرصاد ٨٠", "MIRSAD 80", overlay = true, max_labels_count = 500, max_lines_count = 500)
 
 // ═══════════════════════════ الإعدادات ═══════════════════════════════════
-ruleIn = input.string("٣ شموع", "قاعدة الدخول", options = ["٣ شموع", "RSI 35 مع متوسط ٢٠٠", "شمعة داخلية وكسر"], group = "الدخول")
-dirIn  = input.string("كول وبوت", "الاتجاه", options = ["كول وبوت", "كول فقط", "بوت فقط"], group = "الدخول")
-stopX  = input.float(3.0, "الوقف (× ATR)", minval = 0.5, step = 0.5, group = "الخروج", tooltip = "كلما وسّعت الوقف ارتفعت نسبة النجاح وكبرت الخسارة الواحدة")
-tgtX   = input.float(1.0, "الهدف (× ATR)", minval = 0.25, step = 0.25, group = "الخروج")
-costR  = input.float(0.15, "تكلفة العقد (بوحدة R)", minval = 0.0, step = 0.05, group = "الخروج", tooltip = "سبريد وعمولة ذهاباً وإياباً، كنسبة من مسافة الوقف. ٠٫١٥ تقدير معتدل للأوبشن")
+ruleIn  = input.string("٣ شموع", "قاعدة الدخول", options = ["٣ شموع", "RSI 35 مع متوسط ٢٠٠", "شمعة داخلية وكسر"], group = "الدخول")
+entryIn = input.string("عند لمس المستوى (مبكر)", "طريقة الدخول", options = ["عند لمس المستوى (مبكر)", "عند إغلاق الكسر ثم الافتتاح"], group = "الدخول", tooltip = "المبكر: أمر معلّق على المستوى يُنفَّذ داخل الشمعة لحظة اللمس. المتأخر: ننتظر إغلاق شمعة فوق المستوى ثم ندخل على افتتاح التالية")
+lifeN   = input.int(3, "صلاحية المستوى (شموع)", minval = 1, maxval = 10, group = "الدخول")
+dirIn   = input.string("كول وبوت", "الاتجاه", options = ["كول وبوت", "كول فقط", "بوت فقط"], group = "الدخول")
+stopX   = input.float(3.0, "الوقف (× ATR)", minval = 0.5, step = 0.5, group = "الخروج", tooltip = "كلما وسّعت الوقف ارتفعت نسبة النجاح وكبرت الخسارة الواحدة")
+tgtX    = input.float(1.0, "الهدف (× ATR)", minval = 0.25, step = 0.25, group = "الخروج")
+costR   = input.float(0.15, "تكلفة العقد (بوحدة R)", minval = 0.0, step = 0.05, group = "الخروج")
 showPanel = input.bool(true, "لوحة الصدق", group = "العرض")
-showLines = input.bool(true, "خطوط الوقف والهدف", group = "العرض")
+showLines = input.bool(true, "خطوط المستوى والوقف والهدف", group = "العرض")
 
 // ═══════════════════════════ الأدوات ═════════════════════════════════════
 a      = ta.atr(14)
@@ -21,70 +24,108 @@ r14    = ta.rsi(close, 14)
 ready  = bar_index >= 210 and not na(a) and not na(e200)
 allowL = dirIn != "بوت فقط"
 allowS = dirIn != "كول فقط"
+early  = entryIn == "عند لمس المستوى (مبكر)"
 
-// ٣ شموع: شمعة معاكسة، ثم شمعتان بلون واحد، ثم إغلاق يكسر قمتهما (أو قاعهما)
-threeL = close[3] < open[3] and close[2] > open[2] and close[1] > open[1] and close > open and close > math.max(high[1], high[2])
-threeS = close[3] > open[3] and close[2] < open[2] and close[1] < open[1] and close < open and close < math.min(low[1], low[2])
-// RSI 35 مع الاتجاه الكبير
-rsiL   = r14 < 35 and close > e200
-rsiS   = r14 > 65 and close < e200
-// شمعة داخلية ثم كسر
-inside = high[1] < high[2] and low[1] > low[2]
-inL    = inside and close > high[1]
-inS    = inside and close < low[1]
-
-sigL = ready and allowL and (ruleIn == "٣ شموع" ? threeL : ruleIn == "RSI 35 مع متوسط ٢٠٠" ? rsiL : inL)
-sigS = ready and allowS and (ruleIn == "٣ شموع" ? threeS : ruleIn == "RSI 35 مع متوسط ٢٠٠" ? rsiS : inS)
+// التهيئة: تكتمل عند إغلاق هذه الشمعة، وتعطي مستوى دخول معروفاً مسبقاً
+// ٣ شموع: شمعة معاكسة ثم شمعتان بلون واحد ← المستوى قمة الشمعتين (كول) أو قاعهما (بوت)
+setL3 = close[2] < open[2] and close[1] > open[1] and close > open
+setS3 = close[2] > open[2] and close[1] < open[1] and close < open
+lvlL3 = math.max(high, high[1])
+lvlS3 = math.min(low, low[1])
+// RSI 35 مع الاتجاه الكبير ← المستوى قمة شمعة الإشارة
+setLr = r14 < 35 and close > e200
+setSr = r14 > 65 and close < e200
+// شمعة داخلية ← المستوى قمتها أو قاعها
+setLi = high < high[1] and low > low[1]
+setSi = setLi
+setL = ready and allowL and (ruleIn == "٣ شموع" ? setL3 : ruleIn == "RSI 35 مع متوسط ٢٠٠" ? setLr : setLi)
+setS = ready and allowS and (ruleIn == "٣ شموع" ? setS3 : ruleIn == "RSI 35 مع متوسط ٢٠٠" ? setSr : setSi)
+lvlL = ruleIn == "٣ شموع" ? lvlL3 : high
+lvlS = ruleIn == "٣ شموع" ? lvlS3 : low
 
 // ═══════════════════════════ الصفقة ══════════════════════════════════════
-var int   pos  = 0
-var int   pend = 0
-var float eP   = na
-var float sP   = na
-var float tP   = na
-var float unit = na
-var int   barsIn = 0
+var int   pos   = 0
+var float eP    = na
+var float sP    = na
+var float tP    = na
+var float unit  = na
+var int   pSide = 0        // مستوى معلّق: الاتجاه
+var float pLvl  = na       // مستوى معلّق: السعر
+var int   pExp  = 0        // مستوى معلّق: آخر شمعة صالحة
+var float pAtr  = na
+var int   pend  = 0        // (طريقة الإغلاق) دخول مؤجل لافتتاح الشمعة التالية
+var line  lnP = na
 var line  lnS = na
 var line  lnT = na
 closed  = false
-exitTxt = ""
 lastR   = float(na)
 
+// دخول جديد في هذه الشمعة؟ (يُحدَّد أولاً، ثم يُنفَّذ مرة واحدة)
+int   newSide = 0
+float newP    = na
+justOpened    = false
+
 if barstate.isconfirmed
-    // ١) تنفيذ الدخول المعلّق على افتتاح هذه الشمعة
+    // ١) (طريقة الإغلاق) تنفيذ الدخول المؤجل على افتتاح هذه الشمعة
     if pend != 0 and pos == 0
-        pos := pend
+        newSide := pend
+        newP := open
         pend := 0
-        eP := open
-        unit := a[1]
+    // ٢) (الطريقة المبكرة) لمس المستوى المعلّق داخل هذه الشمعة = دخول على المستوى نفسه
+    if early and pos == 0 and newSide == 0 and pSide != 0 and bar_index <= pExp
+        touched = pSide == 1 ? high >= pLvl : low <= pLvl
+        if touched
+            newSide := pSide
+            newP := pSide == 1 ? math.max(open, pLvl) : math.min(open, pLvl)
+            pSide := 0
+    // فتح الصفقة
+    if newSide != 0
+        pos := newSide
+        eP := newP
+        unit := pAtr
         sP := pos == 1 ? eP - stopX * unit : eP + stopX * unit
         tP := pos == 1 ? eP + tgtX * unit : eP - tgtX * unit
-        barsIn := 0
-        label.new(bar_index, pos == 1 ? low : high, pos == 1 ? "كول" : "بوت", style = pos == 1 ? label.style_label_up : label.style_label_down, color = pos == 1 ? color.new(#16A34A, 0) : color.new(#DC2626, 0), textcolor = color.white, size = size.small)
+        justOpened := true
+        label.new(bar_index, eP, pos == 1 ? "كول" : "بوت", style = pos == 1 ? label.style_label_up : label.style_label_down, color = pos == 1 ? color.new(#16A34A, 0) : color.new(#DC2626, 0), textcolor = color.white, size = size.small)
         if showLines
             lnS := line.new(bar_index, sP, bar_index + 1, sP, color = color.new(#DC2626, 0), width = 2)
             lnT := line.new(bar_index, tP, bar_index + 1, tP, color = color.new(#16A34A, 0), width = 2)
-    // ٢) متابعة الصفقة المفتوحة: الوقف على الذيول، والوقف يسبق الهدف عند التعارض
-    if pos != 0
-        barsIn += 1
+    // ٣) الوقف والهدف على ذيول هذه الشمعة (تشمل شمعة الدخول المبكر نفسها؛ الوقف أولاً عند التعارض)
+    if pos != 0 and (not justOpened or early)
         hitS = pos == 1 ? low <= sP : high >= sP
         hitT = pos == 1 ? high >= tP : low <= tP
         if hitS or hitT
             exitP = hitS ? sP : tP
             lastR := (exitP - eP) / unit * pos - costR
             closed := true
-            exitTxt := hitS ? "وقف ✗" : "هدف ✓"
-            label.new(bar_index, hitS ? (pos == 1 ? low : high) : (pos == 1 ? high : low), exitTxt, style = label.style_label_left, color = hitS ? color.new(#DC2626, 20) : color.new(#16A34A, 20), textcolor = color.white, size = size.tiny)
+            label.new(bar_index, hitS ? (pos == 1 ? low : high) : (pos == 1 ? high : low), hitS ? "وقف ✗" : "هدف ✓", style = label.style_label_left, color = hitS ? color.new(#DC2626, 20) : color.new(#16A34A, 20), textcolor = color.white, size = size.tiny)
             pos := 0
         else if showLines
             line.set_x2(lnS, bar_index)
             line.set_x2(lnT, bar_index)
-    // ٣) إشارة جديدة تُنفَّذ على افتتاح الشمعة التالية
+    // ٤) (طريقة الإغلاق) إغلاق فوق المستوى المعلّق = دخول على افتتاح التالية
+    if not early and pos == 0 and pend == 0 and pSide != 0 and bar_index <= pExp
+        if (pSide == 1 and close > pLvl) or (pSide == -1 and close < pLvl)
+            pend := pSide
+            pSide := 0
+    // ٥) انتهاء صلاحية المستوى
+    if pSide != 0 and bar_index > pExp
+        pSide := 0
+    // ٦) تهيئة جديدة تُرسم مسبقاً (لا مستوى جديد ونحن داخل صفقة)
     if pos == 0 and pend == 0
-        if sigL
-            pend := 1
-        else if sigS
-            pend := -1
+        if setL
+            pSide := 1
+            pLvl := lvlL
+            pExp := bar_index + lifeN
+            pAtr := a
+        else if setS
+            pSide := -1
+            pLvl := lvlS
+            pExp := bar_index + lifeN
+            pAtr := a
+        if pSide != 0 and (setL or setS) and showLines
+            lnP := line.new(bar_index, pLvl, bar_index + lifeN, pLvl, color = pSide == 1 ? color.new(#16A34A, 30) : color.new(#DC2626, 30), style = line.style_dashed, width = 1)
+            label.new(bar_index, pLvl, pSide == 1 ? "مستوى كول" : "مستوى بوت", style = label.style_label_right, color = color.new(#111827, 30), textcolor = pSide == 1 ? color.new(#4ADE80, 0) : color.new(#FCA5A5, 0), size = size.tiny)
 
 // ═══════════════════════════ لوحة الصدق ══════════════════════════════════
 var int   nT = 0
@@ -97,7 +138,7 @@ if closed and not na(lastR)
         nW += 1
 wr     = nT > 0 ? 100.0 * nW / nT : 0.0
 avgR   = nT > 0 ? sumR / nT : 0.0
-needWr = 100.0 * (stopX + costR) / (stopX + tgtX)   // نسبة النجاح التي تكفي للتعادل فقط
+needWr = 100.0 * (stopX + costR) / (stopX + tgtX)
 
 var table pt = na
 f_row(int r, string k, string v, color c) =>
@@ -106,18 +147,22 @@ f_row(int r, string k, string v, color c) =>
 
 if showPanel and barstate.islast
     if na(pt)
-        pt := table.new(position.bottom_right, 2, 8, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
+        pt := table.new(position.bottom_right, 2, 9, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
     table.cell(pt, 0, 0, "مِرصاد ٨٠", text_color = color.white, bgcolor = color.new(#111827, 0), text_size = size.small)
     table.cell(pt, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color = color.new(#D1D5DB, 0), bgcolor = color.new(#111827, 0), text_size = size.small)
     f_row(1, "القاعدة", ruleIn + " · وقف " + str.tostring(stopX, "#.#") + " هدف " + str.tostring(tgtX, "#.##"), color.new(#D1D5DB, 0))
-    f_row(2, "الصفقات", str.tostring(nT) + (nT < 30 ? " (عينة صغيرة)" : ""), color.new(#D1D5DB, 0))
-    f_row(3, "نسبة النجاح", str.tostring(wr, "#.#") + "%", wr >= needWr ? color.new(#4ADE80, 0) : color.new(#FCA5A5, 0))
-    f_row(4, "المطلوب للتعادل", str.tostring(needWr, "#.#") + "%", color.new(#FCD34D, 0))
-    f_row(5, "متوسط الصفقة", str.tostring(avgR, "+#.###;-#.###") + " R", avgR > 0 ? color.new(#4ADE80, 0) : color.new(#FCA5A5, 0))
-    f_row(6, "صافي R", str.tostring(sumR, "+#.#;-#.#") + " R", sumR > 0 ? color.new(#4ADE80, 0) : color.new(#FCA5A5, 0))
-    f_row(7, "الحكم", nT < 30 ? "لم يكتمل" : sumR > 0 ? "رابح" : "خاسر رغم النسبة ⚠", nT < 30 ? color.new(#D1D5DB, 0) : sumR > 0 ? color.new(#4ADE80, 0) : color.new(#FCA5A5, 0))
+    f_row(2, "الدخول", early ? "مبكر: عند لمس المستوى" : "متأخر: بعد إغلاق الكسر", color.new(#D1D5DB, 0))
+    f_row(3, "الصفقات", str.tostring(nT) + (nT < 30 ? " (عينة صغيرة)" : ""), color.new(#D1D5DB, 0))
+    f_row(4, "نسبة النجاح", str.tostring(wr, "#.#") + "%", wr >= needWr ? color.new(#4ADE80, 0) : color.new(#FCA5A5, 0))
+    f_row(5, "المطلوب للتعادل", str.tostring(needWr, "#.#") + "%", color.new(#FCD34D, 0))
+    f_row(6, "متوسط الصفقة", str.tostring(avgR, "+#.###;-#.###") + " R", avgR > 0 ? color.new(#4ADE80, 0) : color.new(#FCA5A5, 0))
+    f_row(7, "صافي R", str.tostring(sumR, "+#.#;-#.#") + " R", sumR > 0 ? color.new(#4ADE80, 0) : color.new(#FCA5A5, 0))
+    f_row(8, "الحكم", nT < 30 ? "لم يكتمل" : sumR > 0 ? "رابح" : "خاسر رغم النسبة ⚠", nT < 30 ? color.new(#D1D5DB, 0) : sumR > 0 ? color.new(#4ADE80, 0) : color.new(#FCA5A5, 0))
 
 // ═══════════════════════════ التنبيهات ═══════════════════════════════════
-if barstate.isconfirmed and pend != 0
-    alert('{"symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","side":"' + (pend == 1 ? "call" : "put") + '","rule":"' + ruleIn + '","close":' + str.tostring(close) + '}', alert.freq_once_per_bar_close)
+// تنبيه أول عند اكتمال التهيئة (ضع الأمر المعلّق على المستوى)، وتنبيه ثانٍ عند الدخول الفعلي
+if barstate.isconfirmed and pSide != 0 and (setL or setS) and pos == 0
+    alert('{"symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"level","side":"' + (pSide == 1 ? "call" : "put") + '","level":' + str.tostring(pLvl) + '}', alert.freq_once_per_bar_close)
+if barstate.isconfirmed and pos != 0 and pos[1] == 0
+    alert('{"symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"entry","side":"' + (pos == 1 ? "call" : "put") + '","price":' + str.tostring(eP) + ',"stop":' + str.tostring(sP) + ',"target":' + str.tostring(tP) + '}', alert.freq_once_per_bar_close)
 plot(na)
