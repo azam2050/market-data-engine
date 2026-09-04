@@ -480,6 +480,17 @@ class TvBridge:
     async def _on_entry(self, sig: TvSignal) -> None:
         side_txt = "كول 🟢" if sig.side > 0 else "بوت 🔴"
         now = datetime.now(UTC)
+        # MIRSAD 9 in immediate mode sends the signal alert and, one bar
+        # later, the entry alert with the fill price: the same trade twice.
+        # The second one refines the entry price instead of opening a twin.
+        live = self._open.get(sig.symbol)
+        if live is not None and live.side == sig.side and (now - live.opened) <= timedelta(minutes=20):
+            if sig.price:
+                live.entry_stock = sig.price
+            if sig.stop:
+                live.stop = sig.stop
+            await self._admin(f"📡 {sig.symbol}: تأكيد الدخول عند {sig.price:g} — الصفقة نفسها، لا بطاقة جديدة" if sig.price else f"📡 {sig.symbol}: تأكيد الدخول — الصفقة نفسها")
+            return
         moon = sig.moon or is_late_session(now)
         underlying, spot = resolve_underlying(sig.symbol, sig.price)
         expiry = next_expiry(underlying, now, moon)

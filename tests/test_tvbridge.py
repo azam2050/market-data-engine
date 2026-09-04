@@ -280,6 +280,21 @@ def test_secure_alert_tells_the_channel_to_sell_half() -> None:
     assert bridge._open["TSLA"].hits == 0
 
 
+def test_signal_then_entry_alert_is_one_trade() -> None:
+    # MIRSAD 9 immediate mode: the signal alert, then the entry alert one bar later
+    wire = _Wire([_c(352.5, 1.9, 2.0)])
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
+
+    async def flow() -> None:
+        await bridge.handle(ENTRY_JSON)
+        await bridge.handle('{"src":"mirsad9","sym":"TSLA","tf":"3","event":"entry","side":"CALL","price":351.4,"stop":349.9,"t1":353.0,"t2":355.0,"t3":358.0}')
+
+    _run(flow())
+    assert len(wire.channel) == 1
+    assert bridge._open["TSLA"].entry_stock == 351.4 and bridge._open["TSLA"].stop == 349.9
+    assert any("الصفقة نفسها" in m for m in wire.admin)
+
+
 def test_bridge_ignores_a_resent_alert() -> None:
     # TradingView re-sends when the webhook answers slowly: same text, same trade
     wire = _Wire([_c(352.5, 1.9, 2.0)])
