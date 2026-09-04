@@ -470,3 +470,18 @@ async def test_tv_username_capture_confirms_and_orders_the_grant(tmp_path):
     await engine._handle_subscriber(InboundMessage("555", "مؤشر"))
     assert "Ahmed_Trader" in engine.memory.subscriber("555")["tv_username"]
     assert "مثال" in engine.commands.sent[-1][1]
+
+
+# ------------------------------------------------------------- walkthrough
+def test_mirsad_walkthrough_is_public_and_served_from_our_domain(tmp_path):
+    """The bot sends every new customer this link, so it must open without a
+    login and live on the product's own domain rather than a third-party host."""
+    settings = _settings(tmp_path)
+    client = TestClient(create_app(settings))
+    page = client.get("/mirsad")
+    assert page.status_code == 200
+    assert page.headers["content-type"].startswith("text/html")
+    assert page.text.startswith("<!doctype html>")
+    assert 'lang="ar" dir="rtl"' in page.text
+    assert "مِرصاد ٩" in page.text
+    assert client.head("/mirsad").status_code == 200

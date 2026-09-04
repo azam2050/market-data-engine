@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from qqq_alpha import payments as pay_gateway
@@ -40,6 +40,11 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 APPLE_PAY_ASSOCIATION_FILE = (
     Path(__file__).parent / "well_known" / "apple-developer-merchantid-domain-association"
 )
+
+# The MIRSAD 9 walkthrough customers receive from the bot: a self-contained
+# page (its only outside dependency is the Google Fonts stylesheet) served
+# from the product's own domain so the link outlives any third-party host.
+MIRSAD_PAGE = Path(__file__).parent / "public" / "mirsad.html"
 
 # an upper bound on a single grant, so a slipped keystroke in the days box
 # cannot hand out a decade of free access
@@ -120,6 +125,17 @@ def create_app(
             return PlainTextResponse("", status_code=404)
         return PlainTextResponse(
             APPLE_PAY_ASSOCIATION_FILE.read_text(), media_type="text/plain"
+        )
+
+    @app.api_route("/mirsad", methods=["GET", "HEAD"])
+    def mirsad_walkthrough():
+        """Public: the indicator walkthrough the bot links every new customer
+        to. No login — it is marketing, not the journal."""
+        if not MIRSAD_PAGE.exists():
+            return PlainTextResponse("", status_code=404)
+        return HTMLResponse(
+            MIRSAD_PAGE.read_text(encoding="utf-8"),
+            headers={"Cache-Control": "public, max-age=300"},
         )
 
     # ------------------------------------------------------------------

@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:,">
+<title>مِرصاد ٩ حيّاً</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  :root { --bg:#0B0F17; --chart:#131722; --grid:#1c2230; --ink:#EEF2F6; --dim:#9AA7B6; --up:#0E9F6E; --dn:#E02424; --zone:#F59E0B; --half:#FCD34D; --upT:#86EFAC; --dnT:#FCA5A5; --cell:#1B2434; --hdr:#0B1220; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--ink); direction:rtl; font-family:"IBM Plex Sans Arabic","Segoe UI",system-ui,sans-serif; overflow:hidden; }
+  .stage { position:relative; height:100vh; display:grid; grid-template-rows:auto 1fr auto; }
+  header { display:flex; justify-content:space-between; align-items:center; padding:.8rem 1.2rem; font-family:"IBM Plex Mono",monospace; font-size:.75rem; letter-spacing:.14em; color:var(--dim); }
+  header b { color:var(--zone); font-family:inherit; }
+  .chartwrap { position:relative; margin:0 1rem; background:var(--chart); border:1px solid #000; border-radius:.8rem; overflow:hidden; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; }
+  .ov { position:absolute; inset:0; pointer-events:none; }
+  .tag { position:absolute; font-size:.8rem; padding:.2rem .55rem; border-radius:.35rem; white-space:nowrap; font-weight:600; opacity:0; transform:scale(.8) translateY(6px); transition:opacity .35s, transform .35s; }
+  .tag.show { opacity:1; transform:none; }
+  .tag.up { background:var(--up); color:#fff; } .tag.dn { background:var(--dn); color:#fff; } .tag.dark { background:#111827; color:var(--upT); border:1px solid #000; }
+  .tag.zn { background:var(--zone); color:#000; } .tag.hf { background:var(--zone); color:#000; font-size:.9rem; box-shadow:0 0 0 0 rgba(245,158,11,.6); }
+  .tag.hf.show { animation:pulse 1.2s ease-out 3; }
+  @keyframes pulse { 0% { box-shadow:0 0 0 0 rgba(245,158,11,.6); } 100% { box-shadow:0 0 0 18px rgba(245,158,11,0); } }
+  .tag.tg { background:rgba(14,159,110,.9); color:#fff; } .tag.st { background:var(--dn); color:#fff; }
+  .hl { position:absolute; right:0; left:0; height:0; border-top:2px solid; opacity:0; transition:opacity .4s; }
+  .hl.show { opacity:1; }
+  .hl.zone { border-top-style:dashed; border-color:var(--zone); } .hl.stop { border-color:var(--dn); } .hl.t { border-top-style:dashed; border-color:rgba(14,159,110,.75); } .hl.half { border-top-style:dotted; border-color:var(--zone); }
+  /* card */
+  .card { position:absolute; right:1rem; bottom:1rem; border:2px solid #000; background:#161e2a; border-collapse:separate; border-spacing:1px; font-size:.82rem; opacity:0; transform:translateX(-12px); transition:opacity .5s, transform .5s; }
+  .card.show { opacity:1; transform:none; }
+  .card td { background:var(--cell); padding:.3rem .6rem; white-space:nowrap; }
+  .card td.k { color:var(--dim); font-size:.72rem; } .card td.h { background:var(--hdr); font-weight:600; }
+  .card td.upbg { background:var(--up); color:#fff; font-size:1.05rem; font-weight:600; }
+  .card td.huge { font-size:1.6rem; font-weight:700; font-family:"IBM Plex Mono",monospace; color:var(--upT); }
+  .card td.half { background:rgba(245,158,11,.3); color:var(--half); font-weight:700; }
+  .card td.dnT { color:var(--dnT); } .card td.upT { color:var(--upT); }
+  .num { font-family:"IBM Plex Mono",monospace; direction:ltr; display:inline-block; }
+  /* watch */
+  .watch { position:absolute; left:1rem; top:1rem; border:2px solid #000; background:#161e2a; border-collapse:separate; border-spacing:1px; font-size:.8rem; opacity:0; transform:translateX(12px); transition:opacity .5s, transform .5s; }
+  .watch.show { opacity:1; transform:none; }
+  .watch td { background:var(--cell); padding:.28rem .55rem; white-space:nowrap; }
+  .watch td.h { background:var(--hdr); font-weight:600; }
+  .watch tr.flash td:nth-child(2) { animation:rowflash 1s ease-in-out 3; }
+  @keyframes rowflash { 50% { background:rgba(14,159,110,.9); } }
+  .watch tr.w2 { display:none; } .watch.big tr.w2 { display:table-row; }
+  .watch tr.hi td { outline:2px solid var(--zone); outline-offset:-2px; }
+  .watch td.pulse { animation:rowflash 1s ease-in-out infinite; }
+  .watch td.upT { color:var(--upT); } .watch td.num { font-family:"IBM Plex Mono",monospace; direction:ltr; }
+  /* card display modes */
+  .card.sm { font-size:.7rem; } .card.sm td.huge { font-size:1.05rem; } .card.sm td.upbg { font-size:.85rem; }
+  .rib { position:absolute; top:.6rem; right:50%; transform:translateX(50%) translateY(-8px); border:2px solid #000; background:#161e2a; border-collapse:separate; border-spacing:1px; font-size:.8rem; opacity:0; transition:opacity .5s, transform .5s; }
+  .rib.show { opacity:1; transform:translateX(50%); }
+  .rib td { background:var(--cell); padding:.35rem .7rem; white-space:nowrap; }
+  .rib td.h { background:var(--hdr); font-weight:600; } .rib td.upbg { background:var(--up); color:#fff; font-weight:600; }
+  .rib .k { color:var(--dim); font-size:.7rem; } .rib .upT { color:var(--upT); } .rib .dnT { color:var(--dnT); } .rib td.half { background:rgba(245,158,11,.3); color:var(--half); font-weight:700; }
+  /* settings panel (contracts) */
+  .setbox { position:absolute; left:1rem; top:1rem; width:min(24rem, 60%); background:#161e2a; border:2px solid #000; border-radius:.5rem; font-size:.82rem; opacity:0; transform:translateX(12px); transition:opacity .5s, transform .5s; }
+  .setbox.show { opacity:1; transform:none; }
+  .setbox .sh { background:var(--hdr); font-weight:600; padding:.45rem .8rem; color:var(--zone); border-radius:.4rem .4rem 0 0; }
+  .setbox .sr { display:flex; justify-content:space-between; align-items:center; gap:.8rem; padding:.45rem .8rem; border-top:1px solid #0b0f17; }
+  .setbox .sr span { color:var(--dim); } .setbox .sr b { font-weight:600; }
+  .setbox .sr.hi { outline:2px solid var(--zone); outline-offset:-2px; }
+  .setbox .num { font-family:"IBM Plex Mono",monospace; direction:ltr; }
+  .setbox .upT { color:var(--upT); } .setbox .dnT { color:var(--dnT); }
+  .sw { width:2.2rem; height:1.2rem; border-radius:1rem; background:#2a3446; position:relative; flex:none; }
+  .sw::after { content:""; position:absolute; top:.15rem; left:.15rem; width:.9rem; height:.9rem; border-radius:50%; background:#fff; transition:left .3s; }
+  .sw.on { background:var(--up); } .sw.on::after { left:1.15rem; }
+  .flab { position:absolute; font-size:.82rem; padding:.35rem .7rem; border-radius:.4rem; background:#111827; color:var(--ink); border:1px solid var(--up); white-space:nowrap; opacity:0; transition:opacity .4s; }
+  .flab.show { opacity:1; } .flab .num { font-family:"IBM Plex Mono",monospace; }
+  /* captions */
+  footer { padding:1rem 1.2rem 1.1rem; display:grid; gap:.6rem; }
+  .cap { min-height:3.6rem; font-size:clamp(1.05rem, 2.4vw, 1.45rem); line-height:1.7; text-wrap:balance; }
+  .cap .cur { display:inline-block; width:.5ch; background:var(--zone); animation:blink 1s steps(1) infinite; margin-right:.2ch; vertical-align:-.1em; height:1.1em; }
+  @keyframes blink { 50% { opacity:0; } }
+  .bar { height:4px; background:var(--grid); border-radius:2px; overflow:hidden; }
+  .bar i { display:block; height:100%; width:0; background:var(--zone); transition:width .4s linear; }
+  .ctl { display:flex; gap:.6rem; align-items:center; justify-content:space-between; }
+  .ctl div { display:flex; gap:.5rem; }
+  button { font-family:inherit; font-size:.9rem; font-weight:600; background:#111826; color:var(--ink); border:1px solid #232D3D; border-radius:.5rem; padding:.5rem 1rem; cursor:pointer; }
+  button:hover { border-color:var(--zone); } button:focus-visible { outline:2px solid var(--zone); outline-offset:2px; }
+  .scene { font-family:"IBM Plex Mono",monospace; color:var(--dim); font-size:.75rem; }
+  /* final */
+  .final { position:absolute; inset:0; display:grid; place-items:center; text-align:center; padding:2rem; background:rgba(11,15,23,.92); opacity:0; pointer-events:none; transition:opacity .6s; }
+  .final.show { opacity:1; pointer-events:auto; }
+  .final h1 { font-size:clamp(2rem, 6vw, 3.4rem); margin:0 0 .6rem; text-wrap:balance; }
+  .final p { color:var(--dim); font-size:1.1rem; max-width:44ch; margin:0 auto; line-height:1.8; }
+  .cta { display:inline-block; margin-top:1.3rem; background:var(--zone); color:#000; font-weight:700; border-radius:.6rem; padding:.8rem 1.6rem; font-size:1.05rem; }
+  .stats { display:flex; gap:1rem; justify-content:center; margin-top:1.4rem; flex-wrap:wrap; }
+  .stats div { background:#111826; border:1px solid #232D3D; border-radius:.7rem; padding:.8rem 1.1rem; min-width:9rem; }
+  .stats .v { font-family:"IBM Plex Mono",monospace; font-size:1.6rem; color:var(--zone); font-weight:600; }
+  .stats .k { color:var(--dim); font-size:.8rem; }
+  @media (prefers-reduced-motion: reduce) { .tag, .hl, .card, .watch { transition:none; } }
+</style>
+</head>
+<body>
+<div class="stage">
+  <header><span><b>MIRSAD 9</b> · مِرصاد ٩ · QQQ · ٣ د</span><span id="clock">09:30</span></header>
+  <div class="chartwrap" id="wrap">
+    <canvas id="cv"></canvas>
+    <div class="ov" id="ov">
+      <div class="hl zone" id="lnZone"></div>
+      <div class="hl stop" id="lnStop"></div>
+      <div class="hl t" id="lnT1"></div>
+      <div class="hl t" id="lnT2"></div>
+      <div class="hl half" id="lnHalf"></div>
+      <span class="tag up" id="tSig">كول ٧٤</span>
+      <span class="tag zn" id="tZone">منطقة كول</span>
+      <span class="tag dark" id="tEnt">دخول من المنطقة 604.90</span>
+      <span class="tag st" id="tStop">وقف 604.10</span>
+      <span class="tag tg" id="tT1">● هدف ١</span>
+      <span class="tag hf" id="tHalf">½ بع النصف</span>
+      <span class="tag st" id="tStop2">الوقف عند الدخول 604.90</span>
+      <span class="tag tg" id="tT2">● هدف ٢</span>
+      <span class="tag dark" id="tExit">خروج بربح +2.4R</span>
+      <table class="card" id="card">
+        <tr><td class="h" colspan="2">مِرصاد ٩ · QQQ · ٣ د</td></tr>
+        <tr><td class="upbg" colspan="2" id="cState">كول قائمة · جودة ٧٤</td></tr>
+        <tr><td class="k">الستررايك</td><td class="huge"><span class="num">605</span> <small style="font-size:.8rem;font-family:'IBM Plex Sans Arabic'">كول · ينتهي اليوم</small></td></tr>
+        <tr><td class="k">سعر العقد</td><td class="huge"><span class="num" id="cPx">0.76</span> <small style="font-size:.85rem;font-family:'IBM Plex Sans Arabic'" id="cPct"></small></td></tr>
+        <tr><td class="k">دخول العقد</td><td><span class="num">0.76</span> · أعلى <span class="num" id="cPeak">0.76</span></td></tr>
+        <tr><td class="k">الوقف</td><td class="dnT" id="cStop"><span class="num">604.10</span></td></tr>
+        <tr><td class="k">الأهداف</td><td class="upT" id="cHits">○ ○ ○</td></tr>
+        <tr><td class="k">التأمين</td><td id="cHalf">عند <span class="num">605.95</span></td></tr>
+      </table>
+      <!-- display modes: ribbon (top) and floating label -->
+      <table class="rib" id="rib">
+        <tr><td class="h">مِرصاد ٩</td><td class="upbg">كول · جودة ٧٤</td><td><span class="k">الستررايك</span> <b class="num">605</b> كول</td><td><span class="k">العقد</span> <b class="num" id="rPx">1.02</b> <span class="upT">+34%</span></td><td><span class="k">الوقف</span> <span class="num dnT">604.90</span></td><td class="upT">● ○ ○</td><td class="half">½ ✓</td></tr>
+      </table>
+      <span class="flab" id="flab">كول · <b class="num">605</b> كول · العقد <b class="num">1.02</b> (+34%) · وقف <span class="num">604.90</span> · ● ○ ○ · ½ ✓</span>
+      <div class="setbox" id="setbox">
+        <div class="sh">الإعدادات · العقود</div>
+        <div class="sr" id="s1"><span>إظهار العقد على البطاقة</span><i class="sw on"></i></div>
+        <div class="sr" id="s2"><span>اختيار الستررايك</span><b>الأقرب لمنطقة الدخول</b></div>
+        <div class="sr" id="s3"><span>رموز الانتهاء اليومي</span><b class="num">SPY QQQ IWM SPX NDX</b></div>
+        <div class="sr" id="s4"><span>غير ذلك</span><b>أقرب انتهاء أسبوعي</b></div>
+        <div class="sr" id="s5"><span>بيانات الخيارات في TradingView</span><b id="s5v" class="upT">مفعّلة ✓ · السعر يتحدث</b></div>
+      </div>
+      <span class="tag zn" id="tMode" style="font-size:.95rem;top:1rem;right:1rem;left:auto;transform:none">البطاقة الكبيرة (ب)</span>
+      <table class="watch" id="watch">
+        <tr><td class="h" colspan="6" style="color:var(--zone)">شاشة المراقبة · <span id="wCount">٤</span> رموز</td></tr>
+        <tr><td class="h">الرمز</td><td class="h">الحالة</td><td class="h">الستررايك</td><td class="h">الأهداف</td><td class="h">½</td><td class="h">المدة</td></tr>
+        <tr class="w1" id="wQ"><td>QQQ · ١</td><td style="background:var(--up)">كول · مؤمَّنة</td><td>605 كول</td><td class="upT">● ● ○</td><td style="color:var(--half)">½ ✓</td><td class="num">42 د</td></tr>
+        <tr class="w1" id="wQ2"><td>QQQ · ٢</td><td style="background:rgba(14,159,110,.55)">كول · دخول ثاني</td><td>605 كول</td><td class="upT">○ ○ ○</td><td>½</td><td class="num">6 د</td></tr>
+        <tr class="w1" id="wT"><td>TSLA</td><td style="background:rgba(224,36,36,.6)">بوت قائمة</td><td>375 بوت</td><td class="upT">● ○ ○</td><td>½</td><td class="num">18 د</td></tr>
+        <tr class="w1" id="wN"><td>NVDA</td><td style="color:var(--half)">عرضي — انتظار</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+        <tr class="w2" id="wA"><td>AAPL</td><td style="background:var(--up)" class="pulse">كول ٨١ · إشارة الآن</td><td>232 كول</td><td>○ ○ ○</td><td>—</td><td class="num">0 د</td></tr>
+        <tr class="w2" id="wS"><td>SPY</td><td>ميل صاعد</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+        <tr class="w2" id="wM"><td>META</td><td style="background:rgba(224,36,36,.6)">بوت · مؤمَّنة</td><td>740 بوت</td><td class="upT">● ○ ○</td><td style="color:var(--half)">½ ✓</td><td class="num">27 د</td></tr>
+        <tr class="w2" id="wD"><td>AMD</td><td>ميل هابط</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+        <tr class="w2" id="wZ"><td>AMZN</td><td style="color:var(--half)">عرضي — انتظار</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+        <tr class="w2" id="wF"><td>MSFT</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      </table>
+    </div>
+    <div class="final" id="final">
+      <div>
+        <p style="font-family:'IBM Plex Mono';letter-spacing:.16em;color:var(--zone);font-size:.75rem;margin:0 0 .5rem">MIRSAD 9</p>
+        <h1>مساعدك في التحليل. سبعة أيام مجاناً</h1>
+        <p>أرسل اسم المستخدم في TradingView إلى البوت، ويُفعَّل لك مِرصاد ٩ سبعة أيام كاملة. لا بطاقة، لا التزام، ولا نطلب كلمة مرور أبداً.</p>
+        <div class="stats">
+          <div><div class="v">كول · بوت</div><div class="k">العلامة تقول الاتجاه</div></div>
+          <div><div class="v">— —</div><div class="k">الخط البرتقالي سعر دخولك</div></div>
+          <div><div class="v">½ ● ● ●</div><div class="k">بع النصف، والأهداف تنوّر</div></div>
+          <div><div class="v">١٠</div><div class="k">شركات في شاشة واحدة</div></div>
+        </div>
+        <p><span class="cta">أرسل اسم المستخدم للبوت</span></p>
+      </div>
+    </div>
+  </div>
+  <footer>
+    <div class="cap" id="cap"></div>
+    <div class="bar"><i id="prog"></i></div>
+    <div class="ctl">
+      <div><button id="play" type="button">إيقاف</button><button id="replay" type="button">من البداية</button></div>
+      <span class="scene" id="sceneN">1 / 9</span>
+    </div>
+  </footer>
+</div>
+<script>
+(() => {
+  const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+  const wrap = document.getElementById('wrap');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // ---- scripted tape: the story of one QQQ morning
+  const C = [
+    [603.2,603.5,602.9,603.1],[603.1,603.3,602.7,602.8],[602.8,603.0,602.5,602.9],[602.9,603.2,602.7,603.0],[603.0,603.1,602.6,602.7],
+    [602.7,603.0,602.5,602.9],[602.9,603.1,602.6,602.8],[602.8,603.0,602.6,602.9],
+    [602.9,604.6,602.8,604.5], // 8: impulse -> كول
+    [604.5,604.9,604.3,604.7],[604.7,604.8,604.2,604.3],[604.3,604.5,604.0,604.1],[604.1,604.4,603.9,604.3], // pull-back touches zone 604.90? zone drawn at 604.9 -> touched by bar 10
+    [604.3,605.0,604.2,604.9],[604.9,605.6,604.8,605.5],[605.5,605.9,605.3,605.8],[605.8,606.5,605.7,606.4], // rally, T1 606.0?
+    [606.4,606.6,606.0,606.2],[606.2,606.9,606.1,606.8],[606.8,607.4,606.7,607.3],[607.3,608.0,607.2,607.9], // T2 607.9
+    [607.9,608.1,607.5,607.7],[607.7,607.9,607.4,607.6]
+  ];
+  const ENTRY = 604.90, STOP = 604.10, T1 = 605.90, T2 = 606.90, T3 = 607.90, HALF = ENTRY + .35 * (T3 - ENTRY);
+  const PMIN = 602.0, PMAX = 608.8;
+  let shown = 0, partial = 1; // candles fully drawn + fraction of current
+  function size() { const r = wrap.getBoundingClientRect(); cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio; ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0); draw(); }
+  addEventListener('resize', size);
+  const W = () => wrap.clientWidth, H = () => wrap.clientHeight;
+  const padL = 0.05, padR = 0.26, padT = 0.09, padB = 0.09;
+  const xOf = i => W() * (padL + (i + .5) / (C.length + 2) * (1 - padL - padR));
+  const yOf = p => H() * (padT + (PMAX - p) / (PMAX - PMIN) * (1 - padT - padB));
+  function draw() {
+    const w = W(), h = H(); ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = '#1c2230'; ctx.lineWidth = 1;
+    for (let p = 602; p <= 608.5; p += 1) { const y = yOf(p); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); ctx.fillStyle = '#6b7685'; ctx.font = '11px IBM Plex Mono'; ctx.textAlign = 'left'; ctx.fillText(p.toFixed(2), w - w * padR + 8, y - 3); }
+    const cw = Math.max(6, (w * (1 - padL - padR)) / (C.length + 2) * 0.7);
+    for (let i = 0; i < shown; i++) {
+      let [o, hi, lo, c] = C[i];
+      if (i === shown - 1 && partial < 1) { c = o + (c - o) * partial; hi = Math.max(o, c, o + (hi - o) * partial); lo = Math.min(o, c, o - (o - lo) * partial); }
+      const x = xOf(i), up = c >= o; ctx.strokeStyle = ctx.fillStyle = up ? '#0E9F6E' : '#E02424';
+      ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, yOf(hi)); ctx.lineTo(x, yOf(lo)); ctx.stroke();
+      const y1 = yOf(Math.max(o, c)), y2 = yOf(Math.min(o, c)); ctx.fillRect(x - cw / 2, y1, cw, Math.max(2, y2 - y1));
+    }
+  }
+  // ---- overlay helpers
+  const $ = id => document.getElementById(id);
+  function placeTag(id, i, p, dy = -30, align = 'center') { const el = $(id); const x = xOf(i), y = yOf(p); el.style.left = (align === 'center' ? x - el.offsetWidth / 2 : x) + 'px'; el.style.top = (y + dy) + 'px'; }
+  function placeLine(id, p) { $(id).style.top = yOf(p) + 'px'; }
+  function show(id, on = true) { $(id).classList.toggle('show', on); }
+  // ---- narration
+  const cap = $('cap'); let typing = null;
+  const SLOW = 1.6; // overall pacing multiplier (bars + pauses)
+  function typeOut(text) { return new Promise(res => { clearInterval(typing); cap.innerHTML = ''; let k = 0; const speed = reduce ? 0 : 42; typing = setInterval(() => { if (paused) return; k++; cap.innerHTML = text.slice(0, k) + '<span class="cur"></span>'; if (k >= text.length) { clearInterval(typing); res(); } }, speed); if (speed === 0) { cap.textContent = text; clearInterval(typing); res(); } }); }
+  // after typing, hold the caption long enough to be read (≈ 22 ms per character, at least 1.8 s)
+  async function say(text) { await typeOut(text); await wait(Math.max(1800, text.length * 22) / SLOW); }
+  let paused = false, token = 0;
+  const wait = ms => new Promise(res => { const t0 = performance.now(); let acc = 0, last = performance.now(); (function tick() { if (token !== myTok) return; const now = performance.now(); if (!paused) acc += now - last; last = now; if (acc >= (reduce ? ms * .3 : ms * SLOW)) res(); else requestAnimationFrame(tick); })(); });
+  let myTok = 0;
+  async function grow(to, msPerBar = 650) { for (let i = shown; i < to; i++) { shown = i + 1; for (let f = 0; f <= 1.0001; f += 0.1) { if (token !== myTok) return; partial = Math.min(1, f); draw(); await wait(msPerBar / 10); } clockAt(i); } }
+  function clockAt(i) { const m = 30 + i * 3; $('clock').textContent = '09:' + String(m).padStart(2, '0'); if (m >= 60) $('clock').textContent = '10:' + String(m - 60).padStart(2, '0'); }
+  function reset() { shown = 0; partial = 1; ['lnZone','lnStop','lnT1','lnT2','lnHalf','tSig','tZone','tEnt','tStop','tT1','tHalf','tStop2','tT2','tExit','card','watch','final','rib','flab','tMode','setbox'].forEach(id => show(id, false)); hiSet(null); $('card').classList.remove('sm'); $('watch').classList.remove('big'); document.querySelectorAll('.watch tr').forEach(r => r.classList.remove('hi', 'flash')); $('wCount').textContent = '٤'; draw(); }
+  async function mode(label, fn) { $('tMode').textContent = label; show('tMode'); fn(); await wait(2600); }
+  function hiSet(id) { document.querySelectorAll('.setbox .sr').forEach(r => r.classList.remove('hi')); if (id) $(id).classList.add('hi'); }
+  function hiRow(id) { document.querySelectorAll('.watch tr').forEach(r => r.classList.remove('hi')); if (id) $(id).classList.add('hi'); }
+  const scenes = [
+    async () => { await say('افتح الرمز على فريم ٣ دقائق. ما دام الشارت بلا علامة، لا تفعل شيئاً. مِرصاد يراقب عنك.'); await grow(8, 420); },
+    async () => { await grow(9, 900); placeTag('tSig', 8, C[8][2], 14); show('tSig'); await say('ظهرت علامة خضراء «كول ٧٤»: الاتجاه صعود، والرقم قوة الإشارة من ١٠٠. الأحمر «بوت» يعني هبوط. العلامة تظهر مع إغلاق الشمعة ولا تتغير بعدها. استعد، ولا تدخل بعد.'); await wait(1200); },
+    async () => { placeLine('lnZone', ENTRY); show('lnZone'); placeTag('tZone', C.length + 1.2, ENTRY, -12, 'left'); show('tZone'); await say('بعد العلامة يظهر خط برتقالي متقطع «منطقة كول»: هذا سعر دخولك. انتظر السعر يرجع إليه…'); await grow(12, 700); placeTag('tEnt', 11, ENTRY, 18); show('tEnt'); await say('رجع. ظهرت علامة «دخول من المنطقة 604.90»: الآن تدخل، بهذا السعر. لو لم يرجع السعر ستظهر «دخول تأكيد» بدلها، وهي أيضاً لحظة الدخول. وقد تظهر لاحقاً «دخول ثاني» على الخط نفسه.'); await wait(1000); },
+    async () => { placeLine('lnStop', STOP); show('lnStop'); placeTag('tStop', C.length + 1.2, STOP, -12, 'left'); show('tStop'); placeLine('lnT1', T1); show('lnT1'); placeLine('lnT2', T2); show('lnT2'); placeLine('lnHalf', HALF); show('lnHalf'); await say('مع الدخول تُرسم الخطوط: الأحمر وقفك، ضع أمر الوقف عنده. الخطوط الخضراء أهدافك الثلاثة. الخط البرتقالي المنقّط مكان بيع النصف. كل شيء أمامك قبل أن يتحرك السعر.'); await wait(900); },
+    async () => { $('card').classList.add('show'); await say('في الزاوية بطاقة العقد: الستررايك الذي تشتريه «605 كول ينتهي اليوم»، وسعر العقد الآن. اشترِ هذا العقد من منصتك. السعر يتحدث كل دقيقة.'); await grow(15, 750); tickCard(1.02, '+34%', '1.02'); placeTag('tHalf', 14, HALF, -34); show('tHalf'); placeLine('lnStop', ENTRY); placeTag('tStop2', C.length + 1.2, ENTRY, 12, 'left'); show('tStop', false); show('tStop2'); $('cStop').innerHTML = '<span class="num">604.90</span> (عند الدخول)'; $('cHalf').innerHTML = '<span style="color:var(--half);font-weight:700">½ بيع النصف ✓</span>'; $('cState').textContent = 'كول · مؤمَّنة · جودة ٧٤'; await say('ظهرت «½ بع النصف» ووصلك تنبيه على الجوال: بع نصف عقودك الآن، وحرّك وقفك إلى سعر الدخول كما فعل الخط الأحمر. البطاقة تكتب «مؤمَّنة».'); await wait(1200); },
+    async () => {
+      show('setbox');
+      await say('تفعيل أسعار العقود: من إعدادات المؤشر، قسم «العقود». خمسة أسطر فقط:');
+      hiSet('s1'); await say('«إظهار العقد» مفعّل، فتظهر البطاقة مع كل صفقة.');
+      hiSet('s2'); await say('الستررايك يُختار تلقائياً: الأقرب لمنطقة الدخول، أو «آت ذا ماني» إن أردت.');
+      hiSet('s3'); await say('الرموز ذات الانتهاء اليومي مكتوبة مسبقاً: SPY وQQQ وأخواتها تأخذ عقد اليوم نفسه.');
+      hiSet('s4'); await say('أي شركة أخرى مثل TSLA أو NVDA تأخذ أقرب انتهاء أسبوعي، تلقائياً بلا تدخل منك.');
+      hiSet('s5'); await say('سعر العقد يأتي من بيانات الخيارات في حسابك على TradingView. إن كانت مفعّلة، السعر يتحدث لحظياً في البطاقة.');
+      $('s5v').textContent = 'غير مفعّلة · الستررايك فقط'; $('s5v').className = 'dnT';
+      await say('وإن لم تكن مفعّلة عندك، لا يتعطل شيء: تظهر البطاقة بالستررايك والانتهاء، وتشتري العقد من منصتك بنفس الرقم.');
+      hiSet(null); show('setbox', false); $('s5v').textContent = 'مفعّلة ✓ · السعر يتحدث'; $('s5v').className = 'upT'; await wait(500);
+    },
+    async () => {
+      await say('طريقة العرض تختارها أنت من الإعدادات. أربعة أشكال لنفس المعلومات، بدّل بينها كما يريحك:');
+      await mode('١ · البطاقة الكبيرة (ب)', () => {});
+      await mode('٢ · البطاقة الصغيرة (أ)', () => $('card').classList.add('sm'));
+      await mode('٣ · شريط أعلى الشارت', () => { show('card', false); show('rib'); });
+      await mode('٤ · بطاقة عائمة بجانب السعر', () => { show('rib', false); placeTag('flab', C.length - 7.5, ENTRY + 1.0, -14, 'left'); show('flab'); });
+      await say('الشكل يتغير، والمعلومة نفسها: الستررايك، سعر العقد، الوقف، الأهداف، ونصفك المؤمَّن.');
+      show('flab', false); show('tMode', false); $('card').classList.remove('sm'); show('card'); await wait(600);
+    },
+    async () => { await grow(17, 700); placeTag('tT1', C.length + 1.2, T1, -12, 'left'); show('tT1'); $('cHits').textContent = '● ○ ○'; tickCard(1.28, '+68%', '1.28'); await say('● هدف ١ نوّر: تحقق الهدف الأول. تقدر تبيع جزءاً أو تترك الباقي للهدف التالي.'); await grow(21, 650); placeTag('tT2', C.length + 1.2, T2, -12, 'left'); show('tT2'); $('cHits').textContent = '● ● ○'; tickCard(1.51, '+99%', '1.51'); await say('● هدف ٢ نوّر، والخط الأحمر صعد وحده إلى الهدف الأول. حرّك وقفك معه. سعر العقد في البطاقة أمامك.'); await wait(900); },
+    async () => { await grow(C.length, 700); placeTag('tExit', C.length - 1, C[C.length - 1][3], -34); show('tExit'); $('cState').textContent = 'خروج بربح +2.4R'; await say('علامة «خروج بربح»: أغلق ما بقي. وإن ظهرت «وقف» فقد انتهت الصفقة بالخسارة المحددة سلفاً، ولا تنتظر شيئاً بعدها. الخروج يصلك تنبيهاً أيضاً.'); await wait(1000); },
+    async () => {
+      $('watch').classList.add('show'); $('wQ').classList.add('flash');
+      await say('شاشة المراقبة: أنت على شارت واحد، لكن مِرصاد يراقب معك عدة شركات في الوقت نفسه. كل صف شركة، وكل شركة لها تحليلها المستقل.');
+      hiRow('wQ'); await say('QQQ · ١: الصفقة الأولى، مؤمَّنة، هدفان نوّرا، والنصف مبيع، وعمرها ٤٢ دقيقة.');
+      hiRow('wQ2'); await say('QQQ · ٢: السهم رجع للخط البرتقالي فظهر «دخول ثاني» على نفس الستررايك. يظهر كصف مستقل بمدته، كأنه شركة أخرى.');
+      hiRow('wT'); await say('TSLA: بوت قائمة، هدف واحد نوّر. اللون الأحمر يعني اتجاه هبوط.');
+      hiRow('wN'); await say('NVDA: «عرضي — انتظار» بالأصفر. السهم بلا اتجاه، لا تدخل فيه الآن.');
+      hiRow(null);
+    },
+    async () => {
+      $('watch').classList.add('big'); $('wCount').textContent = '١٠';
+      await say('العدد بيدك: من الإعدادات تختار الشركات التي تريدها، وتزيدها حتى عشرة أو تقلّلها إلى واحدة.');
+      hiRow('wA'); await say('AAPL: الصف النابض إشارة كول ظهرت الآن. انتقل إلى شارت AAPL، وستجد الخط البرتقالي بانتظارك.');
+      hiRow('wM'); await say('META: بوت مؤمَّنة، النصف مبيع، والوقف عند الدخول. الشركات التي بلا صفقة تكتب «ميل صاعد» أو «ميل هابط» فقط.');
+      hiRow(null); await wait(800);
+    },
+    async () => {
+      await say('مِرصاد ٩ مساعدك في التحليل: يقرأ كل شركة في قائمتك ويحسب لك المنطقة والوقف والأهداف والعقد، ويعرضها في مكان واحد.');
+      await say('القرار يبقى لك. أنت تدخل، وأنت تبيع النصف، وأنت تغلق. هو يعطيك الصورة كاملة، ويوقظك بتنبيه حين يحدث شيء.');
+    },
+    async () => { $('final').classList.add('show'); await say('هذا كل ما تحتاج: علامة، خط دخول، وقف، أهداف تنوّر، ونصف تبيعه، وشاشة تجمع شركاتك. فعّل التنبيهات وجرّبه سبعة أيام مجاناً.'); }
+  ];
+  function tickCard(px, pct, peak) { const el = $('cPx'); const from = parseFloat(el.textContent), steps = 18; let k = 0; const iv = setInterval(() => { k++; el.textContent = (from + (px - from) * k / steps).toFixed(2); if (k >= steps) { clearInterval(iv); el.textContent = px.toFixed(2); } }, 60); $('cPct').textContent = pct; $('cPeak').textContent = peak; }
+  async function run(from = 0) { myTok = ++token; reset(); if (from > 0) { /* fast-forward silently */ for (let s = 0; s < from; s++) { /* not needed: always run from 0 */ } } for (let s = 0; s < scenes.length; s++) { if (token !== myTok) return; $('sceneN').textContent = (s + 1) + ' / ' + scenes.length; $('prog').style.width = ((s + 1) / scenes.length * 100) + '%'; await scenes[s](); if (token !== myTok) return; await wait(700); } }
+  $('play').addEventListener('click', () => { paused = !paused; $('play').textContent = paused ? 'تشغيل' : 'إيقاف'; });
+  $('replay').addEventListener('click', () => { paused = false; $('play').textContent = 'إيقاف'; run(0); });
+  size(); run(0);
+})();
+</script>
+
+</body>
+</html>
