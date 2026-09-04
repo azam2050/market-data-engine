@@ -75,8 +75,8 @@ optPick = input.string("أقرب ستررايك لمنطقة الدخول", "ا�
 stepIn  = input.float(0, "خطوة الستررايك (٠ = تلقائي: الصناديق ١، والأسهم حسب السعر)", minval = 0, maxval = 50, step = 0.5, group = gK)
 dailyIn = input.string("QQQ,SPY,IWM,DIA,SPX,SPXW,NDX,XSP", "رموز انتهاؤها يومي (مفصولة بفاصلة)", group = gK)
 lateMin = input.int(930, "بعد هذه الدقيقة من اليوم بتوقيت نيويورك يُؤخذ الانتهاء التالي (٩٣٠ = ١٥:٣٠)", minval = 600, maxval = 960, group = gK)
-lookN   = input.int(120, "طلب سعر العقد لآخر N شمعة فقط", minval = 20, maxval = 600, group = gK)
-bracketN = input.int(4, "سلة الستررايكات المحمّلة حول السعر (± N خطوة)", minval = 1, maxval = 8, group = gK, tooltip = "تُحمَّل على آخر الشموع التاريخية كي يُسمح بطلبها على الشمعة الحية. لو ابتعد السعر عن السلة يظهر «غير متاح» حتى يُعاد تحميل الشارت")
+lookN   = input.int(60, "طلب سعر العقد لآخر N شمعة فقط", minval = 10, maxval = 300, group = gK)
+bracketN = input.int(3, "سلة الستررايكات المحمّلة حول السعر (± N خطوة)", minval = 1, maxval = 5, group = gK, tooltip = "تُحمَّل على آخر الشموع التاريخية كي يُسمح بطلبها على الشمعة الحية. لو ابتعد السعر عن السلة يظهر «غير متاح» حتى يُعاد تحميل الشارت")
 
 
 allowL = dirIn != "بوت فقط"
@@ -522,7 +522,8 @@ var string[] preloaded = array.new_string()
 f_req(string occ) =>
     float v = na
     known = array.includes(preloaded, occ)
-    if occ != "" and (known or (barstate.ishistory and array.size(preloaded) < 38))
+    // حد TradingView ٤٠ رمزاً للمؤشر كله: ١٠ للمراقبة و٢ للفريمين، فيبقى للعقود ٢٦
+    if occ != "" and (known or (barstate.ishistory and array.size(preloaded) < 26))
         v := request.security(occ, "1", close, ignore_invalid_symbol = true)
         if not known
             array.push(preloaded, occ)
