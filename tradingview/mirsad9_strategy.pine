@@ -65,6 +65,9 @@ gV = "العرض"
 showLv = input.bool(true, "الوقف والأهداف", group = gV)
 showPnl = input.bool(true, "لوحة الصفقة", group = gV)
 showTf = input.bool(true, "صفّا الفريمين ٣ و٥", group = gV)
+compactWatch = input.bool(false, "شاشة مراقبة مختصرة (للتابلت): الرمز، الصفقة، الأهداف، ½", group = gV)
+cleanN = input.int(20, "حذف خطوط الصفقة المقفلة بعد N شمعة", minval = 0, maxval = 200, group = gV)
+keepZones = input.int(2, "المناطق المنتهية التي تبقى على الشارت", minval = 0, maxval = 10, group = gV)
 watchPos = input.string("يسار الوسط", "مكان شاشة المراقبة", options = ["يسار الوسط", "أعلى اليسار", "أسفل اليسار", "أعلى الوسط"], group = gV)
 
 
@@ -368,27 +371,32 @@ if barstate.isconfirmed and pSide != 0 and pSide[1] == 0
     label.new(bar_index, pSide == 1 ? low : high, (pSide == 1 ? "كول " : "بوت ") + str.tostring(qv, "#"), style = pSide == 1 ? label.style_label_up : label.style_label_down, color = color.new(pSide == 1 ? cUp : cDn, 0), textcolor = color.white, size = size.small)
 // سعر الدخول الصادق يُكتب على شمعة الدخول نفسها — والدخول الثاني باسمه
 if entered
-    label.new(bar_index, eP, eWord + str.tostring(eP, format.mintick), style = pos == 1 ? label.style_label_up : label.style_label_down, color = color.new(#111827, 15), textcolor = pos == 1 ? color.new(#86EFAC, 0) : color.new(#FCA5A5, 0), size = size.tiny)
+    label.new(bar_index, eP, eWord + str.tostring(eP, format.mintick), style = pos == 1 ? label.style_label_up : label.style_label_down, color = color.new(#111827, 0), textcolor = pos == 1 ? color.new(#86EFAC, 0) : color.new(#FCA5A5, 0), size = size.small)
 
-// المنطقة: خط برتقالي متقطع يعيش لمدة الدخول الثاني، ويُقصّ حين تموت
+// المنطقة: خط برتقالي متقطع يعيش لمدة الدخول الثاني، ويُقصّ حين تموت.
+// الكلمة تُحذف حين تموت المنطقة، ويبقى من الخطوط الميتة آخر اثنين فقط.
 var line zl = na
 var label zlab = na
+var line[] oldZones = array.new_line()
 if newZone
     zl := line.new(bar_index, zLvl, bar_index + reLife, zLvl, color = color.new(cZone, 0), style = line.style_dashed, width = 2)
     zlab := label.new(bar_index + reLife, zLvl, zSide == 1 ? "منطقة كول" : "منطقة بوت", style = label.style_label_left, color = color.new(cZone, 15), textcolor = color.black, size = size.small)
 if zoneGone and not na(zl)
     line.set_x2(zl, bar_index)
-    label.set_x(zlab, bar_index)
-    label.set_text(zlab, label.get_text(zlab) + (zUses[1] == 0 ? " · فاتت" : zStopped[1] ? " · انتهت" : zUses[1] >= 2 ? " · دخولان" : " · انتهت"))
-    label.set_color(zlab, color.new(#374151, 30))
-    label.set_textcolor(zlab, color.new(#D1D5DB, 0))
+    line.set_color(zl, color.new(cZone, 60))
+    label.delete(zlab)
+    array.push(oldZones, zl)
+    if array.size(oldZones) > keepZones
+        line.delete(array.shift(oldZones))
 
-// الوقف والأهداف
+// الوقف والأهداف — خطوط الصفقات المقفلة تُحذف بعد N شمعة كي لا تتراكم
 var line lnS = na
 var line ln1 = na
 var line ln2 = na
 var line ln3 = na
 var line lnH = na
+var line[] oldLines = array.new_line()
+var int[] oldBars = array.new_int()
 inTr = pos != 0
 if showLv and inTr and not inTr[1]
     lnS := line.new(bar_index, sP, bar_index + 1, sP, color = color.new(cDn, 10), width = 2)
@@ -403,16 +411,25 @@ if showLv and inTr and not na(lnS)
     line.set_xy2(ln2, bar_index + 1, t2)
     line.set_xy2(ln3, bar_index + 1, t3)
     line.set_xy2(lnH, bar_index + 1, halfLvl)
+if showLv and closed and not na(lnS)
+    for l in array.from(lnS, ln1, ln2, ln3, lnH)
+        array.push(oldLines, l)
+        array.push(oldBars, bar_index)
+while array.size(oldBars) > 0 and bar_index - array.get(oldBars, 0) > cleanN
+    line.delete(array.shift(oldLines))
+    array.shift(oldBars)
 // ● على الهدف لحظة تحققه — ولا ● بعد الوقف لأن الصفقة تكون قد ماتت
 if inTr and hit >= 1 and hit[1] < 1
     label.new(bar_index, t1, "● هدف ١", style = label.style_label_left, color = color.new(cUp, 30), textcolor = color.white, size = size.tiny)
 if inTr and hit >= 2 and hit[1] < 2
     label.new(bar_index, t2, "● هدف ٢", style = label.style_label_left, color = color.new(cUp, 20), textcolor = color.white, size = size.tiny)
-// التأمين: تنبيه على الشارت ببيع النصف
+// التأمين: علامة قصيرة على يمين الشمعة لا فوقها
 if secNow
-    label.new(bar_index, halfLvl, "🔔 أمّن الصفقة — بع النصف · الوقف عند الدخول", style = pos == 1 ? label.style_label_down : label.style_label_up, color = color.new(cZone, 0), textcolor = color.black, size = size.small)
+    label.new(bar_index, halfLvl, "½ بع النصف", style = label.style_label_left, color = color.new(cZone, 0), textcolor = color.black, size = size.small, tooltip = "أمّن الصفقة: بع نصف الكمية، والوقف الآن عند سعر الدخول")
+// الخروج: النتيجة بإشارتها دائماً
 if closed
-    label.new(bar_index, close, exitTxt + "  " + str.tostring(lastR, "#.##") + "R", style = label.style_label_left, size = size.small, color = color.new(lastR >= 0 ? cUp : cDn, 15), textcolor = color.white)
+    rTxt = (lastR >= 0 ? "+" : "") + str.tostring(lastR, "#.##") + "R"
+    label.new(bar_index, close, exitTxt + " " + rTxt, style = label.style_label_left, size = size.small, color = color.new(lastR >= 0 ? cUp : cDn, 15), textcolor = color.white)
 
 // ═══════════════════════════ اللوحة ════════════════════════════════════
 f_dur(int bars, simple string tf) =>
