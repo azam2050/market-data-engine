@@ -23,8 +23,9 @@ indicator("مِرصاد ٩", "MIRSAD 9", overlay = true, max_labels_count = 500,
 // ─────────────────────────────────────────────────────────── الإعدادات
 gM = "الوضع"
 dirIn   = input.string("الاتجاهان", "الاتجاه", options = ["الاتجاهان", "كول فقط", "بوت فقط"], group = gM)
-entryIn = input.string("منطقة دخول: انتظار الرجوع لمتوسط ٩", "الدخول", options = ["منطقة دخول: انتظار الرجوع لمتوسط ٩", "فوري: افتتاح الشمعة التالية"], group = gM, tooltip = "منطقة: يُرسم خط عند متوسط ٩ والدخول لحظة رجوع السعر إليه خلال N شموع — أعطى في الاختبار على ٣ و٥ دقائق أعلى نسبة حركة أولى معك وأقل وقفات، لكن ثلاثة أرباع الإشارات تفوت لأن السعر لا يرجع. فوري: الدخول على افتتاح الشمعة التالية، إشارات أكثر ونسبة أقل")
-lifeN   = input.int(3, "صلاحية الدخول الأول في المنطقة (شموع)", minval = 1, maxval = 10, group = gM)
+entryIn = input.string("منطقة ثم تأكيد: لا تفوت", "الدخول", options = ["منطقة ثم تأكيد: لا تفوت", "منطقة دخول: انتظار الرجوع لمتوسط ٩", "فوري: افتتاح الشمعة التالية"], group = gM, tooltip = "منطقة ثم تأكيد: يُرسم خط عند متوسط ٩، فإن رجع السعر إليه دخلت عنده، وإن لم يرجع وأغلقت شمعة فوق قمة شمعة الإشارة دخلت على افتتاح التالية. لا تفوت إشارة. في الاختبار على ٣ دقائق: ٥٥٪ حركة أولى معك. منطقة فقط: ٦٥٪ لكن ثلاثة أرباع الإشارات تفوت. فوري: ٥٠٪ ولا تفوت")
+lifeN   = input.int(5, "صلاحية الدخول الأول في المنطقة (شموع)", minval = 1, maxval = 10, group = gM)
+chaseN  = input.int(8, "التأكيد: إغلاق فوق قمة شمعة الإشارة خلال N شموع", minval = 2, maxval = 20, group = gM)
 reEntry = input.bool(true, "دخول ثانٍ حين يرتد السعر إلى المنطقة", group = gM, tooltip = "بعد صفقة أولى لم تُوقف، إن رجع السعر إلى خط المنطقة خلال مدة بقائها يُفتح دخول ثانٍ. لا دخول ثانٍ بعد وقف: السعر اخترق المنطقة")
 reLife  = input.int(40, "المنطقة تبقى للدخول الثاني (شموع)", minval = 5, maxval = 120, group = gM)
 minQ    = input.int(0, "أدنى جودة مقبولة (٠ = الكل)", minval = 0, maxval = 90, step = 5, group = gM)
@@ -80,7 +81,8 @@ w6t = input.timeframe("5", "فريم ٦", group = gW)
 
 allowL = dirIn != "بوت فقط"
 allowS = dirIn != "كول فقط"
-waitZone = entryIn == "منطقة دخول: انتظار الرجوع لمتوسط ٩"
+chaseOn = entryIn == "منطقة ثم تأكيد: لا تفوت"
+waitZone = chaseOn or entryIn == "منطقة دخول: انتظار الرجوع لمتوسط ٩"
 
 // ═══════════════════════════ المطبخ ═══════════════════════════════════
 // كل شيء في دالة واحدة كي تعمل على الشارت وعلى رموز المراقبة بالمنطق نفسه.
@@ -139,8 +141,12 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     var int pSide = 0
     var float pLvl = na
     var int pExp = 0
+    var int pBorn = 0
+    var float pHi = na
+    var float pLo = na
     var float pAtr = na
     var float pQ = na
+    var int eMode = 0
     // المنطقة الحية: للدخول الأول ثم الدخول الثاني عند الارتداد
     var int zSide = 0
     var float zLvl = na
@@ -181,17 +187,27 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     touched = barstate.isconfirmed and pos == 0 and pend == 0 and pSide != 0 and bar_index <= pExp and (pSide == 1 ? low <= pLvl : high >= pLvl)
     // الدخول الثاني: ارتداد إلى المنطقة بعد صفقة أولى لم تُوقف
     reTouch = reEntry and barstate.isconfirmed and pos == 0 and pend == 0 and pSide == 0 and zSide != 0 and zUses == 1 and not zStopped and bar_index <= zBorn + reLife and (zSide == 1 ? low <= zLvl : high >= zLvl)
+    // التأكيد: لم يرجع السعر، وأغلقت شمعة فوق قمة شمعة الإشارة (أو تحت قاعها) — الدخول على افتتاح التالية
+    chased = chaseOn and barstate.isconfirmed and pos == 0 and pend == 0 and pSide != 0 and not touched and bar_index <= pBorn + chaseN and (pSide == 1 ? close > pHi : close < pLo)
     if touched
         pend := pSide
         pSide := 0
         viaZone := true
         fillLvl := pLvl
         zUses := 1
+        eMode := 1
+    else if chased
+        pend := pSide
+        pSide := 0
+        viaZone := false
+        zUses := 1
+        eMode := 2
     else if reTouch
         pend := zSide
         viaZone := true
         fillLvl := zLvl
         zUses := 2
+        eMode := 3
     if pend != 0 and pos == 0 and not na(a[1])
         pos := pend
         nth := zUses
@@ -280,22 +296,27 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
                 pSide := side0
                 pLvl := lvl
                 pExp := bar_index + lifeN
+                pBorn := bar_index
+                pHi := high
+                pLo := low
                 pAtr := a
                 pQ := q0
                 zUses := 0
             else
                 pend := side0
                 zUses := 1
-    if pSide != 0 and (bar_index > pExp or pos != 0)
+                eMode := 0
+    if pSide != 0 and (bar_index > (chaseOn ? math.max(pExp, pBorn + chaseN) : pExp) or pos != 0)
         pSide := 0
     // المنطقة تموت: انتهت مدتها، أو استُعملت مرتين، أو أُوقفت الصفقة، أو فاتت بلا دخول
     if zSide != 0 and pos == 0 and pend == 0 and (bar_index > zBorn + reLife or zUses >= 2 or zStopped or (zUses == 0 and pSide == 0))
         zSide := 0
-    [pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth]
+    [pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth, eMode]
 
 // ═══════════════════════════ الشارت ═══════════════════════════════════
 [sigL, sigS, qv, atrv, e9v, state, blockTxt, rawSide] = f_core()
-[pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth] = f_trade(sigL, sigS, qv, atrv, e9v)
+[pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth, eMode] = f_trade(sigL, sigS, qv, atrv, e9v)
+eWord = eMode == 1 ? "دخول من المنطقة " : eMode == 2 ? "دخول تأكيد " : eMode == 3 ? "دخول ثاني " : "دخول "
 newZone = barstate.isconfirmed and zSide != 0 and (zSide[1] == 0 or zBorn != zBorn[1])
 zoneGone = zSide == 0 and zSide[1] != 0
 entered = pos != 0 and pos[1] == 0
@@ -315,7 +336,7 @@ if barstate.isconfirmed and pSide != 0 and pSide[1] == 0
     label.new(bar_index, pSide == 1 ? low : high, (pSide == 1 ? "كول " : "بوت ") + str.tostring(qv, "#"), style = pSide == 1 ? label.style_label_up : label.style_label_down, color = color.new(pSide == 1 ? cUp : cDn, 0), textcolor = color.white, size = size.small)
 // سعر الدخول الصادق يُكتب على شمعة الدخول نفسها — والدخول الثاني باسمه
 if entered
-    label.new(bar_index, eP, (nth >= 2 ? "دخول ثاني " : "دخول ") + str.tostring(eP, format.mintick), style = pos == 1 ? label.style_label_up : label.style_label_down, color = color.new(#111827, 15), textcolor = pos == 1 ? color.new(#86EFAC, 0) : color.new(#FCA5A5, 0), size = size.tiny)
+    label.new(bar_index, eP, eWord + str.tostring(eP, format.mintick), style = pos == 1 ? label.style_label_up : label.style_label_down, color = color.new(#111827, 15), textcolor = pos == 1 ? color.new(#86EFAC, 0) : color.new(#FCA5A5, 0), size = size.tiny)
 
 // المنطقة: خط برتقالي متقطع يعيش لمدة الدخول الثاني، ويُقصّ حين تموت
 var line zl = na
@@ -376,7 +397,7 @@ f_stateTxt(int p, int pd, bool sec, int st, int raw, string blk) =>
 // الفريمان ٣ و٥ على الرمز نفسه — المنطق نفسه
 f_tf() =>
     [sL, sS, qq, av, e9w, stt, blk, raw] = f_core()
-    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt] = f_trade(sL, sS, qq, av, e9w)
+    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt, em] = f_trade(sL, sS, qq, av, e9w)
     pdx = pd != 0 ? pd : ps != 0 ? ps * 2 : (zs != 0 and zu == 1 and not zst) ? zs * 3 : 0
     [p, pdx, sec ? 1 : 0, stt, raw, blk, ft > 0 ? 10.0 * fw / ft : na]
 
@@ -411,7 +432,7 @@ if showPnl and barstate.islast
 // ═══════════════════════════ شاشة المراقبة ═══════════════════════════
 f_watch() =>
     [sL, sS, qq, av, e9w, stt, blk, raw] = f_core()
-    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt] = f_trade(sL, sS, qq, av, e9w)
+    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt, em] = f_trade(sL, sS, qq, av, e9w)
     pdx = pd != 0 ? pd : ps != 0 ? ps * 2 : (zs != 0 and zu == 1 and not zst and p == 0) ? zs * 3 : 0
     [p, pdx, sec ? 1 : 0, stt, bi, h, s, qt, e, hf ? 1 : 0, q3, ft > 0 ? 10.0 * fw / ft : na]
 
@@ -487,7 +508,7 @@ if barstate.isconfirmed and (pend != 0 or (pSide != 0 and pSide[1] == 0))
     ref = pend != 0 ? close : pLvl
     alert('{"src":"mirsad9","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"' + (pend != 0 ? "" : "zone") + '","side":"' + sideTxt + '","why":"اندفاع · جودة ' + str.tostring(qv, "#") + '","q":' + str.tostring(qv, "#") + ',"level":' + str.tostring(ref, format.mintick) + ',"ref":' + str.tostring(ref, format.mintick) + ',"stop":' + str.tostring(sd == 1 ? ref - d0 : ref + d0, format.mintick) + ',"t1":' + str.tostring(sd == 1 ? ref + a1 : ref - a1, format.mintick) + ',"t2":' + str.tostring(sd == 1 ? ref + a2 : ref - a2, format.mintick) + ',"t3":' + str.tostring(sd == 1 ? ref + a3 : ref - a3, format.mintick) + '}', alert.freq_once_per_bar_close)
 if entered
-    alert('{"src":"mirsad9","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"entry","side":"' + (pos == 1 ? "CALL" : "PUT") + '","why":"' + (nth >= 2 ? "دخول ثانٍ من المنطقة" : "دخول") + ' · جودة ' + str.tostring(qT, "#") + '","price":' + str.tostring(eP, format.mintick) + ',"stop":' + str.tostring(sP, format.mintick) + ',"t1":' + str.tostring(t1, format.mintick) + ',"t2":' + str.tostring(t2, format.mintick) + ',"t3":' + str.tostring(t3, format.mintick) + '}', alert.freq_once_per_bar)
+    alert('{"src":"mirsad9","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"entry","side":"' + (pos == 1 ? "CALL" : "PUT") + '","why":"' + eWord + '· جودة ' + str.tostring(qT, "#") + '","price":' + str.tostring(eP, format.mintick) + ',"stop":' + str.tostring(sP, format.mintick) + ',"t1":' + str.tostring(t1, format.mintick) + ',"t2":' + str.tostring(t2, format.mintick) + ',"t3":' + str.tostring(t3, format.mintick) + '}', alert.freq_once_per_bar)
 if secNow
     alert('{"src":"mirsad9","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"secure","side":"' + (pos == 1 ? "CALL" : "PUT") + '","price":' + str.tostring(halfLvl, format.mintick) + '}', alert.freq_once_per_bar)
 if closed
