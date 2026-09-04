@@ -74,12 +74,13 @@ optPick = input.string("أقرب ستررايك لمنطقة الدخول", "ا�
 stepIn  = input.float(0, "خطوة الستررايك (٠ = تلقائي: الصناديق ١، والأسهم حسب السعر)", minval = 0, maxval = 50, step = 0.5, group = gK)
 dailyIn = input.string("QQQ,SPY,IWM,DIA,SPX,SPXW,NDX,XSP", "رموز انتهاؤها يومي (مفصولة بفاصلة)", group = gK)
 lateMin = input.int(930, "بعد هذه الدقيقة من اليوم بتوقيت نيويورك يُؤخذ الانتهاء التالي (٩٣٠ = ١٥:٣٠)", minval = 600, maxval = 960, group = gK)
-lookN   = input.int(300, "طلب سعر العقد لآخر N شمعة فقط", minval = 50, maxval = 2000, group = gK)
+lookN   = input.int(120, "طلب سعر العقد لآخر N شمعة فقط", minval = 20, maxval = 600, group = gK)
+bracketN = input.int(4, "سلة الستررايكات المحمّلة حول السعر (± N خطوة)", minval = 1, maxval = 8, group = gK, tooltip = "تُحمَّل على آخر الشموع التاريخية كي يُسمح بطلبها على الشمعة الحية. لو ابتعد السعر عن السلة يظهر «غير متاح» حتى يُعاد تحميل الشارت")
 
 gW = "شاشة المراقبة"
 showWatch = input.bool(true, "إظهار شاشة المراقبة", group = gW)
 watchN = input.int(6, "عدد الرموز المعروضة", minval = 1, maxval = 10, group = gW)
-compactWatch = input.bool(false, "مختصرة (للتابلت): الرمز، الصفقة، الستررايك، السعر، الأهداف، ½", group = gW)
+compactWatch = input.bool(false, "مختصرة (للتابلت): الرمز، الصفقة، الستررايك، الأهداف، ½", group = gW)
 watchPos = input.string("يسار الوسط", "مكانها", options = ["يسار الوسط", "أعلى اليسار", "أسفل اليسار", "أعلى الوسط"], group = gW)
 w1s = input.symbol("NASDAQ:QQQ", "١", group = gW, inline = "w1")
 w1t = input.timeframe("3", "", group = gW, inline = "w1")
@@ -498,9 +499,28 @@ optLvl = pos != 0 ? eP : zSide != 0 ? zLvl : pSide != 0 ? pLvl : close
 optStrike = f_strike(optRoot, optSide, optLvl, close)
 [ey, emo, ed, expToday] = f_expiry(f_isDaily(optRoot))
 optOcc = optSide != 0 ? f_occ(optRoot, optSide == 1, optStrike, ey, emo, ed) : ""
+// TradingView لا يسمح بطلب رمز جديد على الشموع الحية إلا إذا طُلب قبلها على
+// شمعة تاريخية. لذلك تُطلب سلة ستررايكات حول السعر على آخر الشموع التاريخية،
+// وعلى الشمعة الحية لا يُطلب إلا رمز سبق طلبه؛ وما لم يُطلب يظهر «غير متاح».
+var string[] preloaded = array.new_string()
+f_req(string occ) =>
+    float v = na
+    known = array.includes(preloaded, occ)
+    if occ != "" and (known or (barstate.ishistory and array.size(preloaded) < 38))
+        v := request.security(occ, "1", close, ignore_invalid_symbol = true)
+        if not known
+            array.push(preloaded, occ)
+    v
+if optOn and barstate.ishistory and bar_index >= last_bar_index - 3
+    stp0 = f_step(optRoot, close)
+    base0 = math.round(close / stp0) * stp0
+    for k = -bracketN to bracketN
+        stk0 = base0 + k * stp0
+        f_req(f_occ(optRoot, true, stk0, ey, emo, ed))
+        f_req(f_occ(optRoot, false, stk0, ey, emo, ed))
 float optPx = na
 if optOn and optOcc != "" and bar_index >= last_bar_index - lookN
-    optPx := request.security(optOcc, "1", close, ignore_invalid_symbol = true)
+    optPx := f_req(optOcc)
 var float optEntry = na
 var float optPeak = na
 if entered
@@ -623,15 +643,12 @@ f_watch() =>
 [p9, d9, c9, l9, n9, h9, s9, g9, e9, f9, k9, m9, v9, o9, x9c, t9n] = request.security(w9s, w9t, f_watch(), lookahead = barmerge.lookahead_off)
 [p10, d10, c10, l10, n10, h10, s10, g10, e10, f10, k10, m10, v10, o10, x10c, t10n] = request.security(w10s, w10t, f_watch(), lookahead = barmerge.lookahead_off)
 
-// عقد كل رمز مراقَب: يُبنى من الستررايك الأقرب لمستواه ويُطلب سعره على آخر شمعة فقط
+// ستررايك كل رمز مراقَب: يُبنى من مستواه. سعره الحي يظهر على شارت الرمز نفسه لا هنا
 f_wOpt(string sym, int sd, float lvl, float px) =>
     root = f_short(sym)
     stk = sd != 0 ? f_strike(root, sd, lvl, px) : na
     [yy, mm, dd, tod] = f_expiry(f_isDaily(root))
-    occ = sd != 0 and not na(stk) ? f_occ(root, sd == 1, stk, yy, mm, dd) : ""
     float wpx = na
-    if optOn and occ != "" and barstate.islast
-        wpx := request.security(occ, "1", close, ignore_invalid_symbol = true)
     txt = sd == 0 ? "—" : str.tostring(stk, "#.##") + (sd == 1 ? " كول" : " بوت") + (tod ? " · اليوم" : " · " + f_two(dd) + "/" + f_two(mm))
     [txt, wpx]
 
@@ -664,28 +681,25 @@ f_row(int r, string sym, simple string tf, int p, int pd, int sec, int ln, int b
     halfTxt = live ? (hf == 1 ? "½ ✓" : "½") : "—"
     halfCol = live and hf == 1 ? color.new(#FCD34D, 0) : color.new(#6B7280, 0)
     halfBg = live and hf == 1 ? color.new(cZone, 70) : dim
-    opTxt = not optOn ? "—" : ot == "—" ? "—" : na(op) ? "غير متاح" : str.tostring(op, "#.##")
     if compactWatch
         table.cell(wt, 0, r, f_short(sym), text_color = color.white, bgcolor = dim, text_size = wBig, tooltip = tip)
         table.cell(wt, 1, r, st, text_color = color.white, bgcolor = bg, text_size = wBig, tooltip = tip)
         table.cell(wt, 2, r, ot, text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = wBig)
-        table.cell(wt, 3, r, opTxt, text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = wBig)
-        table.cell(wt, 4, r, hitsTxt, text_color = hitsCol, bgcolor = dim, text_size = wBig)
-        table.cell(wt, 5, r, halfTxt, text_color = halfCol, bgcolor = halfBg, text_size = wBig)
+        table.cell(wt, 3, r, hitsTxt, text_color = hitsCol, bgcolor = dim, text_size = wBig)
+        table.cell(wt, 4, r, halfTxt, text_color = halfCol, bgcolor = halfBg, text_size = wBig)
     else
         table.cell(wt, 0, r, f_short(sym), text_color = color.white, bgcolor = dim, text_size = wBig, tooltip = tip)
         table.cell(wt, 1, r, tf, text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = wMid)
         table.cell(wt, 2, r, st, text_color = color.white, bgcolor = bg, text_size = wBig, tooltip = tip)
         table.cell(wt, 3, r, ot, text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = wBig)
-        table.cell(wt, 4, r, opTxt, text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = wBig)
-        table.cell(wt, 5, r, live ? str.tostring(qt, "#") : "—", text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = wMid)
-        table.cell(wt, 6, r, live ? str.tostring(e, format.mintick) : "—", text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = wMid)
-        table.cell(wt, 7, r, live ? str.tostring(s, format.mintick) : "—", text_color = color.new(#FCA5A5, 0), bgcolor = dim, text_size = wMid)
-        table.cell(wt, 8, r, hitsTxt, text_color = hitsCol, bgcolor = dim, text_size = wBig)
-        table.cell(wt, 9, r, halfTxt, text_color = halfCol, bgcolor = halfBg, text_size = wBig)
-        table.cell(wt, 10, r, live ? f_dur(bi, tf) : "—", text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = wMid)
+        table.cell(wt, 4, r, live ? str.tostring(qt, "#") : "—", text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = wMid)
+        table.cell(wt, 5, r, live ? str.tostring(e, format.mintick) : "—", text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = wMid)
+        table.cell(wt, 6, r, live ? str.tostring(s, format.mintick) : "—", text_color = color.new(#FCA5A5, 0), bgcolor = dim, text_size = wMid)
+        table.cell(wt, 7, r, hitsTxt, text_color = hitsCol, bgcolor = dim, text_size = wBig)
+        table.cell(wt, 8, r, halfTxt, text_color = halfCol, bgcolor = halfBg, text_size = wBig)
+        table.cell(wt, 9, r, live ? f_dur(bi, tf) : "—", text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = wMid)
 
-nCols = compactWatch ? 6 : 11
+nCols = compactWatch ? 5 : 10
 if showWatch and barstate.islast
     if na(wt)
         wt := table.new(wpos, nCols, watchN + 2, border_width = 1, border_color = color.new(#000000, 80), frame_width = 2, frame_color = color.new(#000000, 60))
@@ -697,21 +711,19 @@ if showWatch and barstate.islast
         table.cell(wt, 0, 1, "الرمز", text_color = color.white, bgcolor = hdr2, text_size = wMid)
         table.cell(wt, 1, 1, "الصفقة", text_color = color.white, bgcolor = hdr2, text_size = wMid)
         table.cell(wt, 2, 1, "الستررايك", text_color = color.white, bgcolor = hdr2, text_size = wMid)
-        table.cell(wt, 3, 1, "سعر العقد", text_color = color.white, bgcolor = hdr2, text_size = wMid)
-        table.cell(wt, 4, 1, "الأهداف", text_color = color.white, bgcolor = hdr2, text_size = wMid)
-        table.cell(wt, 5, 1, "½", text_color = color.white, bgcolor = hdr2, text_size = wMid)
+        table.cell(wt, 3, 1, "الأهداف", text_color = color.white, bgcolor = hdr2, text_size = wMid)
+        table.cell(wt, 4, 1, "½", text_color = color.white, bgcolor = hdr2, text_size = wMid)
     else
         table.cell(wt, 0, 1, "الرمز", text_color = color.white, bgcolor = hdr2, text_size = wMid)
         table.cell(wt, 1, 1, "الفريم", text_color = color.white, bgcolor = hdr2, text_size = wMid)
         table.cell(wt, 2, 1, "الصفقة", text_color = color.white, bgcolor = hdr2, text_size = wMid)
         table.cell(wt, 3, 1, "الستررايك", text_color = color.white, bgcolor = hdr2, text_size = wMid)
-        table.cell(wt, 4, 1, "سعر العقد", text_color = color.white, bgcolor = hdr2, text_size = wMid)
-        table.cell(wt, 5, 1, "الجودة", text_color = color.white, bgcolor = hdr2, text_size = wMid)
-        table.cell(wt, 6, 1, "الدخول", text_color = color.white, bgcolor = hdr2, text_size = wMid)
-        table.cell(wt, 7, 1, "الوقف", text_color = color.white, bgcolor = hdr2, text_size = wMid)
-        table.cell(wt, 8, 1, "الأهداف", text_color = color.white, bgcolor = hdr2, text_size = wMid)
-        table.cell(wt, 9, 1, "التأمين", text_color = color.white, bgcolor = hdr2, text_size = wMid)
-        table.cell(wt, 10, 1, "المدة", text_color = color.white, bgcolor = hdr2, text_size = wMid)
+        table.cell(wt, 4, 1, "الجودة", text_color = color.white, bgcolor = hdr2, text_size = wMid)
+        table.cell(wt, 5, 1, "الدخول", text_color = color.white, bgcolor = hdr2, text_size = wMid)
+        table.cell(wt, 6, 1, "الوقف", text_color = color.white, bgcolor = hdr2, text_size = wMid)
+        table.cell(wt, 7, 1, "الأهداف", text_color = color.white, bgcolor = hdr2, text_size = wMid)
+        table.cell(wt, 8, 1, "التأمين", text_color = color.white, bgcolor = hdr2, text_size = wMid)
+        table.cell(wt, 9, 1, "المدة", text_color = color.white, bgcolor = hdr2, text_size = wMid)
     if watchN >= 1
         f_row(2, w1s, w1t, p1, d1, c1, l1, n1, h1, s1, g1, e1, f1, k1, m1, wo1, wp1, t1n)
     if watchN >= 2

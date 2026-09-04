@@ -75,7 +75,8 @@ optPick = input.string("أقرب ستررايك لمنطقة الدخول", "ا�
 stepIn  = input.float(0, "خطوة الستررايك (٠ = تلقائي: الصناديق ١، والأسهم حسب السعر)", minval = 0, maxval = 50, step = 0.5, group = gK)
 dailyIn = input.string("QQQ,SPY,IWM,DIA,SPX,SPXW,NDX,XSP", "رموز انتهاؤها يومي (مفصولة بفاصلة)", group = gK)
 lateMin = input.int(930, "بعد هذه الدقيقة من اليوم بتوقيت نيويورك يُؤخذ الانتهاء التالي (٩٣٠ = ١٥:٣٠)", minval = 600, maxval = 960, group = gK)
-lookN   = input.int(300, "طلب سعر العقد لآخر N شمعة فقط", minval = 50, maxval = 2000, group = gK)
+lookN   = input.int(120, "طلب سعر العقد لآخر N شمعة فقط", minval = 20, maxval = 600, group = gK)
+bracketN = input.int(4, "سلة الستررايكات المحمّلة حول السعر (± N خطوة)", minval = 1, maxval = 8, group = gK, tooltip = "تُحمَّل على آخر الشموع التاريخية كي يُسمح بطلبها على الشمعة الحية. لو ابتعد السعر عن السلة يظهر «غير متاح» حتى يُعاد تحميل الشارت")
 
 
 allowL = dirIn != "بوت فقط"
@@ -501,9 +502,28 @@ optLvl = pos != 0 ? eP : zSide != 0 ? zLvl : pSide != 0 ? pLvl : close
 optStrike = f_strike(optRoot, optSide, optLvl, close)
 [ey, emo, ed, expToday] = f_expiry(f_isDaily(optRoot))
 optOcc = optSide != 0 ? f_occ(optRoot, optSide == 1, optStrike, ey, emo, ed) : ""
+// TradingView لا يسمح بطلب رمز جديد على الشموع الحية إلا إذا طُلب قبلها على
+// شمعة تاريخية. لذلك تُطلب سلة ستررايكات حول السعر على آخر الشموع التاريخية،
+// وعلى الشمعة الحية لا يُطلب إلا رمز سبق طلبه؛ وما لم يُطلب يظهر «غير متاح».
+var string[] preloaded = array.new_string()
+f_req(string occ) =>
+    float v = na
+    known = array.includes(preloaded, occ)
+    if occ != "" and (known or (barstate.ishistory and array.size(preloaded) < 38))
+        v := request.security(occ, "1", close, ignore_invalid_symbol = true)
+        if not known
+            array.push(preloaded, occ)
+    v
+if optOn and barstate.ishistory and bar_index >= last_bar_index - 3
+    stp0 = f_step(optRoot, close)
+    base0 = math.round(close / stp0) * stp0
+    for k = -bracketN to bracketN
+        stk0 = base0 + k * stp0
+        f_req(f_occ(optRoot, true, stk0, ey, emo, ed))
+        f_req(f_occ(optRoot, false, stk0, ey, emo, ed))
 float optPx = na
 if optOn and optOcc != "" and bar_index >= last_bar_index - lookN
-    optPx := request.security(optOcc, "1", close, ignore_invalid_symbol = true)
+    optPx := f_req(optOcc)
 var float optEntry = na
 var float optPeak = na
 if entered
