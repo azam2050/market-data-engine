@@ -167,6 +167,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     var float e1P = na
     var float e1R = na
     var string e1T = ""
+    var int e1B = 0
     // المنطقة الحية: للدخول الأول ثم الدخول الثاني عند الارتداد
     var int zSide = 0
     var float zLvl = na
@@ -308,6 +309,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
         e1P := eP
         e1R := lastR
         e1T := exitTxt
+        e1B := barsIn
     if barstate.isconfirmed and pos == 0 and pend == 0 and not closed
         side0 = sigL ? 1 : sigS ? -1 : 0
         if side0 != 0
@@ -338,11 +340,11 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     // المنطقة تموت: انتهت مدتها، أو استُعملت مرتين، أو أُوقفت الصفقة، أو فاتت بلا دخول
     if zSide != 0 and pos == 0 and pend == 0 and (bar_index > zBorn + reLife or zUses >= 2 or zStopped or (zUses == 0 and pSide == 0))
         zSide := 0
-    [pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth, eMode, e1P, e1R, e1T]
+    [pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth, eMode, e1P, e1R, e1T, e1B]
 
 // ═══════════════════════════ الشارت ═══════════════════════════════════
 [sigL, sigS, qv, atrv, e9v, state, blockTxt, rawSide] = f_core()
-[pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth, eMode, e1P, e1R, e1T] = f_trade(sigL, sigS, qv, atrv, e9v)
+[pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth, eMode, e1P, e1R, e1T, e1B] = f_trade(sigL, sigS, qv, atrv, e9v)
 eWord = eMode == 1 ? "دخول من المنطقة " : eMode == 2 ? "دخول تأكيد " : eMode == 3 ? "دخول ثاني " : "دخول "
 newZone = barstate.isconfirmed and zSide != 0 and (zSide[1] == 0 or zBorn != zBorn[1])
 zoneGone = zSide == 0 and zSide[1] != 0
@@ -556,7 +558,7 @@ f_pctCol(float v) =>
 // الفريمان ٣ و٥ على الرمز نفسه — المنطق نفسه
 f_tf() =>
     [sL, sS, qq, av, e9w, stt, blk, raw] = f_core()
-    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt, em, x1p, x1r, x1t] = f_trade(sL, sS, qq, av, e9w)
+    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt, em, x1p, x1r, x1t, x1b] = f_trade(sL, sS, qq, av, e9w)
     pdx = pd != 0 ? pd : ps != 0 ? ps * 2 : (zs != 0 and zu == 1 and not zst) ? zs * 3 : 0
     [p, pdx, sec ? 1 : 0, stt, raw, blk, ft > 0 ? 10.0 * fw / ft : na]
 
@@ -602,7 +604,7 @@ f_kv(int r, string k, string v, color c) =>
 
 if showPnl and barstate.islast
     if na(pt)
-        pt := table.new(position.bottom_right, 2, 16, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
+        pt := table.new(position.bottom_right, 2, 17, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
     table.cell(pt, 0, 0, "مِرصاد ٩ — اختبار", text_color = color.white, bgcolor = color.new(#111827, 0), text_size = vSize)
     table.cell(pt, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color = color.new(#D1D5DB, 0), bgcolor = color.new(#111827, 0), text_size = vSize)
     table.cell(pt, 0, 1, "الحالة", text_color = color.new(#9CA3AF, 0), bgcolor = color.new(#1F2937, 10), text_size = kSize)
@@ -620,13 +622,13 @@ if showPnl and barstate.islast
     f_kv(r + 2, "الأهداف", pos != 0 ? f_hits(hit) + "   " + str.tostring(t1, format.mintick) + " · " + str.tostring(t2, format.mintick) + " · " + str.tostring(t3, format.mintick) : "—", color.new(#86EFAC, 0))
     f_kv(r + 3, "التأمين", pos != 0 ? (half ? "½ بيع النصف ✓ · الوقف عند الدخول" : "عند " + str.tostring(halfLvl, format.mintick) + " (" + str.tostring(secPct, "#") + "٪ من الطريق)") : "—", half ? color.new(#FCD34D, 0) : color.new(#D1D5DB, 0))
     if pos != 0 and nth >= 2 and not na(e1P)
-        f_kv(r + 8 + (showTf ? 1 : 0), "الدخول الأول", str.tostring(e1P, format.mintick) + " · " + e1T + " " + (e1R >= 0 ? "+" : "") + str.tostring(e1R, "#.##") + "R", e1R > 0 ? color.new(#86EFAC, 0) : e1R < 0 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
+        f_kv(r + 8 + (showTf ? 1 : 0), "الدخول الأول", str.tostring(e1P, format.mintick) + " · " + e1T + " " + (e1R >= 0 ? "+" : "") + str.tostring(e1R, "#.##") + "R · " + f_dur(e1B, timeframe.period), e1R > 0 ? color.new(#86EFAC, 0) : e1R < 0 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
     f_kv(r + 4, "أول حركة معك", fmTxt, fmTot > 0 and fmWin * 2 >= fmTot ? color.new(#86EFAC, 0) : color.new(#FCD34D, 0))
     if showTf
         f_kv(r + 5, "فريم ٣", na(tp3) ? "غير متاح" : f_stateTxt(tp3, td3, tc3 == 1, ts3, tr3, tb3) + (na(tf3) ? "" : "  · " + str.tostring(tf3, "#.#") + "/١٠"), na(tp3) ? color.new(#9CA3AF, 0) : tp3 == 1 or td3 == 1 ? color.new(#86EFAC, 0) : tp3 == -1 or td3 == -1 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
         f_kv(r + 6, "فريم ٥", na(tp5) ? "غير متاح" : f_stateTxt(tp5, td5, tc5 == 1, ts5, tr5, tb5) + (na(tf5) ? "" : "  · " + str.tostring(tf5, "#.#") + "/١٠"), na(tp5) ? color.new(#9CA3AF, 0) : tp5 == 1 or td5 == 1 ? color.new(#86EFAC, 0) : tp5 == -1 or td5 == -1 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
         f_kv(r + 7, "التوافق", agree, agree == "لا توافق" ? color.new(#FCD34D, 0) : color.white)
-    f_kv(r + 8, "الصدق", nT > 0 ? str.tostring(nT) + " صفقة · " + str.tostring(wr, "#") + "% · متوسط " + str.tostring(avgR, "#.##") + "R · ربح/خسارة " + str.tostring(pf, "#.##") : "—", avgR > 0 ? color.new(#86EFAC, 0) : color.new(#FCA5A5, 0))
+    f_kv(r + 10, "الصدق", nT > 0 ? str.tostring(nT) + " صفقة · " + str.tostring(wr, "#") + "% · متوسط " + str.tostring(avgR, "#.##") + "R · ربح/خسارة " + str.tostring(pf, "#.##") : "—", avgR > 0 ? color.new(#86EFAC, 0) : color.new(#FCA5A5, 0))
 
 // ── (أ) الشريط العلوي: صف واحد عريض بخط كبير
 var table rt = na

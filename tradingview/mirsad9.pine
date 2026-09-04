@@ -191,6 +191,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     var float e1P = na
     var float e1R = na
     var string e1T = ""
+    var int e1B = 0
     // المنطقة الحية: للدخول الأول ثم الدخول الثاني عند الارتداد
     var int zSide = 0
     var float zLvl = na
@@ -332,6 +333,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
         e1P := eP
         e1R := lastR
         e1T := exitTxt
+        e1B := barsIn
     if barstate.isconfirmed and pos == 0 and pend == 0 and not closed
         side0 = sigL ? 1 : sigS ? -1 : 0
         if side0 != 0
@@ -362,11 +364,11 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     // المنطقة تموت: انتهت مدتها، أو استُعملت مرتين، أو أُوقفت الصفقة، أو فاتت بلا دخول
     if zSide != 0 and pos == 0 and pend == 0 and (bar_index > zBorn + reLife or zUses >= 2 or zStopped or (zUses == 0 and pSide == 0))
         zSide := 0
-    [pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth, eMode, e1P, e1R, e1T]
+    [pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth, eMode, e1P, e1R, e1T, e1B]
 
 // ═══════════════════════════ الشارت ═══════════════════════════════════
 [sigL, sigS, qv, atrv, e9v, state, blockTxt, rawSide] = f_core()
-[pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth, eMode, e1P, e1R, e1T] = f_trade(sigL, sigS, qv, atrv, e9v)
+[pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth, eMode, e1P, e1R, e1T, e1B] = f_trade(sigL, sigS, qv, atrv, e9v)
 eWord = eMode == 1 ? "دخول من المنطقة " : eMode == 2 ? "دخول تأكيد " : eMode == 3 ? "دخول ثاني " : "دخول "
 newZone = barstate.isconfirmed and zSide != 0 and (zSide[1] == 0 or zBorn != zBorn[1])
 zoneGone = zSide == 0 and zSide[1] != 0
@@ -553,7 +555,7 @@ f_pctCol(float v) =>
 // الفريمان ٣ و٥ على الرمز نفسه — المنطق نفسه
 f_tf() =>
     [sL, sS, qq, av, e9w, stt, blk, raw] = f_core()
-    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt, em, x1p, x1r, x1t] = f_trade(sL, sS, qq, av, e9w)
+    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt, em, x1p, x1r, x1t, x1b] = f_trade(sL, sS, qq, av, e9w)
     pdx = pd != 0 ? pd : ps != 0 ? ps * 2 : (zs != 0 and zu == 1 and not zst) ? zs * 3 : 0
     [p, pdx, sec ? 1 : 0, stt, raw, blk, ft > 0 ? 10.0 * fw / ft : na]
 
@@ -599,7 +601,7 @@ if showPnl and barstate.islast
     f_kv(r + 2, "الأهداف", pos != 0 ? f_hits(hit) + "   " + str.tostring(t1, format.mintick) + " · " + str.tostring(t2, format.mintick) + " · " + str.tostring(t3, format.mintick) : "—", color.new(#86EFAC, 0))
     f_kv(r + 3, "التأمين", pos != 0 ? (half ? "½ بيع النصف ✓ · الوقف عند الدخول" : "عند " + str.tostring(halfLvl, format.mintick) + " (" + str.tostring(secPct, "#") + "٪ من الطريق)") : "—", half ? color.new(#FCD34D, 0) : color.new(#D1D5DB, 0))
     if pos != 0 and nth >= 2 and not na(e1P)
-        f_kv(r + 8 + (showTf ? 1 : 0), "الدخول الأول", str.tostring(e1P, format.mintick) + " · " + e1T + " " + (e1R >= 0 ? "+" : "") + str.tostring(e1R, "#.##") + "R", e1R > 0 ? color.new(#86EFAC, 0) : e1R < 0 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
+        f_kv(r + 8 + (showTf ? 1 : 0), "الدخول الأول", str.tostring(e1P, format.mintick) + " · " + e1T + " " + (e1R >= 0 ? "+" : "") + str.tostring(e1R, "#.##") + "R · " + f_dur(e1B, timeframe.period), e1R > 0 ? color.new(#86EFAC, 0) : e1R < 0 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
     f_kv(r + 4, "أول حركة معك", fmTxt, fmTot > 0 and fmWin * 2 >= fmTot ? color.new(#86EFAC, 0) : color.new(#FCD34D, 0))
     if showTf
         f_kv(r + 5, "فريم ٣", na(tp3) ? "غير متاح" : f_stateTxt(tp3, td3, tc3 == 1, ts3, tr3, tb3) + (na(tf3) ? "" : "  · " + str.tostring(tf3, "#.#") + "/١٠"), na(tp3) ? color.new(#9CA3AF, 0) : tp3 == 1 or td3 == 1 ? color.new(#86EFAC, 0) : tp3 == -1 or td3 == -1 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
@@ -639,22 +641,22 @@ if floatCard and barstate.islast
 // ═══════════════════════════ شاشة المراقبة ═══════════════════════════
 f_watch() =>
     [sL, sS, qq, av, e9w, stt, blk, raw] = f_core()
-    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt, em, x1p, x1r, x1t] = f_trade(sL, sS, qq, av, e9w)
+    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt, em, x1p, x1r, x1t, x1b] = f_trade(sL, sS, qq, av, e9w)
     pdx = pd != 0 ? pd : ps != 0 ? ps * 2 : (zs != 0 and zu == 1 and not zst and p == 0) ? zs * 3 : 0
     lvl = p != 0 ? e : zs != 0 ? zlv : ps != 0 ? pl : close
     sd = p != 0 ? p : zs != 0 ? zs : ps != 0 ? ps : 0
-    [p, pdx, sec ? 1 : 0, stt, bi, h, s, qt, e, hf ? 1 : 0, q3, ft > 0 ? 10.0 * fw / ft : na, lvl, sd, close, nt, x1p, x1r, x1t]
+    [p, pdx, sec ? 1 : 0, stt, bi, h, s, qt, e, hf ? 1 : 0, q3, ft > 0 ? 10.0 * fw / ft : na, lvl, sd, close, nt, x1p, x1r, x1t, x1b]
 
-[p1, d1, c1, l1, n1, h1, s1, g1, e1, f1, k1, m1, v1, o1, x1c, t1n, a1p, a1r, a1t] = request.security(w1s, w1t, f_watch(), lookahead = barmerge.lookahead_off)
-[p2, d2, c2, l2, n2, h2, s2, g2, e2, f2, k2, m2, v2, o2, x2c, t2n, a2p, a2r, a2t] = request.security(w2s, w2t, f_watch(), lookahead = barmerge.lookahead_off)
-[p3, d3, c3, l3, n3, h3, s3, g3, e3, f3, k3, m3, v3, o3, x3c, t3n, a3p, a3r, a3t] = request.security(w3s, w3t, f_watch(), lookahead = barmerge.lookahead_off)
-[p4, d4, c4, l4, n4, h4, s4, g4, e4, f4, k4, m4, v4, o4, x4c, t4n, a4p, a4r, a4t] = request.security(w4s, w4t, f_watch(), lookahead = barmerge.lookahead_off)
-[p5, d5, c5, l5, n5, h5, s5, g5, e5, f5, k5, m5, v5, o5, x5c, t5n, a5p, a5r, a5t] = request.security(w5s, w5t, f_watch(), lookahead = barmerge.lookahead_off)
-[p6, d6, c6, l6, n6, h6, s6, g6, e6, f6, k6, m6, v6, o6, x6c, t6n, a6p, a6r, a6t] = request.security(w6s, w6t, f_watch(), lookahead = barmerge.lookahead_off)
-[p7, d7, c7, l7, n7, h7, s7, g7, e7, f7, k7, m7, v7, o7, x7c, t7n, a7p, a7r, a7t] = request.security(w7s, w7t, f_watch(), lookahead = barmerge.lookahead_off)
-[p8, d8, c8, l8, n8, h8, s8, g8, e8, f8, k8, m8, v8, o8, x8c, t8n, a8p, a8r, a8t] = request.security(w8s, w8t, f_watch(), lookahead = barmerge.lookahead_off)
-[p9, d9, c9, l9, n9, h9, s9, g9, e9, f9, k9, m9, v9, o9, x9c, t9n, a9p, a9r, a9t] = request.security(w9s, w9t, f_watch(), lookahead = barmerge.lookahead_off)
-[p10, d10, c10, l10, n10, h10, s10, g10, e10, f10, k10, m10, v10, o10, x10c, t10n, a10p, a10r, a10t] = request.security(w10s, w10t, f_watch(), lookahead = barmerge.lookahead_off)
+[p1, d1, c1, l1, n1, h1, s1, g1, e1, f1, k1, m1, v1, o1, x1c, t1n, a1p, a1r, a1t, a1b] = request.security(w1s, w1t, f_watch(), lookahead = barmerge.lookahead_off)
+[p2, d2, c2, l2, n2, h2, s2, g2, e2, f2, k2, m2, v2, o2, x2c, t2n, a2p, a2r, a2t, a2b] = request.security(w2s, w2t, f_watch(), lookahead = barmerge.lookahead_off)
+[p3, d3, c3, l3, n3, h3, s3, g3, e3, f3, k3, m3, v3, o3, x3c, t3n, a3p, a3r, a3t, a3b] = request.security(w3s, w3t, f_watch(), lookahead = barmerge.lookahead_off)
+[p4, d4, c4, l4, n4, h4, s4, g4, e4, f4, k4, m4, v4, o4, x4c, t4n, a4p, a4r, a4t, a4b] = request.security(w4s, w4t, f_watch(), lookahead = barmerge.lookahead_off)
+[p5, d5, c5, l5, n5, h5, s5, g5, e5, f5, k5, m5, v5, o5, x5c, t5n, a5p, a5r, a5t, a5b] = request.security(w5s, w5t, f_watch(), lookahead = barmerge.lookahead_off)
+[p6, d6, c6, l6, n6, h6, s6, g6, e6, f6, k6, m6, v6, o6, x6c, t6n, a6p, a6r, a6t, a6b] = request.security(w6s, w6t, f_watch(), lookahead = barmerge.lookahead_off)
+[p7, d7, c7, l7, n7, h7, s7, g7, e7, f7, k7, m7, v7, o7, x7c, t7n, a7p, a7r, a7t, a7b] = request.security(w7s, w7t, f_watch(), lookahead = barmerge.lookahead_off)
+[p8, d8, c8, l8, n8, h8, s8, g8, e8, f8, k8, m8, v8, o8, x8c, t8n, a8p, a8r, a8t, a8b] = request.security(w8s, w8t, f_watch(), lookahead = barmerge.lookahead_off)
+[p9, d9, c9, l9, n9, h9, s9, g9, e9, f9, k9, m9, v9, o9, x9c, t9n, a9p, a9r, a9t, a9b] = request.security(w9s, w9t, f_watch(), lookahead = barmerge.lookahead_off)
+[p10, d10, c10, l10, n10, h10, s10, g10, e10, f10, k10, m10, v10, o10, x10c, t10n, a10p, a10r, a10t, a10b] = request.security(w10s, w10t, f_watch(), lookahead = barmerge.lookahead_off)
 
 // ستررايك كل رمز مراقَب: يُبنى من مستواه. سعره الحي يظهر على شارت الرمز نفسه لا هنا
 f_wOpt(string sym, int sd, float lvl, float px) =>
@@ -682,7 +684,7 @@ wBig = wideWatch ? size.large : size.normal
 wMid = wideWatch ? size.normal : size.small
 
 var table wt = na
-f_row(int r0, string sym, simple string tf, int p, int pd, int sec, int ln, int bi, int h, float s, float qt, float e, int hf, float q3, float fm, string ot, float op, int nt, float e1p, float e1r, string e1t) =>
+f_row(int r0, string sym, simple string tf, int p, int pd, int sec, int ln, int bi, int h, float s, float qt, float e, int hf, float q3, float fm, string ot, float op, int nt, float e1p, float e1r, string e1t, int e1b) =>
     unavailable = na(p)
     // دخول ثانٍ حي: الصفقة الأولى تُعرض في صف خاص بها كأنها رمز آخر
     two = not unavailable and p != 0 and nt >= 2 and not na(e1p)
@@ -696,6 +698,7 @@ f_row(int r0, string sym, simple string tf, int p, int pd, int sec, int ln, int 
         if not compactWatch
             table.cell(wt, 2, r0, r1Txt, text_color = color.white, bgcolor = r1Col, text_size = wMid)
             table.cell(wt, 5, r0, str.tostring(e1p, format.mintick), text_color = color.new(#D1D5DB, 0), bgcolor = dim0, text_size = wMid)
+            table.cell(wt, 9, r0, f_dur(e1b, tf), text_color = color.new(#D1D5DB, 0), bgcolor = dim0, text_size = wMid)
     st = unavailable ? "غير متاح" : f_stateTxt(p, pd, sec == 1, ln, 0, "")
     live = not unavailable and p != 0
     bg = unavailable ? color.new(#1F2937, 45) : (pd == 1 or pd == -1) ? color.new(pd == 1 ? cUp : cDn, blink) : (pd == 3 or pd == -3) ? color.new(cZone, 55) : p != 0 ? color.new(p == 1 ? cUp : cDn, sec == 1 ? 35 : 55) : (pd == 2 or pd == -2) ? color.new(pd == 2 ? cUp : cDn, 70) : color.new(#1F2937, 20)
@@ -752,25 +755,25 @@ if showWatch and barstate.islast
         table.cell(wt, 9, 1, "المدة", text_color = color.white, bgcolor = hdr2, text_size = wMid)
     rr = 2
     if watchN >= 1
-        rr := f_row(rr, w1s, w1t, p1, d1, c1, l1, n1, h1, s1, g1, e1, f1, k1, m1, wo1, wp1, t1n, a1p, a1r, a1t)
+        rr := f_row(rr, w1s, w1t, p1, d1, c1, l1, n1, h1, s1, g1, e1, f1, k1, m1, wo1, wp1, t1n, a1p, a1r, a1t, a1b)
     if watchN >= 2
-        rr := f_row(rr, w2s, w2t, p2, d2, c2, l2, n2, h2, s2, g2, e2, f2, k2, m2, wo2, wp2, t2n, a2p, a2r, a2t)
+        rr := f_row(rr, w2s, w2t, p2, d2, c2, l2, n2, h2, s2, g2, e2, f2, k2, m2, wo2, wp2, t2n, a2p, a2r, a2t, a2b)
     if watchN >= 3
-        rr := f_row(rr, w3s, w3t, p3, d3, c3, l3, n3, h3, s3, g3, e3, f3, k3, m3, wo3, wp3, t3n, a3p, a3r, a3t)
+        rr := f_row(rr, w3s, w3t, p3, d3, c3, l3, n3, h3, s3, g3, e3, f3, k3, m3, wo3, wp3, t3n, a3p, a3r, a3t, a3b)
     if watchN >= 4
-        rr := f_row(rr, w4s, w4t, p4, d4, c4, l4, n4, h4, s4, g4, e4, f4, k4, m4, wo4, wp4, t4n, a4p, a4r, a4t)
+        rr := f_row(rr, w4s, w4t, p4, d4, c4, l4, n4, h4, s4, g4, e4, f4, k4, m4, wo4, wp4, t4n, a4p, a4r, a4t, a4b)
     if watchN >= 5
-        rr := f_row(rr, w5s, w5t, p5, d5, c5, l5, n5, h5, s5, g5, e5, f5, k5, m5, wo5, wp5, t5n, a5p, a5r, a5t)
+        rr := f_row(rr, w5s, w5t, p5, d5, c5, l5, n5, h5, s5, g5, e5, f5, k5, m5, wo5, wp5, t5n, a5p, a5r, a5t, a5b)
     if watchN >= 6
-        rr := f_row(rr, w6s, w6t, p6, d6, c6, l6, n6, h6, s6, g6, e6, f6, k6, m6, wo6, wp6, t6n, a6p, a6r, a6t)
+        rr := f_row(rr, w6s, w6t, p6, d6, c6, l6, n6, h6, s6, g6, e6, f6, k6, m6, wo6, wp6, t6n, a6p, a6r, a6t, a6b)
     if watchN >= 7
-        rr := f_row(rr, w7s, w7t, p7, d7, c7, l7, n7, h7, s7, g7, e7, f7, k7, m7, wo7, wp7, t7n, a7p, a7r, a7t)
+        rr := f_row(rr, w7s, w7t, p7, d7, c7, l7, n7, h7, s7, g7, e7, f7, k7, m7, wo7, wp7, t7n, a7p, a7r, a7t, a7b)
     if watchN >= 8
-        rr := f_row(rr, w8s, w8t, p8, d8, c8, l8, n8, h8, s8, g8, e8, f8, k8, m8, wo8, wp8, t8n, a8p, a8r, a8t)
+        rr := f_row(rr, w8s, w8t, p8, d8, c8, l8, n8, h8, s8, g8, e8, f8, k8, m8, wo8, wp8, t8n, a8p, a8r, a8t, a8b)
     if watchN >= 9
-        rr := f_row(rr, w9s, w9t, p9, d9, c9, l9, n9, h9, s9, g9, e9, f9, k9, m9, wo9, wp9, t9n, a9p, a9r, a9t)
+        rr := f_row(rr, w9s, w9t, p9, d9, c9, l9, n9, h9, s9, g9, e9, f9, k9, m9, wo9, wp9, t9n, a9p, a9r, a9t, a9b)
     if watchN >= 10
-        rr := f_row(rr, w10s, w10t, p10, d10, c10, l10, n10, h10, s10, g10, e10, f10, k10, m10, wo10, wp10, t10n, a10p, a10r, a10t)
+        rr := f_row(rr, w10s, w10t, p10, d10, c10, l10, n10, h10, s10, g10, e10, f10, k10, m10, wo10, wp10, t10n, a10p, a10r, a10t, a10b)
 
 // ═══════════════════════════ التنبيهات ════════════════════════════════
 alertcondition(pend == 1 and barstate.isconfirmed, "كول", "مِرصاد ٩ — كول")
