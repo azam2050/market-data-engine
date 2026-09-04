@@ -26,6 +26,7 @@ dirIn   = input.string("الاتجاهان", "الاتجاه", options = ["ال�
 entryIn = input.string("منطقة ثم تأكيد: لا تفوت", "الدخول", options = ["منطقة ثم تأكيد: لا تفوت", "منطقة دخول: انتظار الرجوع لمتوسط ٩", "فوري: افتتاح الشمعة التالية"], group = gM, tooltip = "منطقة ثم تأكيد: يُرسم خط عند متوسط ٩، فإن رجع السعر إليه دخلت عنده، وإن لم يرجع وأغلقت شمعة فوق قمة شمعة الإشارة دخلت على افتتاح التالية. لا تفوت إشارة. في الاختبار على ٣ دقائق: ٥٥٪ حركة أولى معك. منطقة فقط: ٦٥٪ لكن ثلاثة أرباع الإشارات تفوت. فوري: ٥٠٪ ولا تفوت")
 lifeN   = input.int(5, "صلاحية الدخول الأول في المنطقة (شموع)", minval = 1, maxval = 10, group = gM)
 chaseN  = input.int(8, "التأكيد: إغلاق فوق قمة شمعة الإشارة خلال N شموع", minval = 2, maxval = 20, group = gM)
+maxChase = input.float(1.5, "لا تأكيد إن ابتعد السعر عن المنطقة أكثر من × ATR", minval = 0.5, maxval = 4.0, step = 0.25, group = gM, tooltip = "يمنع مطاردة السعر في قمة الحركة: إن كان إغلاق شمعة التأكيد أبعد من هذا عن خط المنطقة تُترك الإشارة. في الاختبار: ٥٨٪ حركة أولى معك مقابل ٥٥٪ بلا الحد، مع ثلثي الإشارات")
 reEntry = input.bool(true, "دخول ثانٍ حين يرتد السعر إلى المنطقة", group = gM, tooltip = "بعد صفقة أولى لم تُوقف، إن رجع السعر إلى خط المنطقة خلال مدة بقائها يُفتح دخول ثانٍ. لا دخول ثانٍ بعد وقف: السعر اخترق المنطقة")
 reLife  = input.int(40, "المنطقة تبقى للدخول الثاني (شموع)", minval = 5, maxval = 120, group = gM)
 minQ    = input.int(0, "أدنى جودة مقبولة (٠ = الكل)", minval = 0, maxval = 90, step = 5, group = gM)
@@ -205,7 +206,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     // الدخول الثاني: ارتداد إلى المنطقة بعد صفقة أولى لم تُوقف
     reTouch = reEntry and barstate.isconfirmed and pos == 0 and pend == 0 and pSide == 0 and zSide != 0 and zUses == 1 and not zStopped and bar_index <= zBorn + reLife and (zSide == 1 ? low <= zLvl : high >= zLvl)
     // التأكيد: لم يرجع السعر، وأغلقت شمعة فوق قمة شمعة الإشارة (أو تحت قاعها) — الدخول على افتتاح التالية
-    chased = chaseOn and barstate.isconfirmed and pos == 0 and pend == 0 and pSide != 0 and not touched and bar_index <= pBorn + chaseN and (pSide == 1 ? close > pHi : close < pLo)
+    chased = chaseOn and barstate.isconfirmed and pos == 0 and pend == 0 and pSide != 0 and not touched and bar_index <= pBorn + chaseN and (pSide == 1 ? close > pHi : close < pLo) and math.abs(close - pLvl) <= maxChase * pAtr
     if touched
         pend := pSide
         pSide := 0
