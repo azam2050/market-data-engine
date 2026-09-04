@@ -36,7 +36,7 @@ adxOn   = input.bool(true, "حجب الإشارة في العرضي (ADX داخ�
 adxLvl  = input.float(18, "ADX تحته عرضي", minval = 10, maxval = 30, group = gF)
 boxN    = input.int(30, "صندوق العرضي: آخر N شمعة", minval = 10, maxval = 60, group = gF)
 coolN   = input.int(8, "راحة بعد كل إشارة (شموع) — لا انقلاب قبلها", minval = 0, maxval = 30, group = gF)
-htfOn   = input.bool(true, "مع اتجاه الفريم الأكبر (متوسط ٩ فوق ٢١ على ٣× الفريم)", group = gF)
+htfOn   = input.bool(false, "حجب الإشارة ضد الفريم الأكبر (متوسط ٩ و٢١ على ٣× الفريم)", group = gF, tooltip = "مطفأ: اتجاه الفريم الأكبر يدخل في درجة الجودة فقط ولا يحجب. مشتغل: يحجب كل إشارة ضده — يقطع نصف الإشارات ويتأخر عن الانعكاسات، ورفع النسبة قليلاً في الاختبار")
 skipOpen = input.int(1, "تجاهل أول N شمعة في الجلسة", minval = 0, maxval = 6, group = gF)
 
 gS = "الوقف والأهداف"
