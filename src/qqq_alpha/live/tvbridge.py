@@ -149,6 +149,8 @@ def _parse_json_signal(data: dict) -> TvSignal | None:
     raw = json.dumps(data, ensure_ascii=False)
     if event in {"zone", "level"}:
         return TvSignal("pending", sym, side, price=_f(data.get("level")), raw=raw, tf=tf)
+    if event == "secure":
+        return TvSignal("secure", sym, side, price=_f(data.get("price")), raw=raw, tf=tf)
     if event == "exit":
         r = _f(data.get("r"))
         why = str(data.get("why") or "")
@@ -461,7 +463,7 @@ class TvBridge:
             return
         if sig.kind == "entry":
             await self._on_entry(sig)
-        elif sig.kind in {"t1", "t2", "t3"}:
+        elif sig.kind in {"t1", "t2", "t3", "secure"}:
             await self._on_target(sig)
         elif sig.kind == "exit":
             await self._on_exit(sig)
@@ -604,10 +606,12 @@ class TvBridge:
             "t1": "🔺 تحقق الهدف الأول — الصفقة مؤمّنة (الوقف عند الدخول)",
             "t2": "🔺 تحقق الهدف الثاني — الوقف صعد إلى الهدف الأول",
             "t3": "🏆 الهدف الممتد تحقق",
+            "secure": "🔔 أمّن الصفقة — بع نصف الكمية الآن والوقف عند سعر الدخول"
+            + (f" (السهم عند {sig.price:g})" if sig.price else ""),
         }[sig.kind]
         trade = self._open.get(sig.symbol)
         if trade is not None:
-            trade.hits = max(trade.hits, {"t1": 1, "t2": 2, "t3": 3}[sig.kind])
+            trade.hits = max(trade.hits, {"t1": 1, "t2": 2, "t3": 3}.get(sig.kind, 0))
         suffix = await self._contract_suffix(sig.symbol)
         if trade is None:
             suffix = " — بدون عقد متتبَّع (الإشارة قبل تشغيل المتابعة)"

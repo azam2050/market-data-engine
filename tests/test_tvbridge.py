@@ -266,6 +266,20 @@ def test_bridge_orphan_exit_is_recorded_and_listed_in_the_day() -> None:
     assert "TSLA: خروج" in bridge.daily_report()
 
 
+def test_secure_alert_tells_the_channel_to_sell_half() -> None:
+    wire = _Wire([_c(352.5, 1.9, 2.0)])
+    bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
+
+    async def flow() -> None:
+        await bridge.handle(ENTRY_JSON)
+        await bridge.handle('{"src":"mirsad9","sym":"TSLA","tf":"5","event":"secure","side":"CALL","price":353.4}')
+
+    _run(flow())
+    assert len(wire.channel) == 2
+    assert "بع نصف الكمية" in wire.channel[1] and "353.4" in wire.channel[1] and "2.00$" in wire.channel[1]
+    assert bridge._open["TSLA"].hits == 0
+
+
 def test_bridge_ignores_a_resent_alert() -> None:
     # TradingView re-sends when the webhook answers slowly: same text, same trade
     wire = _Wire([_c(352.5, 1.9, 2.0)])

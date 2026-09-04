@@ -5,14 +5,16 @@
 //  وفوقه أربعة أشياء رأيناها ناقصة في غيره:
 //
 //    الصدق في السعر     سعر العلامة هو سعر الدخول الذي تحصل عليه فعلاً:
-//                       افتتاح الشمعة التالية. لا سعر شمعة فاتت.
-//    الوقف يُحترم       الصفقة تموت عند الوقف، ولا ✓ على هدف بعده.
+//                       افتتاح الشمعة التالية أو مستوى المنطقة. لا سعر شمعة فاتت.
+//    الوقف يُحترم       الصفقة تموت عند الوقف، ولا ● على هدف بعده.
 //    فلتر العرضي        لا كول ثم بوت ثم كول في ساعة واحدة: ADX + صندوق آخر
 //                       ٣٠ شمعة + فترة راحة بعد كل إشارة.
 //    الجودة             درجة من ١٠٠ على كل إشارة: قوة الشمعة، حجم الكسر،
 //                       توافق الفريم الأكبر، قوة الاتجاه، الحجم.
 //
-//  الوقف ثابت من ATR. الأهداف من ATR أو بالدولار. صفّا الفريمين ٣ و٥ في اللوحة.
+//  المنطقة: خط برتقالي متقطع عند متوسط ٩. الدخول الأول عند لمسه، والدخول
+//  الثاني حين يرتد السعر إليه بعد صفقة لم تُوقف. التأمين: تنبيه «بع النصف»
+//  عند نسبة من الطريق إلى الهدف الثالث، ويُنقل الوقف إلى الدخول.
 //  لا إعادة رسم: الإشارة تُختم على الإغلاق، والدخول على افتتاح التالية.
 // ══════════════════════════════════════════════════════════════════════════
 //@version=5
@@ -22,7 +24,9 @@ indicator("مِرصاد ٩", "MIRSAD 9", overlay = true, max_labels_count = 500,
 gM = "الوضع"
 dirIn   = input.string("الاتجاهان", "الاتجاه", options = ["الاتجاهان", "كول فقط", "بوت فقط"], group = gM)
 entryIn = input.string("منطقة دخول: انتظار الرجوع لمتوسط ٩", "الدخول", options = ["منطقة دخول: انتظار الرجوع لمتوسط ٩", "فوري: افتتاح الشمعة التالية"], group = gM, tooltip = "منطقة: يُرسم خط عند متوسط ٩ والدخول لحظة رجوع السعر إليه خلال N شموع — أعطى في الاختبار على ٣ و٥ دقائق أعلى نسبة حركة أولى معك وأقل وقفات، لكن ثلاثة أرباع الإشارات تفوت لأن السعر لا يرجع. فوري: الدخول على افتتاح الشمعة التالية، إشارات أكثر ونسبة أقل")
-lifeN   = input.int(3, "صلاحية منطقة الدخول (شموع)", minval = 1, maxval = 10, group = gM)
+lifeN   = input.int(3, "صلاحية الدخول الأول في المنطقة (شموع)", minval = 1, maxval = 10, group = gM)
+reEntry = input.bool(true, "دخول ثانٍ حين يرتد السعر إلى المنطقة", group = gM, tooltip = "بعد صفقة أولى لم تُوقف، إن رجع السعر إلى خط المنطقة خلال مدة بقائها يُفتح دخول ثانٍ. لا دخول ثانٍ بعد وقف: السعر اخترق المنطقة")
+reLife  = input.int(40, "المنطقة تبقى للدخول الثاني (شموع)", minval = 5, maxval = 120, group = gM)
 minQ    = input.int(0, "أدنى جودة مقبولة (٠ = الكل)", minval = 0, maxval = 90, step = 5, group = gM)
 fmX     = input.float(1.0, "مقياس الحركة الأولى (× ATR)", minval = 0.25, maxval = 3.0, step = 0.25, group = gM)
 
@@ -39,7 +43,7 @@ coolN   = input.int(8, "راحة بعد كل إشارة (شموع) — لا ان
 htfOn   = input.bool(false, "حجب الإشارة ضد الفريم الأكبر (متوسط ٩ و٢١ على ٣× الفريم)", group = gF, tooltip = "مطفأ: اتجاه الفريم الأكبر يدخل في درجة الجودة فقط ولا يحجب. مشتغل: يحجب كل إشارة ضده — يقطع نصف الإشارات ويتأخر عن الانعكاسات، ورفع النسبة قليلاً في الاختبار")
 skipOpen = input.int(1, "تجاهل أول N شمعة في الجلسة", minval = 0, maxval = 6, group = gF)
 
-gS = "الوقف والأهداف"
+gS = "الوقف والأهداف والتأمين"
 stopX  = input.float(1.5, "الوقف = × ATR من الدخول", minval = 0.5, maxval = 3.0, step = 0.25, group = gS)
 tgtMode = input.string("× ATR", "الأهداف تُحسب", options = ["× ATR", "بالدولار"], group = gS)
 x1 = input.float(1.0, "هدف ١ = × ATR", minval = 0.25, step = 0.25, group = gS)
@@ -48,7 +52,8 @@ x3 = input.float(3.0, "هدف ٣ = × ATR", minval = 1.0, step = 0.25, group = g
 usd1 = input.float(1.5, "هدف ١ بالدولار", minval = 0.1, step = 0.5, group = gS)
 usd2 = input.float(2.5, "هدف ٢ بالدولار", minval = 0.1, step = 0.5, group = gS)
 usd3 = input.float(4.0, "هدف ٣ بالدولار", minval = 0.1, step = 0.5, group = gS)
-trailN = input.int(3, "بعد التأمين: الوقف يتبع قاع/قمة آخر N شمعة", minval = 2, maxval = 15, group = gS)
+secPct = input.float(35, "تنبيه التأمين «بع النصف» عند ٪ من الطريق إلى هدف ٣", minval = 10, maxval = 90, step = 5, group = gS, tooltip = "حين يقطع السعر هذه النسبة من المسافة بين الدخول والهدف الثالث: تنبيه على الشارت والجوال ببيع نصف الكمية، ويُنقل الوقف إلى سعر الدخول فتصير الصفقة مؤمَّنة")
+trailN = input.int(3, "بعد هدف ٢: الوقف يتبع قاع/قمة آخر N شمعة", minval = 2, maxval = 15, group = gS)
 eodOut = input.bool(true, "إغلاق الصفقة آخر الجلسة (لا مبيت)", group = gS)
 
 gV = "العرض"
@@ -56,6 +61,7 @@ showLv = input.bool(true, "الوقف والأهداف", group = gV)
 showPnl = input.bool(true, "لوحة الصفقة", group = gV)
 showTf = input.bool(true, "صفّا الفريمين ٣ و٥", group = gV)
 showWatch = input.bool(true, "شاشة المراقبة", group = gV)
+watchPos = input.string("يسار الوسط", "مكان شاشة المراقبة", options = ["يسار الوسط", "أعلى اليسار", "أسفل اليسار", "أعلى الوسط"], group = gV)
 
 gW = "رموز المراقبة"
 w1s = input.symbol("NASDAQ:QQQ", "١", group = gW)
@@ -122,14 +128,21 @@ f_core() =>
     [okL, okS, q, a, e9, state, blockTxt, side0]
 
 // ═══════════════════════════ إدارة الصفقة ═════════════════════════════
-// الدخول على افتتاح الشمعة التالية للإشارة. الوقف ثابت × ATR من الدخول.
-// هدف ١ يُنقل الوقف إلى الدخول، هدف ٢ يرفعه إلى هدف ١، هدف ٣ يُقفل.
+// الدخول على افتتاح الشمعة التالية أو عند لمس المنطقة. الوقف ثابت × ATR.
+// التأمين: عند نسبة من الطريق إلى هدف ٣ يُباع النصف ويُنقل الوقف إلى الدخول.
+// هدف ٢ يرفع الوقف إلى هدف ١ ويتبع الهيكل، هدف ٣ يُقفل. الوقف يُحترم دائماً.
 f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     var int pSide = 0
     var float pLvl = na
     var int pExp = 0
     var float pAtr = na
     var float pQ = na
+    // المنطقة الحية: للدخول الأول ثم الدخول الثاني عند الارتداد
+    var int zSide = 0
+    var float zLvl = na
+    var int zBorn = 0
+    var int zUses = 0
+    var bool zStopped = false
     var bool fmOn = false
     var float fmUp = na
     var float fmDn = na
@@ -138,6 +151,8 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     var int fmTot = 0
     var int pos = 0
     var int pend = 0
+    var bool viaZone = false
+    var float fillLvl = na
     var float eP = na
     var float sP = na
     var float t1 = na
@@ -146,22 +161,38 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     var float qT = na
     var int hit = 0
     var bool secured = false
+    var bool half = false
+    var float halfLvl = na
+    var int nth = 0
     var int barsIn = 0
     var string exitTxt = ""
     var float lastR = na
     var float unit = na
     closed = false
+    secNow = false
     trailLo = ta.lowest(low, trailN)
     trailHi = ta.highest(high, trailN)
     lastBar = eodOut and hour(time, "America/New_York") == 15 and minute(time, "America/New_York") >= 55
+    // الدخول الأول: لمس المنطقة خلال صلاحيتها
     touched = barstate.isconfirmed and pos == 0 and pend == 0 and pSide != 0 and bar_index <= pExp and (pSide == 1 ? low <= pLvl : high >= pLvl)
+    // الدخول الثاني: ارتداد إلى المنطقة بعد صفقة أولى لم تُوقف
+    reTouch = reEntry and barstate.isconfirmed and pos == 0 and pend == 0 and pSide == 0 and zSide != 0 and zUses == 1 and not zStopped and bar_index <= zBorn + reLife and (zSide == 1 ? low <= zLvl : high >= zLvl)
     if touched
         pend := pSide
         pSide := 0
+        viaZone := true
+        fillLvl := pLvl
+        zUses := 1
+    else if reTouch
+        pend := zSide
+        viaZone := true
+        fillLvl := zLvl
+        zUses := 2
     if pend != 0 and pos == 0 and not na(a[1])
         pos := pend
-        // السعر الصادق: افتتاح هذه الشمعة (أو مستوى المنطقة إن لُمست)
-        eP := touched ? (pos == 1 ? math.min(open, pLvl) : math.max(open, pLvl)) : open
+        nth := zUses
+        // السعر الصادق: افتتاح هذه الشمعة، أو مستوى المنطقة إن لُمست
+        eP := viaZone ? (pos == 1 ? math.min(open, fillLvl) : math.max(open, fillLvl)) : open
         aRef = touched ? pAtr : a[1]
         qT := touched ? pQ : q0[1]
         unit := stopX * aRef
@@ -176,13 +207,17 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
         t1 := pos == 1 ? eP + m1 : eP - m1
         t2 := pos == 1 ? eP + m2 : eP - m2
         t3 := pos == 1 ? eP + m3 : eP - m3
+        halfLvl := pos == 1 ? eP + secPct / 100.0 * m3 : eP - secPct / 100.0 * m3
         hit := 0
         secured := false
+        half := false
         barsIn := 0
         exitTxt := ""
         pend := 0
+        viaZone := false
     else if pend != 0 and pos == 0
         pend := 0
+        viaZone := false
     if fmOn
         fmBars += 1
         side_ = fmUp > fmDn ? 1 : -1
@@ -197,9 +232,11 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
         barsIn += 1
         hitStop = pos == 1 ? low <= sP : high >= sP
         if hitStop
-            // الوقف يُحترم: الصفقة تموت هنا ولا ✓ بعدها
+            // الوقف يُحترم: الصفقة تموت هنا ولا ● بعدها
             lastR := (sP - eP) / unit * pos
             exitTxt := (sP - eP) * pos > 0 ? "خروج بربح" : (sP - eP) * pos == 0 ? "خروج على التعادل" : "وقف"
+            if (sP - eP) * pos < 0
+                zStopped := true
             pos := 0
             closed := true
         else
@@ -207,6 +244,10 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
                 hit := high >= t3 ? 3 : high >= t2 ? 2 : high >= t1 ? 1 : hit
             else
                 hit := low <= t3 ? 3 : low <= t2 ? 2 : low <= t1 ? 1 : hit
+            // التأمين: بع النصف وانقل الوقف إلى الدخول
+            if not half and (pos == 1 ? high >= halfLvl : low <= halfLvl)
+                half := true
+                secNow := true
             if hit >= 3
                 lastR := (t3 - eP) / unit * pos
                 exitTxt := "هدف ٣"
@@ -218,7 +259,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
                 pos := 0
                 closed := true
             else
-                if hit >= 1
+                if half or hit >= 1
                     sP := pos == 1 ? math.max(sP, eP) : math.min(sP, eP)
                 if hit >= 2
                     sP := pos == 1 ? math.max(sP, t1, trailLo) : math.min(sP, t1, trailHi)
@@ -226,64 +267,93 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     if barstate.isconfirmed and pos == 0 and pend == 0 and not closed
         side0 = sigL ? 1 : sigS ? -1 : 0
         if side0 != 0
+            lvl = side0 == 1 ? math.min(e9, close) : math.max(e9, close)
+            zSide := side0
+            zLvl := lvl
+            zBorn := bar_index
+            zStopped := false
             if waitZone
                 pSide := side0
-                pLvl := side0 == 1 ? math.min(e9, close) : math.max(e9, close)
+                pLvl := lvl
                 pExp := bar_index + lifeN
                 pAtr := a
                 pQ := q0
+                zUses := 0
             else
                 pend := side0
+                zUses := 1
     if pSide != 0 and (bar_index > pExp or pos != 0)
         pSide := 0
-    [pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT]
+    // المنطقة تموت: انتهت مدتها، أو استُعملت مرتين، أو أُوقفت الصفقة، أو فاتت بلا دخول
+    if zSide != 0 and pos == 0 and pend == 0 and (bar_index > zBorn + reLife or zUses >= 2 or zStopped or (zUses == 0 and pSide == 0))
+        zSide := 0
+    [pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth]
 
 // ═══════════════════════════ الشارت ═══════════════════════════════════
 [sigL, sigS, qv, atrv, e9v, state, blockTxt, rawSide] = f_core()
-[pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT] = f_trade(sigL, sigS, qv, atrv, e9v)
-newZone = barstate.isconfirmed and pSide != 0 and (pSide[1] != pSide or pLvl != pLvl[1])
+[pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth] = f_trade(sigL, sigS, qv, atrv, e9v)
+newZone = barstate.isconfirmed and zSide != 0 and (zSide[1] == 0 or zBorn != zBorn[1])
+zoneGone = zSide == 0 and zSide[1] != 0
 entered = pos != 0 and pos[1] == 0
 missed  = barstate.isconfirmed and pSide == 0 and pSide[1] != 0 and pos == 0 and pend == 0
+reArm = reEntry and barstate.isconfirmed and zSide != 0 and zUses == 1 and not zStopped and pos == 0 and pos[1] != 0
 
 cUp = #0E9F6E
 cDn = #E02424
+cZone = #F59E0B
 
 // كول / بوت مع الجودة — تُختم على إغلاق شمعة الإشارة
 if barstate.isconfirmed and pend == 1
     label.new(bar_index, low, "كول " + str.tostring(qv, "#"), style = label.style_label_up, color = color.new(cUp, 0), textcolor = color.white, size = size.small)
 if barstate.isconfirmed and pend == -1
     label.new(bar_index, high, "بوت " + str.tostring(qv, "#"), style = label.style_label_down, color = color.new(cDn, 0), textcolor = color.white, size = size.small)
-// سعر الدخول الصادق يُكتب على شمعة الدخول نفسها
+if barstate.isconfirmed and pSide != 0 and pSide[1] == 0
+    label.new(bar_index, pSide == 1 ? low : high, (pSide == 1 ? "كول " : "بوت ") + str.tostring(qv, "#"), style = pSide == 1 ? label.style_label_up : label.style_label_down, color = color.new(pSide == 1 ? cUp : cDn, 0), textcolor = color.white, size = size.small)
+// سعر الدخول الصادق يُكتب على شمعة الدخول نفسها — والدخول الثاني باسمه
 if entered
-    label.new(bar_index, eP, "دخول " + str.tostring(eP, format.mintick), style = pos == 1 ? label.style_label_up : label.style_label_down, color = color.new(#111827, 15), textcolor = pos == 1 ? color.new(#86EFAC, 0) : color.new(#FCA5A5, 0), size = size.tiny)
+    label.new(bar_index, eP, (nth >= 2 ? "دخول ثاني " : "دخول ") + str.tostring(eP, format.mintick), style = pos == 1 ? label.style_label_up : label.style_label_down, color = color.new(#111827, 15), textcolor = pos == 1 ? color.new(#86EFAC, 0) : color.new(#FCA5A5, 0), size = size.tiny)
+
+// المنطقة: خط برتقالي متقطع يعيش لمدة الدخول الثاني، ويُقصّ حين تموت
+var line zl = na
+var label zlab = na
 if newZone
-    line.new(bar_index, pLvl, bar_index + lifeN, pLvl, color = color.new(pSide == 1 ? cUp : cDn, 20), style = line.style_dashed, width = 2)
-    label.new(bar_index, pLvl, pSide == 1 ? "منطقة كول" : "منطقة بوت", style = label.style_label_right, color = color.new(#111827, 20), textcolor = pSide == 1 ? color.new(#86EFAC, 0) : color.new(#FCA5A5, 0), size = size.small)
-if missed
-    label.new(bar_index, pLvl[1], "فاتت", style = label.style_label_left, color = color.new(#374151, 30), textcolor = color.new(#D1D5DB, 0), size = size.tiny)
+    zl := line.new(bar_index, zLvl, bar_index + reLife, zLvl, color = color.new(cZone, 0), style = line.style_dashed, width = 2)
+    zlab := label.new(bar_index + reLife, zLvl, zSide == 1 ? "منطقة كول" : "منطقة بوت", style = label.style_label_left, color = color.new(cZone, 15), textcolor = color.black, size = size.small)
+if zoneGone and not na(zl)
+    line.set_x2(zl, bar_index)
+    label.set_x(zlab, bar_index)
+    label.set_text(zlab, label.get_text(zlab) + (zUses[1] == 0 ? " · فاتت" : zStopped[1] ? " · انتهت" : zUses[1] >= 2 ? " · دخولان" : " · انتهت"))
+    label.set_color(zlab, color.new(#374151, 30))
+    label.set_textcolor(zlab, color.new(#D1D5DB, 0))
 
 // الوقف والأهداف
 var line lnS = na
 var line ln1 = na
 var line ln2 = na
 var line ln3 = na
+var line lnH = na
 inTr = pos != 0
 if showLv and inTr and not inTr[1]
     lnS := line.new(bar_index, sP, bar_index + 1, sP, color = color.new(cDn, 10), width = 2)
     ln1 := line.new(bar_index, t1, bar_index + 1, t1, color = color.new(cUp, 55), style = line.style_dashed)
     ln2 := line.new(bar_index, t2, bar_index + 1, t2, color = color.new(cUp, 35), style = line.style_dashed)
     ln3 := line.new(bar_index, t3, bar_index + 1, t3, color = color.new(cUp, 10), width = 2)
+    lnH := line.new(bar_index, halfLvl, bar_index + 1, halfLvl, color = color.new(cZone, 40), style = line.style_dotted)
 if showLv and inTr and not na(lnS)
     line.set_y1(lnS, sP)
     line.set_xy2(lnS, bar_index + 1, sP)
     line.set_xy2(ln1, bar_index + 1, t1)
     line.set_xy2(ln2, bar_index + 1, t2)
     line.set_xy2(ln3, bar_index + 1, t3)
-// ✓ على الهدف لحظة تحققه — ولا ✓ بعد الوقف لأن الصفقة تكون قد ماتت
+    line.set_xy2(lnH, bar_index + 1, halfLvl)
+// ● على الهدف لحظة تحققه — ولا ● بعد الوقف لأن الصفقة تكون قد ماتت
 if inTr and hit >= 1 and hit[1] < 1
-    label.new(bar_index, t1, "✓ هدف ١", style = label.style_label_left, color = color.new(cUp, 30), textcolor = color.white, size = size.tiny)
+    label.new(bar_index, t1, "● هدف ١", style = label.style_label_left, color = color.new(cUp, 30), textcolor = color.white, size = size.tiny)
 if inTr and hit >= 2 and hit[1] < 2
-    label.new(bar_index, t2, "✓ هدف ٢", style = label.style_label_left, color = color.new(cUp, 20), textcolor = color.white, size = size.tiny)
+    label.new(bar_index, t2, "● هدف ٢", style = label.style_label_left, color = color.new(cUp, 20), textcolor = color.white, size = size.tiny)
+// التأمين: تنبيه على الشارت ببيع النصف
+if secNow
+    label.new(bar_index, halfLvl, "🔔 أمّن الصفقة — بع النصف · الوقف عند الدخول", style = pos == 1 ? label.style_label_down : label.style_label_up, color = color.new(cZone, 0), textcolor = color.black, size = size.small)
 if closed
     label.new(bar_index, close, exitTxt + "  " + str.tostring(lastR, "#.##") + "R", style = label.style_label_left, size = size.small, color = color.new(lastR >= 0 ? cUp : cDn, 15), textcolor = color.white)
 
@@ -292,17 +362,19 @@ f_dur(int bars, simple string tf) =>
     m = bars * timeframe.in_seconds(tf) / 60
     m < 60 ? str.tostring(m) + " د" : m < 1440 ? str.tostring(math.round(m / 60.0, 1)) + " س" : str.tostring(math.round(m / 1440.0, 1)) + " ي"
 
+// الأهداف كأيقونات: ● تنوّر حين يتحقق الهدف، ○ مطفأة
 f_hits(int h) =>
-    (h >= 1 ? "✓" : "—") + " " + (h >= 2 ? "✓" : "—") + " " + (h >= 3 ? "✓" : "—")
+    (h >= 1 ? "●" : "○") + " " + (h >= 2 ? "●" : "○") + " " + (h >= 3 ? "●" : "○")
 
 f_stateTxt(int p, int pd, bool sec, int st, int raw, string blk) =>
-    p == 1 ? (sec ? "كول · مؤمَّنة" : "كول قائمة") : p == -1 ? (sec ? "بوت · مؤمَّنة" : "بوت قائمة") : pd == 1 ? "كول على الافتتاح" : pd == -1 ? "بوت على الافتتاح" : pd == 2 ? "منطقة كول جاهزة" : pd == -2 ? "منطقة بوت جاهزة" : raw != 0 and blk != "" ? (raw == 1 ? "كول محجوبة: " : "بوت محجوبة: ") + blk : st == 9 ? "عرضي — انتظار" : st == 1 ? "ميل صاعد" : "ميل هابط"
+    p == 1 ? (sec ? "كول · مؤمَّنة" : "كول قائمة") : p == -1 ? (sec ? "بوت · مؤمَّنة" : "بوت قائمة") : pd == 1 ? "كول على الافتتاح" : pd == -1 ? "بوت على الافتتاح" : pd == 2 ? "منطقة كول جاهزة" : pd == -2 ? "منطقة بوت جاهزة" : pd == 3 ? "منطقة كول للدخول الثاني" : pd == -3 ? "منطقة بوت للدخول الثاني" : raw != 0 and blk != "" ? (raw == 1 ? "كول محجوبة: " : "بوت محجوبة: ") + blk : st == 9 ? "عرضي — انتظار" : st == 1 ? "ميل صاعد" : "ميل هابط"
 
 // الفريمان ٣ و٥ على الرمز نفسه — المنطق نفسه
 f_tf() =>
     [sL, sS, qq, av, e9w, stt, blk, raw] = f_core()
-    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt] = f_trade(sL, sS, qq, av, e9w)
-    [p, pd != 0 ? pd : ps * 2, sec ? 1 : 0, stt, raw, blk, ft > 0 ? 10.0 * fw / ft : na]
+    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt] = f_trade(sL, sS, qq, av, e9w)
+    pdx = pd != 0 ? pd : ps != 0 ? ps * 2 : (zs != 0 and zu == 1 and not zst) ? zs * 3 : 0
+    [p, pdx, sec ? 1 : 0, stt, raw, blk, ft > 0 ? 10.0 * fw / ft : na]
 
 [tp3, td3, tc3, ts3, tr3, tb3, tf3] = request.security(syminfo.tickerid, "3", f_tf(), lookahead = barmerge.lookahead_off)
 [tp5, td5, tc5, ts5, tr5, tb5, tf5] = request.security(syminfo.tickerid, "5", f_tf(), lookahead = barmerge.lookahead_off)
@@ -314,88 +386,105 @@ f_kv(int r, string k, string v, color c) =>
 
 if showPnl and barstate.islast
     if na(pt)
-        pt := table.new(position.bottom_right, 2, 11, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
+        pt := table.new(position.bottom_right, 2, 12, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
     table.cell(pt, 0, 0, "مِرصاد ٩", text_color = color.white, bgcolor = color.new(#111827, 0), text_size = size.small)
     table.cell(pt, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color = color.new(#D1D5DB, 0), bgcolor = color.new(#111827, 0), text_size = size.small)
-    st = f_stateTxt(pos, pend != 0 ? pend : pSide * 2, secured, state, rawSide, blockTxt)
-    f_kv(1, "الحالة", st, pos != 0 or pend != 0 ? color.new(pos == -1 or pend == -1 ? #FCA5A5 : #86EFAC, 0) : color.new(#FCD34D, 0))
-    f_kv(2, "الجودة", pos != 0 ? str.tostring(qT, "#") + " من ١٠٠" : "—", color.new(#D1D5DB, 0))
+    pdx = pend != 0 ? pend : pSide != 0 ? pSide * 2 : (zSide != 0 and zUses == 1 and not zStopped and pos == 0) ? zSide * 3 : 0
+    st = f_stateTxt(pos, pdx, secured, state, rawSide, blockTxt)
+    f_kv(1, "الحالة", st, pos != 0 or pdx != 0 ? color.new(pos == -1 or pdx < 0 ? #FCA5A5 : #86EFAC, 0) : color.new(#FCD34D, 0))
+    f_kv(2, "الجودة", pos != 0 ? str.tostring(qT, "#") + " من ١٠٠" + (nth >= 2 ? " · دخول ثانٍ" : "") : "—", color.new(#D1D5DB, 0))
     f_kv(3, "الدخول", pos != 0 ? str.tostring(eP, format.mintick) + "  (" + f_dur(barsIn, timeframe.period) + ")" : "—", color.new(#D1D5DB, 0))
     f_kv(4, "الوقف", pos != 0 ? str.tostring(sP, format.mintick) + (secured ? "  (مؤمَّن)" : "") : "—", color.new(#FCA5A5, 0))
     f_kv(5, "الأهداف", pos != 0 ? f_hits(hit) + "   " + str.tostring(t1, format.mintick) + " · " + str.tostring(t2, format.mintick) + " · " + str.tostring(t3, format.mintick) : "—", color.new(#86EFAC, 0))
-    f_kv(6, "أول حركة معك", fmTot > 0 ? str.tostring(math.round(10.0 * fmWin / fmTot, 1), "#.#") + " من ١٠  (" + str.tostring(fmWin) + " من " + str.tostring(fmTot) + ")" : "—", fmTot > 0 and fmWin * 2 >= fmTot ? color.new(#86EFAC, 0) : color.new(#FCD34D, 0))
+    f_kv(6, "التأمين", pos != 0 ? (half ? "½ بيع النصف ✓ · الوقف عند الدخول" : "عند " + str.tostring(halfLvl, format.mintick) + " (" + str.tostring(secPct, "#") + "٪ من الطريق)") : "—", half ? color.new(#FCD34D, 0) : color.new(#D1D5DB, 0))
+    f_kv(7, "أول حركة معك", fmTot > 0 ? str.tostring(math.round(10.0 * fmWin / fmTot, 1), "#.#") + " من ١٠  (" + str.tostring(fmWin) + " من " + str.tostring(fmTot) + ")" : "—", fmTot > 0 and fmWin * 2 >= fmTot ? color.new(#86EFAC, 0) : color.new(#FCD34D, 0))
     if showTf
-        f_kv(7, "فريم ٣", na(tp3) ? "غير متاح" : f_stateTxt(tp3, td3, tc3 == 1, ts3, tr3, tb3) + (na(tf3) ? "" : "  · " + str.tostring(tf3, "#.#") + "/١٠"), na(tp3) ? color.new(#9CA3AF, 0) : tp3 == 1 or td3 == 1 ? color.new(#86EFAC, 0) : tp3 == -1 or td3 == -1 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
-        f_kv(8, "فريم ٥", na(tp5) ? "غير متاح" : f_stateTxt(tp5, td5, tc5 == 1, ts5, tr5, tb5) + (na(tf5) ? "" : "  · " + str.tostring(tf5, "#.#") + "/١٠"), na(tp5) ? color.new(#9CA3AF, 0) : tp5 == 1 or td5 == 1 ? color.new(#86EFAC, 0) : tp5 == -1 or td5 == -1 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
+        f_kv(8, "فريم ٣", na(tp3) ? "غير متاح" : f_stateTxt(tp3, td3, tc3 == 1, ts3, tr3, tb3) + (na(tf3) ? "" : "  · " + str.tostring(tf3, "#.#") + "/١٠"), na(tp3) ? color.new(#9CA3AF, 0) : tp3 == 1 or td3 == 1 ? color.new(#86EFAC, 0) : tp3 == -1 or td3 == -1 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
+        f_kv(9, "فريم ٥", na(tp5) ? "غير متاح" : f_stateTxt(tp5, td5, tc5 == 1, ts5, tr5, tb5) + (na(tf5) ? "" : "  · " + str.tostring(tf5, "#.#") + "/١٠"), na(tp5) ? color.new(#9CA3AF, 0) : tp5 == 1 or td5 == 1 ? color.new(#86EFAC, 0) : tp5 == -1 or td5 == -1 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
         agree = (tp3 == 1 or td3 == 1) and (tp5 == 1 or td5 == 1) ? "كول على الفريمين" : (tp3 == -1 or td3 == -1) and (tp5 == -1 or td5 == -1) ? "بوت على الفريمين" : "لا توافق"
-        f_kv(9, "التوافق", agree, agree == "لا توافق" ? color.new(#FCD34D, 0) : color.white)
+        f_kv(10, "التوافق", agree, agree == "لا توافق" ? color.new(#FCD34D, 0) : color.white)
 
 // ═══════════════════════════ شاشة المراقبة ═══════════════════════════
 f_watch() =>
     [sL, sS, qq, av, e9w, stt, blk, raw] = f_core()
-    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt] = f_trade(sL, sS, qq, av, e9w)
-    [p, pd != 0 ? pd : ps * 2, sec ? 1 : 0, stt, bi, h, s, qt]
+    [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt] = f_trade(sL, sS, qq, av, e9w)
+    pdx = pd != 0 ? pd : ps != 0 ? ps * 2 : (zs != 0 and zu == 1 and not zst and p == 0) ? zs * 3 : 0
+    [p, pdx, sec ? 1 : 0, stt, bi, h, s, qt, e, hf ? 1 : 0, q3, ft > 0 ? 10.0 * fw / ft : na]
 
-[p1, d1, c1, l1, n1, h1, s1, g1] = request.security(w1s, w1t, f_watch(), lookahead = barmerge.lookahead_off)
-[p2, d2, c2, l2, n2, h2, s2, g2] = request.security(w2s, w2t, f_watch(), lookahead = barmerge.lookahead_off)
-[p3, d3, c3, l3, n3, h3, s3, g3] = request.security(w3s, w3t, f_watch(), lookahead = barmerge.lookahead_off)
-[p4, d4, c4, l4, n4, h4, s4, g4] = request.security(w4s, w4t, f_watch(), lookahead = barmerge.lookahead_off)
-[p5, d5, c5, l5, n5, h5, s5, g5] = request.security(w5s, w5t, f_watch(), lookahead = barmerge.lookahead_off)
-[p6, d6, c6, l6, n6, h6, s6, g6] = request.security(w6s, w6t, f_watch(), lookahead = barmerge.lookahead_off)
+[p1, d1, c1, l1, n1, h1, s1, g1, e1, f1, k1, m1] = request.security(w1s, w1t, f_watch(), lookahead = barmerge.lookahead_off)
+[p2, d2, c2, l2, n2, h2, s2, g2, e2, f2, k2, m2] = request.security(w2s, w2t, f_watch(), lookahead = barmerge.lookahead_off)
+[p3, d3, c3, l3, n3, h3, s3, g3, e3, f3, k3, m3] = request.security(w3s, w3t, f_watch(), lookahead = barmerge.lookahead_off)
+[p4, d4, c4, l4, n4, h4, s4, g4, e4, f4, k4, m4] = request.security(w4s, w4t, f_watch(), lookahead = barmerge.lookahead_off)
+[p5, d5, c5, l5, n5, h5, s5, g5, e5, f5, k5, m5] = request.security(w5s, w5t, f_watch(), lookahead = barmerge.lookahead_off)
+[p6, d6, c6, l6, n6, h6, s6, g6, e6, f6, k6, m6] = request.security(w6s, w6t, f_watch(), lookahead = barmerge.lookahead_off)
 
 f_short(string s) =>
     parts = str.split(s, ":")
     array.size(parts) > 1 ? array.get(parts, 1) : s
 
-blink = bar_index % 2 == 0 ? 0 : 30
+blink = bar_index % 2 == 0 ? 0 : 35
+wpos = watchPos == "أعلى اليسار" ? position.top_left : watchPos == "أسفل اليسار" ? position.bottom_left : watchPos == "أعلى الوسط" ? position.top_center : position.middle_left
 
 var table wt = na
-f_row(int r, string sym, simple string tf, int p, int pd, int sec, int ln, int bi, int h, float s, float qt) =>
+f_row(int r, string sym, simple string tf, int p, int pd, int sec, int ln, int bi, int h, float s, float qt, float e, int hf, float q3, float fm) =>
     unavailable = na(p)
     st = unavailable ? "غير متاح" : f_stateTxt(p, pd, sec == 1, ln, 0, "")
-    bg = unavailable ? color.new(#1F2937, 45) : pd != 0 ? color.new(pd == 1 ? cUp : cDn, blink) : p != 0 ? color.new(p == 1 ? cUp : cDn, 55) : color.new(#1F2937, 20)
+    live = not unavailable and p != 0
+    // لون الصف: نابض على الإشارة الجاهزة، أخضر/أحمر على الصفقة، برتقالي على منطقة الدخول الثاني، رمادي في الانتظار
+    bg = unavailable ? color.new(#1F2937, 45) : (pd == 1 or pd == -1) ? color.new(pd == 1 ? cUp : cDn, blink) : (pd == 3 or pd == -3) ? color.new(cZone, 55) : p != 0 ? color.new(p == 1 ? cUp : cDn, sec == 1 ? 35 : 55) : (pd == 2 or pd == -2) ? color.new(pd == 2 ? cUp : cDn, 70) : color.new(#1F2937, 20)
     dim = color.new(#1F2937, 20)
-    table.cell(wt, 0, r, f_short(sym), text_color = color.white, bgcolor = dim, text_size = size.small)
-    table.cell(wt, 1, r, tf, text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = size.tiny)
-    table.cell(wt, 2, r, st, text_color = color.white, bgcolor = bg, text_size = size.small)
-    table.cell(wt, 3, r, unavailable or p == 0 ? "—" : str.tostring(qt, "#"), text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = size.tiny)
-    table.cell(wt, 4, r, unavailable or p == 0 ? "—" : f_dur(bi, tf), text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = size.tiny)
-    table.cell(wt, 5, r, unavailable or p == 0 ? "—" : f_hits(h), text_color = color.new(#86EFAC, 0), bgcolor = dim, text_size = size.tiny)
-    table.cell(wt, 6, r, unavailable or p == 0 ? "—" : str.tostring(s, format.mintick), text_color = color.new(#FCA5A5, 0), bgcolor = dim, text_size = size.tiny)
+    tip = unavailable ? "لا بيانات لهذا الرمز الآن" : live ? "دخول " + str.tostring(e, format.mintick) + " · وقف " + str.tostring(s, format.mintick) + " · هدف ٣ " + str.tostring(q3, format.mintick) + (hf == 1 ? " · بيع النصف تم" : "") : "أول حركة معك: " + (na(fm) ? "—" : str.tostring(fm, "#.#") + "/١٠")
+    table.cell(wt, 0, r, f_short(sym), text_color = color.white, bgcolor = dim, text_size = size.normal, tooltip = tip)
+    table.cell(wt, 1, r, tf, text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = size.small)
+    table.cell(wt, 2, r, st, text_color = color.white, bgcolor = bg, text_size = size.normal, tooltip = tip)
+    table.cell(wt, 3, r, live ? str.tostring(qt, "#") : "—", text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = size.small)
+    table.cell(wt, 4, r, live ? str.tostring(e, format.mintick) : "—", text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = size.small)
+    table.cell(wt, 5, r, live ? str.tostring(s, format.mintick) : "—", text_color = color.new(#FCA5A5, 0), bgcolor = dim, text_size = size.small)
+    table.cell(wt, 6, r, live ? f_hits(h) : "○ ○ ○", text_color = live and h > 0 ? color.new(#86EFAC, 0) : color.new(#6B7280, 0), bgcolor = dim, text_size = size.normal)
+    table.cell(wt, 7, r, live ? (hf == 1 ? "½ ✓" : "½") : "—", text_color = live and hf == 1 ? color.new(#FCD34D, 0) : color.new(#6B7280, 0), bgcolor = live and hf == 1 ? color.new(cZone, 70) : dim, text_size = size.normal, tooltip = "½ تنوّر حين يحين بيع النصف والوقف عند الدخول")
+    table.cell(wt, 8, r, live ? f_dur(bi, tf) : "—", text_color = color.new(#D1D5DB, 0), bgcolor = dim, text_size = size.small)
 
 if showWatch and barstate.islast
     if na(wt)
-        wt := table.new(position.middle_left, 7, 7, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
+        wt := table.new(wpos, 9, 8, border_width = 1, border_color = color.new(#000000, 80), frame_width = 2, frame_color = color.new(#000000, 60))
     hdr = color.new(#111827, 0)
-    table.cell(wt, 0, 0, "الرمز", text_color = color.white, bgcolor = hdr, text_size = size.small)
-    table.cell(wt, 1, 0, "الفريم", text_color = color.white, bgcolor = hdr, text_size = size.small)
-    table.cell(wt, 2, 0, "الصفقة", text_color = color.white, bgcolor = hdr, text_size = size.small)
-    table.cell(wt, 3, 0, "الجودة", text_color = color.white, bgcolor = hdr, text_size = size.small)
-    table.cell(wt, 4, 0, "المدة", text_color = color.white, bgcolor = hdr, text_size = size.small)
-    table.cell(wt, 5, 0, "الأهداف", text_color = color.white, bgcolor = hdr, text_size = size.small)
-    table.cell(wt, 6, 0, "الوقف", text_color = color.white, bgcolor = hdr, text_size = size.small)
-    f_row(1, w1s, w1t, p1, d1, c1, l1, n1, h1, s1, g1)
-    f_row(2, w2s, w2t, p2, d2, c2, l2, n2, h2, s2, g2)
-    f_row(3, w3s, w3t, p3, d3, c3, l3, n3, h3, s3, g3)
-    f_row(4, w4s, w4t, p4, d4, c4, l4, n4, h4, s4, g4)
-    f_row(5, w5s, w5t, p5, d5, c5, l5, n5, h5, s5, g5)
-    f_row(6, w6s, w6t, p6, d6, c6, l6, n6, h6, s6, g6)
+    table.cell(wt, 0, 0, "مِرصاد ٩ · شاشة المراقبة", text_color = color.new(cZone, 0), bgcolor = hdr, text_size = size.small)
+    table.merge_cells(wt, 0, 0, 8, 0)
+    hdr2 = color.new(#0B1220, 0)
+    table.cell(wt, 0, 1, "الرمز", text_color = color.white, bgcolor = hdr2, text_size = size.small)
+    table.cell(wt, 1, 1, "الفريم", text_color = color.white, bgcolor = hdr2, text_size = size.small)
+    table.cell(wt, 2, 1, "الصفقة", text_color = color.white, bgcolor = hdr2, text_size = size.small)
+    table.cell(wt, 3, 1, "الجودة", text_color = color.white, bgcolor = hdr2, text_size = size.small)
+    table.cell(wt, 4, 1, "الدخول", text_color = color.white, bgcolor = hdr2, text_size = size.small)
+    table.cell(wt, 5, 1, "الوقف", text_color = color.white, bgcolor = hdr2, text_size = size.small)
+    table.cell(wt, 6, 1, "الأهداف", text_color = color.white, bgcolor = hdr2, text_size = size.small)
+    table.cell(wt, 7, 1, "التأمين", text_color = color.white, bgcolor = hdr2, text_size = size.small)
+    table.cell(wt, 8, 1, "المدة", text_color = color.white, bgcolor = hdr2, text_size = size.small)
+    f_row(2, w1s, w1t, p1, d1, c1, l1, n1, h1, s1, g1, e1, f1, k1, m1)
+    f_row(3, w2s, w2t, p2, d2, c2, l2, n2, h2, s2, g2, e2, f2, k2, m2)
+    f_row(4, w3s, w3t, p3, d3, c3, l3, n3, h3, s3, g3, e3, f3, k3, m3)
+    f_row(5, w4s, w4t, p4, d4, c4, l4, n4, h4, s4, g4, e4, f4, k4, m4)
+    f_row(6, w5s, w5t, p5, d5, c5, l5, n5, h5, s5, g5, e5, f5, k5, m5)
+    f_row(7, w6s, w6t, p6, d6, c6, l6, n6, h6, s6, g6, e6, f6, k6, m6)
 
 // ═══════════════════════════ التنبيهات ════════════════════════════════
 alertcondition(pend == 1 and barstate.isconfirmed, "كول", "مِرصاد ٩ — كول")
 alertcondition(pend == -1 and barstate.isconfirmed, "بوت", "مِرصاد ٩ — بوت")
+alertcondition(secNow, "تأمين", "مِرصاد ٩ — أمّن الصفقة: بع النصف")
 alertcondition(closed, "خروج", "مِرصاد ٩ — خروج")
 
-if barstate.isconfirmed and pend != 0
-    sideTxt = pend == 1 ? "CALL" : "PUT"
+if barstate.isconfirmed and (pend != 0 or (pSide != 0 and pSide[1] == 0))
+    sd = pend != 0 ? pend : pSide
+    sideTxt = sd == 1 ? "CALL" : "PUT"
     d0 = stopX * atrv
     a1 = tgtMode == "بالدولار" ? usd1 : x1 * atrv
     a2 = tgtMode == "بالدولار" ? usd2 : x2 * atrv
     a3 = tgtMode == "بالدولار" ? usd3 : x3 * atrv
-    alert('{"src":"mirsad9","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","side":"' + sideTxt + '","why":"اندفاع · جودة ' + str.tostring(qv, "#") + '","q":' + str.tostring(qv, "#") + ',"ref":' + str.tostring(close, format.mintick) + ',"stop":' + str.tostring(pend == 1 ? close - d0 : close + d0, format.mintick) + ',"t1":' + str.tostring(pend == 1 ? close + a1 : close - a1, format.mintick) + ',"t2":' + str.tostring(pend == 1 ? close + a2 : close - a2, format.mintick) + ',"t3":' + str.tostring(pend == 1 ? close + a3 : close - a3, format.mintick) + '}', alert.freq_once_per_bar_close)
-if newZone
-    alert('{"src":"mirsad9","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"zone","side":"' + (pSide == 1 ? "CALL" : "PUT") + '","level":' + str.tostring(pLvl, format.mintick) + '}', alert.freq_once_per_bar_close)
+    ref = pend != 0 ? close : pLvl
+    alert('{"src":"mirsad9","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"' + (pend != 0 ? "" : "zone") + '","side":"' + sideTxt + '","why":"اندفاع · جودة ' + str.tostring(qv, "#") + '","q":' + str.tostring(qv, "#") + ',"level":' + str.tostring(ref, format.mintick) + ',"ref":' + str.tostring(ref, format.mintick) + ',"stop":' + str.tostring(sd == 1 ? ref - d0 : ref + d0, format.mintick) + ',"t1":' + str.tostring(sd == 1 ? ref + a1 : ref - a1, format.mintick) + ',"t2":' + str.tostring(sd == 1 ? ref + a2 : ref - a2, format.mintick) + ',"t3":' + str.tostring(sd == 1 ? ref + a3 : ref - a3, format.mintick) + '}', alert.freq_once_per_bar_close)
 if entered
-    alert('{"src":"mirsad9","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"entry","side":"' + (pos == 1 ? "CALL" : "PUT") + '","price":' + str.tostring(eP, format.mintick) + ',"stop":' + str.tostring(sP, format.mintick) + ',"t1":' + str.tostring(t1, format.mintick) + ',"t2":' + str.tostring(t2, format.mintick) + ',"t3":' + str.tostring(t3, format.mintick) + '}', alert.freq_once_per_bar)
+    alert('{"src":"mirsad9","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"entry","side":"' + (pos == 1 ? "CALL" : "PUT") + '","why":"' + (nth >= 2 ? "دخول ثانٍ من المنطقة" : "دخول") + ' · جودة ' + str.tostring(qT, "#") + '","price":' + str.tostring(eP, format.mintick) + ',"stop":' + str.tostring(sP, format.mintick) + ',"t1":' + str.tostring(t1, format.mintick) + ',"t2":' + str.tostring(t2, format.mintick) + ',"t3":' + str.tostring(t3, format.mintick) + '}', alert.freq_once_per_bar)
+if secNow
+    alert('{"src":"mirsad9","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"secure","side":"' + (pos == 1 ? "CALL" : "PUT") + '","price":' + str.tostring(halfLvl, format.mintick) + '}', alert.freq_once_per_bar)
 if closed
     alert('{"src":"mirsad9","sym":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","event":"exit","why":"' + exitTxt + '","r":' + str.tostring(lastR, "#.##") + '}', alert.freq_once_per_bar)
