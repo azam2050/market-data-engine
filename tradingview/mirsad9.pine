@@ -35,6 +35,7 @@ gE = "محرك الاندفاع"
 bodyK   = input.float(0.8, "جسم الشمعة ≥ × ATR", minval = 0.3, maxval = 2.0, step = 0.1, group = gE)
 closeP  = input.float(0.65, "الإغلاق في أعلى/أدنى هذا الجزء من الشمعة", minval = 0.5, maxval = 0.9, step = 0.05, group = gE)
 brkN    = input.int(6, "تكسر قمة/قاع آخر N شمعة", minval = 3, maxval = 20, group = gE)
+orbN    = input.int(20, "كسر مدى الافتتاح: خلال أول N شمعة (٠ = إيقاف)", minval = 0, maxval = 60, group = gE, tooltip = "أول إغلاق قوي فوق قمة شمعة الافتتاح (أو تحت قاعها) في أول N شمعة من الجلسة يُقبل إشارة، حتى لو لم يتجاوز قمم أمس. في الاختبار لم يغيّر النسبة وأضاف إشارات الصباح")
 revK    = input.float(1.5, "شمعة انعكاس ضخمة: جسمها ≥ × ATR تكفي بكسر الشمعة السابقة فقط (٠ = إيقاف)", minval = 0, maxval = 4.0, step = 0.25, group = gE, tooltip = "في القاع أو القمة الحادة تأتي شمعة ضخمة تُغلق فوق قمة الشمعة السابقة لكنها لا تتجاوز قمة الشموع الست لأن الافتتاح كان أعلى. هذه تُقبل إشارة. في الاختبار لم تغيّر النسبة وزادت الإشارات قليلاً")
 
 gF = "فلتر العرضي والانقلاب"
@@ -94,19 +95,36 @@ f_core() =>
     eH2 = ta.ema(close, 63)
     [dip, dim, adx] = ta.dmi(14, 14)
     vAvg = ta.sma(volume, 20)
-    hiN = ta.highest(high, brkN)[1]
-    loN = ta.lowest(low, brkN)[1]
     boxH = ta.highest(high, boxN)[1]
     boxL = ta.lowest(low, boxN)[1]
     rng = high - low
     body = close - open
+    // موضع الشمعة في الجلسة
+    barDay = (hour(time, "America/New_York") * 60 + minute(time, "America/New_York") - 570) / math.max(timeframe.in_seconds() / 60, 1)
+    barsToday = int(math.max(barDay, 0))
+    // قمة/قاع الشموع السابقة داخل الجلسة فقط: لا تُقارن شمعة الصباح بشموع الأمس
+    hiN = high[1]
+    loN = low[1]
+    for k = 2 to brkN
+        if k <= barsToday
+            hiN := math.max(hiN, high[k])
+            loN := math.min(loN, low[k])
+    // مدى شمعة الافتتاح
+    var float orHi = na
+    var float orLo = na
+    if session.isfirstbar_regular
+        orHi := high
+        orLo := low
     // شمعة الاندفاع
     impL = rng > 0 and body >= bodyK * a and (close - low) / rng >= closeP and close > hiN
     impS = rng > 0 and -body >= bodyK * a and (high - close) / rng >= closeP and close < loN
     // شمعة الانعكاس الضخمة في القاع/القمة الحادة: تكسر الشمعة السابقة فقط
     revL = revK > 0 and rng > 0 and body >= revK * a and (close - low) / rng >= closeP and close > high[1]
     revS = revK > 0 and rng > 0 and -body >= revK * a and (high - close) / rng >= closeP and close < low[1]
-    side0 = impL or revL ? 1 : impS or revS ? -1 : 0
+    // كسر مدى الافتتاح: أول إغلاق قوي فوق قمة شمعة الافتتاح (أو تحت قاعها) في أول N شمعة
+    orbL = orbN > 0 and barsToday >= 1 and barsToday <= orbN and not na(orHi) and rng > 0 and body >= bodyK * a and (close - low) / rng >= closeP and close > orHi and close[1] <= orHi
+    orbS = orbN > 0 and barsToday >= 1 and barsToday <= orbN and not na(orLo) and rng > 0 and -body >= bodyK * a and (high - close) / rng >= closeP and close < orLo and close[1] >= orLo
+    side0 = impL or revL or orbL ? 1 : impS or revS or orbS ? -1 : 0
     // الجودة من ١٠٠
     margin = side0 == 1 ? close - hiN : side0 == -1 ? loN - close : 0.0
     htfOk = side0 == 1 ? eH1 > eH2 : side0 == -1 ? eH1 < eH2 : false
@@ -116,7 +134,6 @@ f_core() =>
     insideBox = close > boxL + 0.25 * boxW and close < boxH - 0.25 * boxW
     sideways = adxOn and adx < adxLvl and insideBox
     // الجلسة: لا أول شمعة (فجوة لا حركة) ولا آخر ربع ساعة
-    barDay = (hour(time, "America/New_York") * 60 + minute(time, "America/New_York") - 570) / math.max(timeframe.in_seconds() / 60, 1)
     lateBar = hour(time, "America/New_York") == 15 and minute(time, "America/New_York") >= 45
     // الراحة: لا إشارة (بأي اتجاه) خلال N شموع بعد إشارة مقبولة
     var int lastBar = -100000
