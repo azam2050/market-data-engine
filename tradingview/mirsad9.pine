@@ -401,9 +401,13 @@ if showLv and closed and not na(lnS)
     for l in array.from(lnS, ln1, ln2, ln3, lnH)
         array.push(oldLines, l)
         array.push(oldBars, bar_index)
-while array.size(oldBars) > 0 and bar_index - array.get(oldBars, 0) > cleanN
-    line.delete(array.shift(oldLines))
-    array.shift(oldBars)
+// Pine لا يوقف تقييم الشرط عند «و»، فالفحص على الحجم يكون وحده أولاً
+while array.size(oldBars) > 0
+    if bar_index - array.get(oldBars, 0) > cleanN
+        line.delete(array.shift(oldLines))
+        array.shift(oldBars)
+    else
+        break
 // ● على الهدف لحظة تحققه — ولا ● بعد الوقف لأن الصفقة تكون قد ماتت
 if inTr and hit >= 1 and hit[1] < 1
     label.new(bar_index, t1, "● هدف ١", style = label.style_label_left, color = color.new(cUp, 30), textcolor = color.white, size = size.tiny)
