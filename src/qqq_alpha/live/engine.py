@@ -24,7 +24,6 @@ from qqq_alpha.brain.attention import AttentionEngine
 from qqq_alpha.brain.decider import Decider, next_expiry, occ_symbol
 from qqq_alpha.brain.playbook import Playbook
 from qqq_alpha.brain.rails import DayState, SafetyRails, infeasible
-from qqq_alpha.brain.tutor import ConceptTutor
 from qqq_alpha.config import MARKET_TZ, REGULAR_CLOSE, REGULAR_OPEN, Settings
 from qqq_alpha.data.backfill import GapRepairer
 from qqq_alpha.data.calendar import todays_events
@@ -228,7 +227,7 @@ class LiveEngine:
             else None
         )
         # the public channel: two live shares a week, daily and weekly
-        # reports, and the education series — all best-effort, never blocking
+        # reports — all best-effort, never blocking
         self.channel = (
             ChannelPublisher(self.settings.telegram_bot_token, self.settings.telegram_channel_id)
             if self.settings.telegram_bot_token and self.settings.telegram_channel_id
@@ -239,7 +238,7 @@ class LiveEngine:
         # scoreboard — the two posts that show the record honestly, losses
         # included — so the paying room saw less accounting than the free one.
         # Only the report methods are ever called on this publisher: the live
-        # shares and the education series stay a public-channel affair.
+        # shares stay a public-channel affair.
         self.private_channel = (
             ChannelPublisher(
                 self.settings.telegram_bot_token,
@@ -250,14 +249,6 @@ class LiveEngine:
             else None
         )
         self._channel_daily_posted: date | None = None
-        # the daily concept lesson: Claude teaching one option-market idea a
-        # day, gated so it can never leak advice, prices, or this desk's own
-        # management rules. None when disabled or when no API key is set.
-        self.tutor = (
-            ConceptTutor(self.settings)
-            if self.settings.daily_lesson_enabled and self.settings.anthropic_api_key
-            else None
-        )
         # which session's data-health verdict has already been sent
         self._health_reported: date | None = None
         # blue under-watch cards published today — capped so a choppy session
@@ -372,7 +363,7 @@ class LiveEngine:
         if self.channel is not None:
             await self.notifier.note(
                 f"📢 النشر في القناة مفعّل: {self.settings.telegram_channel_id} — "
-                "دراستا حالة أسبوعيًا + تقرير يومي وأسبوعي ومنهج تعليمي"
+                "دراستا حالة أسبوعيًا + تقرير يومي وأسبوعي"
             )
         if self.settings.telegram_private_channel_id:
             await self.notifier.note(
@@ -1106,13 +1097,9 @@ class LiveEngine:
         return [c for c in (self.channel, self.private_channel) if c is not None]
 
     async def _publish_channel_daily(self, day: date) -> None:
-        """The after-the-bell package: the daily report, the weekly report on
-        Fridays, and the education series on its two slots. Guarded so it runs
-        once per session no matter how many post-close bars arrive.
-
-        The reports go to both channels; the education series stays public,
-        because it is written to attract readers rather than to inform paying
-        ones.
+        """The after-the-bell package: the daily report, and the weekly report
+        on Fridays. Guarded so it runs once per session no matter how many
+        post-close bars arrive. The reports go to both channels.
         """
         targets = self._report_channels
         if not targets or self._channel_daily_posted == day:
@@ -1130,11 +1117,6 @@ class LiveEngine:
             if self._tv_bridge is not None:
                 with contextlib.suppress(Exception):
                     await self._tv_bridge.post_daily_report(day)
-            # the concept lesson rides the bell's attention: minutes after the
-            # numbers, while the audience is still reading them
-            await self._post_daily_concept_lesson(day, targets)
-            if self.channel is not None and day.weekday() in (1, 3):  # Tue, Thu
-                await self.channel.post_education(day)
             if day.weekday() == 4:  # Friday: the weekly scoreboard
                 period = load_period(
                     self.settings.journal_dir, since=day - timedelta(days=6), until=day
@@ -1161,26 +1143,6 @@ class LiveEngine:
                 await self._publish_channel_monthly(day)
         except Exception:  # noqa: BLE001 - the shop window must never stop the desk
             log.exception("channel daily publishing failed")
-
-    async def _post_daily_concept_lesson(self, day: date, targets: list[ChannelPublisher]) -> None:
-        """One gated concept lesson to both rooms. A failure here is a log
-        line and an operator note — never a blocked report."""
-        if self.tutor is None:
-            return
-        try:
-            lesson = await self.tutor.compose(day)
-        except Exception:  # noqa: BLE001 - the lesson is garnish, the reports are dinner
-            log.exception("daily lesson generation failed")
-            return
-        if not lesson:
-            # composed but gated out (or empty) — the operator should know the
-            # gate fired, because a silently missing lesson looks like a bug
-            await self.notifier.note(
-                "🚫 درس اليوم حُجب آلياً (خالف بوابة المحتوى) — راجع السجلات"
-            )
-            return
-        for channel in targets:
-            await channel.post_lesson(lesson)
 
     @staticmethod
     def _is_last_session_of_month(day: date) -> bool:
@@ -2463,10 +2425,6 @@ class LiveEngine:
                 cards.render_update_card(trade, follow_up),
             ))
             samples.append((
-                "📚 نموذج: البطاقة التعليمية",
-                cards.render_education_card(cards._SAMPLE_LESSON),
-            ))
-            samples.append((
                 "📄 نموذج: التقرير اليومي",
                 cards.render_daily_report_card(
                     date(2026, 8, 14),
@@ -2535,7 +2493,7 @@ class LiveEngine:
                 chat_id,
                 f"🎁 تم تمديد اشتراكك المجاني {days} يومًا إضافية.\n"
                 f"ينتهي الآن في: {expires}\n"
-                "استمتع بالمحتوى التعليمي 🤍",
+                "استمتع بمِرصاد ٩ 🤍",
             )
             await self.notifier.note(f"🎁 مُدّد اشتراك {name} بـ {days} يومًا")
             return

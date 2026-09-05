@@ -17,7 +17,6 @@ from qqq_alpha.domain import Action, Decision, OptionType, Target
 from qqq_alpha.features.snapshot import SnapshotBuilder
 from qqq_alpha.journal import Journal
 from qqq_alpha.live.channel import (
-    EDUCATION_SERIES,
     ChannelPublisher,
     share_days_for_week,
 )
@@ -143,36 +142,6 @@ async def test_daily_report_falls_back_to_tagged_text_when_photos_fail():
     assert text.count("🟢") == 2
     assert text.count("🔓") == 1  # only the live share carries the tag
     assert "كما أُغلقت فعليًا" in text
-
-
-@pytest.mark.asyncio
-async def test_education_series_cycles_without_repeating_adjacent_slots():
-    captions: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        # the lesson now travels as a card; its title rides in the caption
-        body = request.content.decode("utf-8", errors="ignore")
-        captions.append(body)
-        return httpx.Response(200, json={"ok": True})
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        publisher = ChannelPublisher("token", "@chan", client=client)
-        tuesday, thursday = date(2026, 3, 3), date(2026, 3, 5)
-        await publisher.post_education(tuesday)
-        await publisher.post_education(thursday)
-        await publisher.post_education(tuesday + timedelta(weeks=1))
-
-    titles = [
-        next(
-            (line for line in body.splitlines() if "منهج إدارة المخاطر ورأس المال" in line),
-            "",
-        )
-        for body in captions
-    ]
-    assert len(titles) == 3
-    assert len(set(titles)) == 3  # three different lessons
-    assert all(t for t in titles)
-    assert len(EDUCATION_SERIES) >= 6
 
 
 @pytest.mark.asyncio
@@ -380,69 +349,6 @@ async def test_a_reached_level_goes_out_as_a_card_not_a_line_of_text():
     assert posts["texts"] == []
 
 
-@pytest.mark.asyncio
-async def test_the_education_series_goes_out_as_a_card():
-    posts, transport = _recorder()
-    async with httpx.AsyncClient(transport=transport) as client:
-        publisher = ChannelPublisher("token", "@chan", client=client)
-        await publisher.post_education(date(2026, 3, 3))
-
-    assert posts["photos"] == 1
-    assert posts["texts"] == []  # no wall of text beside the card
-
-
-@pytest.mark.asyncio
-async def test_education_falls_back_to_the_full_text_when_the_photo_fails():
-    """The lesson is the content; losing its styling is acceptable, losing the
-    lesson is not."""
-    posts = {"texts": []}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("sendPhoto"):
-            return httpx.Response(400, json={"ok": False})
-        posts["texts"].append(json.loads(request.content).get("text", ""))
-        return httpx.Response(200, json={"ok": True})
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        publisher = ChannelPublisher("token", "@chan", client=client)
-        await publisher.post_education(date(2026, 3, 3))
-
-    assert "منهج إدارة المخاطر ورأس المال" in posts["texts"][0]
-    assert "القاعدة" in posts["texts"][0]
-
-
-@pytest.mark.asyncio
-async def test_the_daily_concept_lesson_goes_out_as_a_card_too():
-    """Same branded delivery as the risk-management series — a plain-text
-    lesson beside a carded one would read like a lesser product."""
-    lesson = (
-        "قراءة السوق — الدعم: أرضية يتذكرها السوق\n\n"
-        "مثال توضيحي عام عن منطقة سعرية يتذكرها السوق.\n\n"
-        "القاعدة: الدعم منطقة يتذكرها السوق."
-    )
-    posts, transport = _recorder()
-    async with httpx.AsyncClient(transport=transport) as client:
-        publisher = ChannelPublisher("token", "@chan", client=client)
-        await publisher.post_lesson(lesson)
-
-    assert posts["photos"] == 1
-    assert posts["texts"] == []
-
-
-def test_education_card_parses_title_body_and_rule():
-    from io import BytesIO
-
-    from PIL import Image
-
-    from qqq_alpha.live.cards import render_education_card
-
-    for lesson in EDUCATION_SERIES:
-        png = render_education_card(lesson)
-        assert png.startswith(b"\x89PNG")
-        # each card sizes itself to its own text rather than clipping it
-        assert Image.open(BytesIO(png)).height > 600
-
-
 # ---------------------------------------------------------------- reports reach both rooms
 def _chat_recorder():
     """Records which chat_id each post was addressed to."""
@@ -528,30 +434,6 @@ async def test_the_weekly_scoreboard_reaches_both_rooms_on_friday(tmp_path):
     await engine._publish_channel_daily(friday)
 
     assert sorted(stats_calls) == ["-1009999", "@public"]
-
-
-@pytest.mark.asyncio
-async def test_the_education_series_stays_public_only(tmp_path):
-    """It is written to attract readers, not to inform paying ones."""
-    tuesday = date(2026, 3, 3)
-    engine = _reporting_engine(tmp_path)
-    taught: list[str] = []
-
-    for channel in engine._report_channels:
-        chat = channel.channel_id
-
-        async def _daily(day, closed, _chat=chat):
-            return None
-
-        async def _education(day, _chat=chat):
-            taught.append(_chat)
-
-        channel.post_daily_report = _daily  # type: ignore[method-assign]
-        channel.post_education = _education  # type: ignore[method-assign]
-
-    await engine._publish_channel_daily(tuesday)
-
-    assert taught == ["@public"]
 
 
 @pytest.mark.asyncio

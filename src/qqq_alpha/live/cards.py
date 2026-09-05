@@ -427,83 +427,6 @@ def render_update_card(trade: Trade, update: TradeUpdate) -> bytes:
         return _png(img)
 
 
-# ---------------------------------------------------------------- education
-def render_education_card(lesson: str) -> bytes:
-    """One lesson from the capital-preservation series, as a card.
-
-    The series was going out as a wall of text indistinguishable from a pinned
-    notice — which is a strange way to present the content that is supposed to
-    justify the channel existing. The text is parsed rather than re-authored:
-    first line is the title, the closing "القاعدة:" line is the takeaway, and
-    everything between is the body.
-    """
-    parts = [block.strip() for block in lesson.strip().split("\n\n") if block.strip()]
-    title = parts[0] if parts else "منهج إدارة المخاطر ورأس المال"
-    rule = ""
-    body_parts = parts[1:]
-    if body_parts and body_parts[-1].startswith("القاعدة"):
-        rule = body_parts.pop()
-    body = " ".join(body_parts)
-
-    # the series number sits in the title as (١) — pull it out for the chip
-    chip = "منهج إدارة المخاطر ورأس المال"
-    heading = title
-    if "—" in title:
-        left, right = title.split("—", 1)
-        chip = left.replace("📚", "").strip() or chip
-        heading = right.strip()
-
-    img = draw = None
-    with _stage(None):
-        # measure first: the body length decides the card's height, so a long
-        # lesson is never clipped and a short one carries no dead space
-        probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
-        heading_lines = _wrap(probe, heading, _font(44, bold=True), W - 2 * MARGIN - 80)
-        body_lines = _wrap(probe, body, _font(30), W - 2 * MARGIN - 80)
-        rule_lines = _wrap(probe, rule, _font(32, bold=True), W - 2 * MARGIN - 120) if rule else []
-
-        height = (
-            226 + 100 + len(heading_lines) * 60 + 30
-            + len(body_lines) * 48 + 40
-            + (len(rule_lines) * 46 + 70 if rule_lines else 0)
-            + 170
-        )
-        img, draw = _canvas(height)
-        y = _header(draw, "محتوى تعليمي")
-
-        _chip(draw, W / 2, y + 34, chip, GOLD)
-        y += 90
-        for line in heading_lines:
-            _rtl(draw, (W / 2, y + 26), line, _font(44, bold=True), TEXT, "mm")
-            y += 60
-        y += 20
-
-        _panel(draw, (MARGIN, y, W - MARGIN, y + len(body_lines) * 48 + 40))
-        y += 34
-        for line in body_lines:
-            _rtl(draw, (W - MARGIN - 40, y), line, _font(30), TEXT, "rm")
-            y += 48
-        y += 30
-
-        if rule_lines:
-            box_height = len(rule_lines) * 46 + 48
-            draw.rounded_rectangle(
-                (MARGIN, y, W - MARGIN, y + box_height), radius=22, outline=GOLD, width=3
-            )
-            y += 40
-            for line in rule_lines:
-                _rtl(draw, (W / 2, y), line, _font(32, bold=True), GOLD, "mm")
-                y += 46
-            y += 30
-
-    _rtl(
-        draw, (W / 2, height - 92),
-        "محتوى تعليمي وليس توصية استثمارية — الخيارات عالية المخاطر والقرار مسؤوليتك",
-        _font(24), MUTED, "mm",
-    )
-    return _png(img)
-
-
 # ---------------------------------------------------------------- close
 def render_close_card(trade: Trade, update: TradeUpdate) -> bytes:
     result = trade.return_pct if trade.return_pct is not None else update.return_pct
@@ -1048,14 +971,6 @@ def render_watch_card(
 # ---------------------------------------------------------------------------
 # Self-test — proof, on every boot, that the cards actually render in Arabic.
 # ---------------------------------------------------------------------------
-_SAMPLE_LESSON = (
-    "📚 منهج إدارة المخاطر ورأس المال (١) — تأمين التكلفة: متى تصبح الصفقة بلا مخاطرة؟\n\n"
-    "أخطر لحظة في أي صفقة رابحة هي لحظة الطمع: الورقة خضراء، والنفس تقول "
-    "\"خلها تكمل\". نظامنا لا يتفاوض مع هذه اللحظة — عند +35% يبيع نصف الكمية آليًا.\n\n"
-    "القاعدة: أمِّن بقاءك أولًا، ثم اسمح لنفسك بالحلم."
-)
-
-
 def _sample_stats():
     """Stand-in period statistics for the self-test and the operator preview."""
     from qqq_alpha.live.review import ReviewStats
@@ -1142,7 +1057,6 @@ def self_test() -> tuple[bool, str]:
             ("بطاقة المجريات", lambda: render_entry_card(trade, False, live=live)),
             ("بطاقة تأمين النصف", lambda: render_scale_out_card(trade, live)),
             ("بطاقة المحطات", lambda: render_update_card(trade, target)),
-            ("بطاقة تعليمية", lambda: render_education_card(_SAMPLE_LESSON)),
             ("بطاقة إغلاق رابح", lambda: render_close_card(trade, win)),
             ("بطاقة إغلاق خاسر", lambda: render_close_card(trade, loss)),
             ("بطاقة قيد التكوّن", lambda: render_watch_card(

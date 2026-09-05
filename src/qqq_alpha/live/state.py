@@ -42,8 +42,8 @@ class SessionState(BaseModel):
     # because a recovered trade whose size is unknown cannot be sold: the
     # engine would either dump more than it holds or leave a leg behind.
     executed: dict[str, int] = Field(default_factory=dict)
-    # whether the after-the-bell channel package (daily report, lesson,
-    # education, weekly/monthly) has already been attempted today. In-memory
+    # whether the after-the-bell channel package (daily report,
+    # weekly/monthly) has already been attempted today. In-memory
     # only until this field existed, so a deploy that restarted the engine
     # between the bell and the next post-close bar forgot the attempt and
     # sent the daily report a second time — once as the photo card, once as
