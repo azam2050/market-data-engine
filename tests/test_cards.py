@@ -66,26 +66,6 @@ def test_losing_close_card_renders_without_flinching():
     assert png.startswith(PNG_MAGIC)
 
 
-def test_report_cards_render_as_valid_pngs():
-    from qqq_alpha.live.review import ReviewStats
-
-    daily = cards.render_daily_report_card(
-        date(2026, 8, 14),
-        [
-            {"label": "QQQ 731 PUT 0DTE", "return_pct": 68.1, "shared": True},
-            {"label": "QQQ 733 CALL 0DTE", "return_pct": -3.9, "shared": False},
-        ],
-    )
-    assert daily.startswith(PNG_MAGIC) and len(daily) > 10_000
-
-    stats = ReviewStats(closed=7, wins=4, losses=3, win_rate=57.1,
-                        expectancy_pct=12.4, best_pct=68.1, worst_pct=-41.7)
-    weekly = cards.render_weekly_report_card(
-        stats, [{"label": "QQQ 731 PUT 0DTE", "return_pct": 68.1}]
-    )
-    assert weekly.startswith(PNG_MAGIC) and len(weekly) > 10_000
-
-
 def test_cards_survive_a_raqm_less_environment(monkeypatch):
     """Production once lost libraqm on a rebuild and shipped tofu boxes: the
     fallback path must render complete Arabic with the Amiri family, whose
@@ -140,50 +120,6 @@ def test_a_broken_renderer_is_reported_not_raised(monkeypatch):
     ok, message = cards.self_test()
     assert not ok
     assert "تعذّر الرسم" in message
-
-
-# ---------------------------------------------------------------- reports
-def test_daily_and_monthly_reports_are_different_objects():
-    """The operator's note: a daily receipt and a monthly statement must not
-    look like the same card with different numbers."""
-    from datetime import date, timedelta
-
-    from qqq_alpha.live import cards
-
-    daily = cards.render_daily_report_card(
-        date(2026, 8, 17),
-        [{"label": "QQQ 580 CALL", "return_pct": 50.0, "shared": True},
-         {"label": "QQQ 578 PUT", "return_pct": -33.3, "shared": False}],
-    )
-    monthly = cards.render_monthly_report_card(
-        date(2026, 8, 1), cards._sample_stats(),
-        [(date(2026, 8, 3) + timedelta(days=i), v)
-         for i, v in enumerate([12.5, -8.0, 31.2, -15.4, 22.0, 5.5, -21.0, 44.0])],
-        [{"label": "QQQ 580 CALL", "return_pct": 44.0}],
-    )
-    assert daily.startswith(b"\x89PNG") and monthly.startswith(b"\x89PNG")
-
-    from io import BytesIO
-
-    from PIL import Image
-
-    day_img, month_img = Image.open(BytesIO(daily)), Image.open(BytesIO(monthly))
-    # the statement carries a curve, a tile grid and week bars: it is taller
-    assert month_img.height > day_img.height * 1.5
-    # and it is drawn on its own palette, not the daily navy
-    assert day_img.getpixel((30, 30)) != month_img.getpixel((30, 30))
-
-
-def test_monthly_card_survives_a_month_with_a_single_session():
-    """One session means no curve to draw. It must still produce a card."""
-    from datetime import date
-
-    from qqq_alpha.live import cards
-
-    png = cards.render_monthly_report_card(
-        date(2026, 8, 1), cards._sample_stats(), [(date(2026, 8, 3), 12.5)], []
-    )
-    assert png.startswith(b"\x89PNG")
 
 
 def test_arabic_date_never_renders_as_a_reversed_iso_string():

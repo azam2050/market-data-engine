@@ -1,6 +1,6 @@
-"""The private subscribers channel: one tap on the invite link is the whole
-sign-up. The bot approves, the trial clock starts, delivery becomes a single
-post per signal, and expiry means removal — all without a human touching it."""
+"""The updates channel and the consent gate: join requests are approved on
+sight, the trial starts on the أوافق press, and the channel check tells the
+operator where the report cards land — all without a human touching it."""
 
 from __future__ import annotations
 
@@ -18,13 +18,11 @@ from qqq_alpha.journal import Journal
 from qqq_alpha.live.engine import LiveEngine
 from qqq_alpha.live.notifier import NullNotifier
 from qqq_alpha.live.telegram import (
-    BroadcastNotifier,
     FanoutNotifier,
     JoinRequest,
     TelegramCommandListener,
     TelegramNotifier,
 )
-from qqq_alpha.memory import Memory
 
 PRIVATE = "-1001234567890"
 
@@ -236,103 +234,6 @@ async def test_expiry_sends_the_farewell_and_evicts_nobody(tmp_path):
     assert "sendMessage" in methods  # the farewell DM
 
 
-# ---------------------------------------------------------------- delivery
-@pytest.mark.asyncio
-async def test_private_delivery_is_one_post_plus_operator_copy(tmp_path):
-    """1000 subscribers or 10: the signal is ONE channel post. Subscriber
-    DMs disappear entirely; the operator keeps a text audit copy."""
-    from datetime import date
-
-    from qqq_alpha.data.synthetic import synthetic_session
-    from qqq_alpha.domain import Action, Decision, OptionType, Target
-    from qqq_alpha.features.snapshot import SnapshotBuilder
-    from qqq_alpha.trades import TradeManager
-
-    memory = Memory(tmp_path / "memory.db")
-    now = datetime.now(UTC)
-    for uid in ("201", "202", "203"):
-        memory.add_subscriber(uid, uid, uid, joined_at=now, expires_at=now + timedelta(days=30))
-
-    photo_chats: list[str] = []
-    text_chats: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("sendPhoto"):
-            # multipart body: chat_id arrives as a form field
-            photo_chats.append(request.content.split(b'name="chat_id"')[1][:40].decode(errors="ignore"))
-            return httpx.Response(200, json={"ok": True})
-        text_chats.append(json.loads(request.content)["chat_id"])
-        return httpx.Response(200, json={"ok": True})
-
-    bars = synthetic_session("QQQ", date(2026, 3, 2), seed=21)
-    snap = SnapshotBuilder("QQQ").build(bars[:80])
-    decision = Decision(
-        ts=snap.ts, action=Action.ENTER, direction=OptionType.CALL,
-        occ_symbol="O:QQQ260302C00485000",
-        targets=[Target(label="T1", price=0.0, return_pct=50, take_pct=50)],
-        stop_return_pct=-40, confidence=7, thesis="x",
-    )
-    trade = TradeManager().open_trade(decision, 1.00, snap)
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        notifier = BroadcastNotifier(
-            "token", "admin", memory, client=client, private_channel_id=PRIVATE
-        )
-        await notifier.signal(trade, delayed=False)
-
-    assert len(photo_chats) == 1 and PRIVATE in photo_chats[0]  # one channel post
-    assert text_chats == ["admin"]  # the audit copy only — no subscriber DMs
-
-
-# ---------------------------------------------------------------- living card
-@pytest.mark.asyncio
-async def test_heartbeat_edits_the_posted_card_instead_of_new_messages(tmp_path):
-    """Every 15 minutes the entry card's badge refreshes in place — 'still
-    in the trade, now +X%' — one message that lives, not a feed of pings."""
-    from datetime import date
-    from datetime import timedelta as td
-
-    from qqq_alpha.data.synthetic import synthetic_session
-    from qqq_alpha.domain import Action, Decision, OptionType, Target
-    from qqq_alpha.features.snapshot import SnapshotBuilder
-    from qqq_alpha.trades import TradeManager
-
-    methods: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        method = request.url.path.rsplit("/", 1)[-1]
-        methods.append(method)
-        if method == "sendPhoto":
-            return httpx.Response(200, json={"ok": True, "result": {"message_id": 42}})
-        return httpx.Response(200, json={"ok": True, "result": {}})
-
-    bars = synthetic_session("QQQ", date(2026, 3, 2), seed=21)
-    snap = SnapshotBuilder("QQQ").build(bars[:80])
-    decision = Decision(
-        ts=snap.ts, action=Action.ENTER, direction=OptionType.CALL,
-        occ_symbol="O:QQQ260302C00485000",
-        targets=[Target(label="T1", price=0.0, return_pct=50, take_pct=50)],
-        stop_return_pct=-40, confidence=7, thesis="x",
-    )
-    manager = TradeManager()
-    trade = manager.open_trade(decision, 1.00, snap)
-
-    memory = Memory(tmp_path / "memory.db")
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        notifier = BroadcastNotifier(
-            "token", "admin", memory, client=client, private_channel_id=PRIVATE
-        )
-        await notifier.signal(trade, delayed=False)
-        assert notifier._live_cards[trade.trade_id] == 42
-
-        heartbeat = manager.update(trade, 1.12, trade.opened_at + td(minutes=16))
-        assert heartbeat is not None and heartbeat.note.startswith("status:")
-        await notifier.update(trade, heartbeat, delayed=False)
-
-    assert methods.count("sendPhoto") == 1        # the entry card, once
-    assert methods.count("editMessageMedia") == 1  # the living refresh
-
-
 @pytest.mark.asyncio
 async def test_preview_command_sends_terms_guide_and_sample_cards(tmp_path):
     calls: list[tuple[str, dict]] = []
@@ -423,17 +324,13 @@ async def test_check_command_posts_a_real_card_to_the_private_channel(tmp_path):
 
     calls: list[tuple[str, dict]] = []
     engine = _engine(tmp_path, calls)
-    memory = Memory(tmp_path / "notifier-memory.db")
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         # exactly how production wires it: the Telegram notifier is WRAPPED in
         # a fanout beside the console one. A diagnostic that isinstance-checks
         # engine.notifier directly is a no-op on the only deployment that
         # matters — which is what this test exists to prevent.
         engine.notifier = FanoutNotifier(
-            NullNotifier(),
-            BroadcastNotifier(
-                "token", "admin", memory, client=client, private_channel_id=PRIVATE
-            ),
+            NullNotifier(), TelegramNotifier("token", "admin", client=client)
         )
         await engine._handle_command("فحص")
 
@@ -466,21 +363,17 @@ async def test_an_unset_private_channel_is_named_as_the_cause_at_startup(tmp_pat
         journal=Journal(tmp_path / "journal", session_tag="test"),
         notifier=NullNotifier(),
     )
-    memory = Memory(tmp_path / "n.db")
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True, "result": {}}))
     ) as client:
-        broadcast = BroadcastNotifier("token", "admin", memory, client=client)
         notes = NullNotifier()
-        engine.notifier = FanoutNotifier(notes, broadcast)
+        engine.notifier = FanoutNotifier(notes, TelegramNotifier("token", "admin", client=client))
         await engine._report_channel_health()
 
     report = "\n".join(notes.notes)
     assert "TELEGRAM_PRIVATE_CHANNEL_ID فارغ" in report
-    assert "تصل البطاقات إلى محادثة البوت" in report
-    # the public channel being unset is a DIFFERENT fact — nothing is
-    # misrouted there, public publishing is simply off — and saying the same
-    # sentence about both would send the operator hunting the wrong problem
+    assert "تقارير مِرصاد ٩" in report
+    # the public channel being unset is a DIFFERENT fact, said differently
     assert "النشر العام معطّل" in report
 
 

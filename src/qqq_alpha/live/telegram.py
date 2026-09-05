@@ -20,7 +20,6 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import httpx
@@ -29,7 +28,7 @@ from qqq_alpha.domain import Trade, TradeUpdate
 from qqq_alpha.live.notifier import format_signal, format_update
 
 if TYPE_CHECKING:
-    from qqq_alpha.memory import Memory
+    pass
 
 log = logging.getLogger(__name__)
 
@@ -783,169 +782,6 @@ class TelegramCommandListener:
         if self._owns_client and self._client is not None:
             await self._client.aclose()
             self._client = None
-
-
-class BroadcastNotifier(TelegramNotifier):
-    """The operator's chat plus every active trial subscriber.
-
-    Two delivery modes. With a private channel configured, a signal is posted
-    there ONCE — every subscriber sees it instantly no matter how many there
-    are, because distribution is Telegram's job, not this process's. Without
-    one, signals fan out as individual DMs (the original mode, kept as the
-    migration path and fallback). System notes (preflight, errors, daily
-    reviews) stay operator-only either way — a subscriber pays for trades,
-    not for plumbing.
-    """
-
-    def __init__(
-        self,
-        token: str,
-        admin_chat_id: str,
-        memory: Memory,
-        client: httpx.AsyncClient | None = None,
-        silent_notes: bool = True,
-        private_channel_id: str = "",
-    ):
-        super().__init__(token, admin_chat_id, client=client, silent_notes=silent_notes)
-        self.memory = memory
-        self.private_channel_id = private_channel_id
-        # entry-card message ids per open trade, so heartbeats can refresh
-        # the posted card in place — in-memory only: after a restart the
-        # heartbeat edits simply resume being skipped, costing nothing
-        self._live_cards: dict[str, int] = {}
-
-    async def _broadcast(self, text: str, silent: bool, card: bytes | None = None) -> None:
-        if self.private_channel_id:
-            # one post to the private channel carries the signal to everyone;
-            # the operator still gets the full text as their audit copy
-            try:
-                delivered_card = False
-                if card is not None:
-                    delivered_card = await self._post_photo(
-                        card, silent=silent, chat_id=self.private_channel_id
-                    )
-                if not delivered_card:
-                    await self._send(text, silent=silent, chat_id=self.private_channel_id)
-            except Exception:  # noqa: BLE001 - the audit copy below must still go out
-                log.exception("private channel broadcast failed")
-            await self._send(text, silent=silent)
-            return
-
-        recipients = [
-            self.chat_id,  # the operator, always first
-            *(
-                chat_id
-                for chat_id in self.memory.active_subscriber_ids(datetime.now(UTC))
-                if chat_id != self.chat_id
-            ),
-        ]
-        for chat_id in recipients:
-            try:
-                delivered_card = False
-                if card is not None:
-                    delivered_card = await self._post_photo(card, silent=silent, chat_id=chat_id)
-                # subscribers get the card alone — the operator asked for one
-                # clean image per event, not image-plus-wall-of-text. The full
-                # text still goes to the operator (their audit copy) and to any
-                # recipient whose photo failed to deliver: a signal may lose its
-                # styling, never its content.
-                if chat_id == self.chat_id or not delivered_card:
-                    await self._send(text, silent=silent, chat_id=chat_id)
-            except Exception:  # noqa: BLE001 - one blocked user must not stop the list
-                log.exception("broadcast to %s failed", chat_id)
-            await asyncio.sleep(0.05)  # stay under Telegram's ~30 msg/s ceiling
-
-    @staticmethod
-    def _render_card(kind: str, trade: Trade, update: TradeUpdate | None, delayed: bool) -> bytes | None:
-        """Best-effort card image. Any failure means text-only, never no-signal."""
-        try:
-            from qqq_alpha.live import cards
-
-            if kind == "entry":
-                return cards.render_entry_card(trade, delayed)
-            if kind == "entry_live" and update is not None:
-                return cards.render_entry_card(trade, delayed, live=update)
-            if kind == "scale_out" and update is not None:
-                return cards.render_scale_out_card(trade, update)
-            if kind == "target" and update is not None:
-                return cards.render_update_card(trade, update)
-            if kind == "close" and update is not None:
-                return cards.render_close_card(trade, update)
-        except Exception:  # noqa: BLE001 - a drawing bug must never cost a signal
-            log.exception("card rendering failed; sending text only")
-        return None
-
-    async def watch(self, png: bytes | None, text: str) -> None:
-        if self.private_channel_id:
-            delivered = None
-            if png is not None:
-                delivered = await self._post_photo(
-                    png, silent=True, chat_id=self.private_channel_id
-                )
-            if not delivered:
-                await self._send(text, silent=True, chat_id=self.private_channel_id)
-            await self._send(text, silent=True)  # operator copy
-            return
-        await self._broadcast(text, silent=True, card=png)
-
-    async def signal(self, trade: Trade, delayed: bool) -> None:
-        card = self._render_card("entry", trade, None, delayed)
-        text = format_signal(trade, delayed)
-        if self.private_channel_id:
-            # posted directly (not via _broadcast) so the message id can be
-            # kept — the heartbeat will edit this exact card in place
-            message_id = None
-            if card is not None:
-                message_id = await self._post_photo(
-                    card, silent=False, chat_id=self.private_channel_id
-                )
-            if not message_id:
-                await self._send(text, silent=False, chat_id=self.private_channel_id)
-                # a card that failed to reach the channel used to look, from
-                # the operator's phone, exactly like one that arrived: they
-                # get the same text copy either way. Say it plainly.
-                await self._send(
-                    f"⚠️ لم تُنشر البطاقة في القناة الخاصة ({self.private_channel_id}) — "
-                    "أُرسل النص بدلاً منها. تأكد أن البوت مشرف في القناة "
-                    'بصلاحية النشر (أرسل "فحص" لاختبار القناة).',
-                    silent=False,
-                )
-            elif message_id > 0:
-                self._live_cards[trade.trade_id] = message_id
-            await self._send(text, silent=False)  # the operator's audit copy
-            return
-        await self._broadcast(text, silent=False, card=card)
-
-    async def update(self, trade: Trade, update: TradeUpdate, delayed: bool) -> None:
-        if update.note.startswith("status:"):
-            # the living card: the 15-minute heartbeat refreshes the posted
-            # entry card's badge in place — "still in, now +X%" — instead of
-            # dropping another message into the feed
-            if self.private_channel_id:
-                message_id = self._live_cards.get(trade.trade_id)
-                if message_id and message_id > 0:
-                    png = self._render_card("entry_live", trade, update, delayed)
-                    if png is not None:
-                        await self._edit_photo(self.private_channel_id, message_id, png)
-                await self._send(format_update(trade, update, delayed), silent=True)
-                return
-            await self._broadcast(format_update(trade, update, delayed), silent=True)
-            return
-
-        card: bytes | None = None
-        if update.note.startswith("closed:"):
-            card = self._render_card("close", trade, update, delayed)
-            self._live_cards.pop(trade.trade_id, None)
-        elif update.note.startswith("scale_out"):
-            card = self._render_card("scale_out", trade, update, delayed)
-        elif update.note.startswith("target:"):
-            # the level we named in advance just got hit — the most engaging
-            # beat in the lifecycle, and it used to go out as a line of text
-            card = self._render_card("target", trade, update, delayed)
-        noteworthy = update.note.startswith(("closed:", "target:", "scale_out"))
-        await self._broadcast(
-            format_update(trade, update, delayed), silent=not noteworthy, card=card
-        )
 
 
 CONSENT_YES = "consent:yes"

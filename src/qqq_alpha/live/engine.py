@@ -53,7 +53,6 @@ from qqq_alpha.live.channel import ChannelPublisher
 from qqq_alpha.live.flowfeed import LiveFlowFeed
 from qqq_alpha.live.notifier import ConsoleNotifier, Notifier, human_contract
 from qqq_alpha.live.preflight import run_preflight
-from qqq_alpha.live.review import load_period, review
 from qqq_alpha.live.shadow import ShadowStockDesk
 from qqq_alpha.live.state import SessionState, StateStore
 from qqq_alpha.live.stream import LiveBarStream
@@ -226,19 +225,14 @@ class LiveEngine:
             if self.settings.shadow_symbols
             else None
         )
-        # the public channel: two live shares a week, daily and weekly
-        # reports — all best-effort, never blocking
+        # the public channel: MIRSAD 9's report cards — best-effort, never
+        # blocking
         self.channel = (
             ChannelPublisher(self.settings.telegram_bot_token, self.settings.telegram_channel_id)
             if self.settings.telegram_bot_token and self.settings.telegram_channel_id
             else None
         )
-        # the same after-the-bell reports, aimed at the private channel. The
-        # subscribers were getting the live cards but not the daily or weekly
-        # scoreboard — the two posts that show the record honestly, losses
-        # included — so the paying room saw less accounting than the free one.
-        # Only the report methods are ever called on this publisher: the live
-        # shares stay a public-channel affair.
+        # the same report cards, aimed at the free updates channel
         self.private_channel = (
             ChannelPublisher(
                 self.settings.telegram_bot_token,
@@ -362,8 +356,8 @@ class LiveEngine:
 
         if self.channel is not None:
             await self.notifier.note(
-                f"📢 النشر في القناة مفعّل: {self.settings.telegram_channel_id} — "
-                "دراستا حالة أسبوعيًا + تقرير يومي وأسبوعي"
+                f"📢 القناة العامة مفعّلة: {self.settings.telegram_channel_id} — "
+                "تقارير أداء مِرصاد ٩ اليومية والأسبوعية والشهرية"
             )
         if self.settings.telegram_private_channel_id:
             await self.notifier.note(
@@ -574,8 +568,6 @@ class LiveEngine:
                 update = self.manager.update(trade, price, bar.ts)
             if update is not None:
                 await self.notifier.update(trade, update, self._delayed)
-                if trade.shared_to_channel and self.channel is not None:
-                    await self.channel.post_trade_update(trade, update, self._delayed)
                 self.journal.log_trade(trade)
                 self.memory.remember_trade(trade)
                 self._recall_after_close(trade)
@@ -699,17 +691,6 @@ class LiveEngine:
         trade = self.manager.open_trade(decision, fill, snapshot)
         self.status.trades_today += 1
         self.status.signals_sent += 1
-        # is this the week's live public share? First trade of a randomly
-        # chosen share day — flagged before persisting so a restart mid-trade
-        # keeps following it in the channel
-        if self.channel is not None:
-            local_day = bar.ts.astimezone(MARKET_TZ).date()
-            already_shared = any(
-                t.shared_to_channel
-                for t in (*self.manager.open_trades, *self.manager.closed_trades)
-            )
-            if self.channel.is_share_day(local_day) and not already_shared:
-                trade.shared_to_channel = True
         self.journal.log_trade(trade)
         self.memory.remember_trade(trade, snapshot)
         # persist before publishing: a crash between the two must leave the
@@ -720,8 +701,6 @@ class LiveEngine:
         # cannot explain
         await self._execute_entry(trade)
         await self.notifier.signal(trade, self._delayed)
-        if trade.shared_to_channel and self.channel is not None:
-            await self.channel.post_trade_entry(trade, self._delayed)
 
     # ------------------------------------------------------------------
     async def _maybe_publish_watch(self, decision: Decision, snapshot: MarketSnapshot) -> None:
@@ -729,8 +708,8 @@ class LiveEngine:
 
         Fires only when the brain named a specific condition it is waiting
         for at confidence 6+, at most twice a day: the watch card is a
-        promise of discipline, and promises lose value when spammed. Private
-        channel always; the public channel only on live-share days.
+        promise of discipline, and promises lose value when spammed. It goes
+        to the operator only.
         """
         if decision.action is not Action.WAIT or decision.confidence < 6:
             return
@@ -767,10 +746,6 @@ class LiveEngine:
             f"⚠️ {DISCLAIMER}"
         )
         await self.notifier.watch(png, text)
-        if self.channel is not None and self.channel.is_share_day(
-            snapshot.ts.astimezone(MARKET_TZ).date()
-        ):
-            await self.channel.post_watch(png, text)
         self._watch_shared_today += 1
 
     # ------------------------------------------------------------------
@@ -827,7 +802,7 @@ class LiveEngine:
         """The Telegram notifier actually in use, wherever it is wrapped.
 
         In production ``self.notifier`` is a FanoutNotifier holding a console
-        notifier and a BroadcastNotifier — so an ``isinstance`` check against
+        notifier and a TelegramNotifier — so an ``isinstance`` check against
         TelegramNotifier is False, and any diagnostic guarded by one becomes a
         silent no-op on the exact deployment it was written for. Unwrap once,
         here, instead of getting this wrong at every call site.
@@ -842,35 +817,29 @@ class LiveEngine:
 
     # ------------------------------------------------------------------
     async def _report_channel_health(self) -> str:
-        """Tell the operator, at boot, where the cards will actually land.
+        """Tell the operator, at boot, where the report cards will land.
 
-        The operator's report that "the bot posts to me instead of the
-        channel" could not be answered from the outside: in private-channel
-        mode they receive the text audit copy either way, so a channel that
-        silently rejects every photo looks exactly like a healthy one. This
-        asks Telegram which is true and puts the answer on their phone before
-        the session starts. Returns the private channel's verdict so فحص can
-        state one conclusion instead of two lines that may disagree.
+        A channel that silently rejects every photo looks, from the
+        operator's phone, exactly like a healthy one: they get the text copy
+        either way. This asks Telegram which is true and puts the answer on
+        their phone before the session starts. Returns the updates channel's
+        verdict so فحص can state one conclusion instead of two lines that
+        may disagree.
         """
         telegram = self._telegram()
         if telegram is None:
             return ""
         targets = [
             (
-                "قناة المشتركين الخاصة",
+                "قناة التحديثات",
                 self.settings.telegram_private_channel_id,
-                # the single most likely cause of "the cards come to me instead
-                # of the channel", and previously indistinguishable from every
-                # other cause: name it outright
-                "غير مُعدّة — المتغير TELEGRAM_PRIVATE_CHANNEL_ID فارغ، ولهذا "
-                "تصل البطاقات إلى محادثة البوت بدل القناة",
+                "غير مُعدّة — المتغير TELEGRAM_PRIVATE_CHANNEL_ID فارغ، فلا تصلها "
+                "تقارير مِرصاد ٩",
             ),
             (
                 "القناة العامة",
                 self.settings.telegram_channel_id,
-                # a different fact entirely: nothing is misrouted, the public
-                # package is simply switched off
-                "غير مُعدّة — النشر العام معطّل (لا تقارير ولا دراسات حالة للجمهور)",
+                "غير مُعدّة — النشر العام معطّل (لا تقارير للجمهور)",
             ),
         ]
         lines: list[str] = []
@@ -881,9 +850,8 @@ class LiveEngine:
                 lines.append(f"{label}: {verdict}")
             else:
                 try:
-                    # the public channel only ever posts; the private one also
-                    # edits living cards, issues invite links and removes
-                    # expired subscribers, so it needs the full set
+                    # the public channel only ever posts; the updates channel
+                    # also approves join requests, so it needs the full set
                     verdict = await telegram.check_channel(
                         str(chat_id), full_rights=(index == 0)
                     )
@@ -1071,8 +1039,6 @@ class LiveEngine:
             )
             update = self.manager.force_close(trade, price, bar.ts, "session_close")
             await self.notifier.update(trade, update, self._delayed)
-            if trade.shared_to_channel and self.channel is not None:
-                await self.channel.post_trade_update(trade, update, self._delayed)
             self.journal.log_trade(trade)
             self.memory.remember_trade(trade)
             self._recall_after_close(trade)
@@ -1096,48 +1062,17 @@ class LiveEngine:
         return [c for c in (self.channel, self.private_channel) if c is not None]
 
     async def _publish_channel_daily(self, day: date) -> None:
-        """The after-the-bell package: the daily report, and the weekly report
-        on Fridays. Guarded so it runs once per session no matter how many
-        post-close bars arrive. The reports go to both channels.
-        """
-        targets = self._report_channels
-        if not targets or self._channel_daily_posted == day:
+        """The after-the-bell package: MIRSAD 9's report cards, to both rooms.
+        Guarded so it runs once per session no matter how many post-close
+        bars arrive."""
+        if not self._report_channels or self._channel_daily_posted == day:
             return
         self._channel_daily_posted = day
         # written to disk before the attempt, not after: a crash mid-publish
         # must still be remembered, or the next boot repeats it verbatim
         self._persist()
         try:
-            closed = list(self.manager.closed_trades)
-            for channel in targets:
-                await channel.post_daily_report(day, closed)
-            # the indicator's own performance cards: daily always, weekly on
-            # Friday, monthly on the month's last session — both rooms
             await self._publish_indicator_reports(day)
-            if day.weekday() == 4:  # Friday: the weekly scoreboard
-                period = load_period(
-                    self.settings.journal_dir, since=day - timedelta(days=6), until=day
-                )
-                stats = review(period)
-                channel_rows = []
-                for row in period.closed:
-                    if not row.get("shared_to_channel"):
-                        continue
-                    opened = row.get("opened_at")
-                    try:
-                        when = datetime.fromisoformat(opened) if opened else datetime.now(UTC)
-                    except ValueError:
-                        when = datetime.now(UTC)
-                    channel_rows.append(
-                        {
-                            "label": human_contract(row.get("occ_symbol", ""), when),
-                            "return_pct": row.get("return_pct"),
-                        }
-                    )
-                for channel in targets:
-                    await channel.post_weekly_report(stats, channel_rows)
-            if self._is_last_session_of_month(day):
-                await self._publish_channel_monthly(day)
         except Exception:  # noqa: BLE001 - the shop window must never stop the desk
             log.exception("channel daily publishing failed")
 
@@ -1206,43 +1141,6 @@ class LiveEngine:
         if bridge is not None:
             bridge.forget_day(day)
 
-    async def _publish_channel_monthly(self, day: date) -> None:
-        """The month's statement. Its daily series and its trade statistics are
-        read from the same journal rows, so the curve's final value and the net
-        in the totals panel can never disagree.
-
-        Goes to both rooms, like the daily and weekly reports it belongs with.
-        """
-        targets = self._report_channels
-        if not targets:
-            return
-        month_start = day.replace(day=1)
-        period = load_period(self.settings.journal_dir, since=month_start, until=day)
-        stats = review(period)
-
-        by_day: dict[date, float] = {}
-        channel_rows: list[dict] = []
-        for row in period.closed:
-            opened = row.get("opened_at")
-            try:
-                when = datetime.fromisoformat(opened) if opened else datetime.now(UTC)
-            except ValueError:
-                when = datetime.now(UTC)
-            session = when.astimezone(MARKET_TZ).date()
-            result = float(row.get("return_pct") or 0.0)
-            by_day[session] = by_day.get(session, 0.0) + result
-            if row.get("shared_to_channel"):
-                channel_rows.append(
-                    {"label": human_contract(row.get("occ_symbol", ""), when),
-                     "return_pct": result}
-                )
-
-        daily_returns = sorted(by_day.items())
-        for channel in targets:
-            await channel.post_monthly_report(
-                month_start, stats, daily_returns, channel_rows
-            )
-
     async def _roll_session(self, new_day: date) -> None:
         """New session: flatten, archive, reset counters."""
         for trade in list(self.manager.open_trades):
@@ -1254,8 +1152,6 @@ class LiveEngine:
                 trade, price, last.ts if last else datetime.now(UTC), "session_rollover"
             )
             await self.notifier.update(trade, update, self._delayed)
-            if trade.shared_to_channel and self.channel is not None:
-                await self.channel.post_trade_update(trade, update, self._delayed)
 
         # if the close-time bar never arrived (dead feed at the bell), the
         # day's channel report still goes out at the boundary instead of never
@@ -2363,24 +2259,6 @@ class LiveEngine:
             samples.append((
                 "🟢 نموذج: بطاقة المحطات (محطة تحققت)",
                 cards.render_update_card(trade, follow_up),
-            ))
-            samples.append((
-                "📄 نموذج: التقرير اليومي",
-                cards.render_daily_report_card(
-                    date(2026, 8, 14),
-                    [{"label": "QQQ 731 PUT 0DTE", "return_pct": 67.6, "shared": True},
-                     {"label": "QQQ 733 CALL 0DTE", "return_pct": -41.3, "shared": False}],
-                ),
-            ))
-            samples.append((
-                "🗓️ نموذج: البيان الشهري",
-                cards.render_monthly_report_card(
-                    date(2026, 8, 1), cards._sample_stats(),
-                    [(date(2026, 8, 3) + timedelta(days=index), value)
-                     for index, value in enumerate(
-                         [12.5, -8.0, 31.2, -15.4, 22.0, 5.5, -21.0, 44.0])],
-                    [{"label": "QQQ 731 PUT 0DTE", "return_pct": 44.0}],
-                ),
             ))
         except Exception:  # noqa: BLE001 - a preview must never crash the engine
             log.exception("preview card rendering failed")

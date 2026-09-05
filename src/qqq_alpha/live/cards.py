@@ -11,7 +11,7 @@ the font's own OpenType shaping — the only way joined script comes out right.
 If a build ever lacks raqm, the reshaper+bidi fallback keeps the cards legible.
 
 Rendering is best-effort by contract: every public function either returns PNG
-bytes or raises, and the caller (BroadcastNotifier) treats any raise as "no
+bytes or raises, and the caller (the notifier) treats any raise as "no
 card today" and falls back to the text path. A drawing bug must never cost a
 subscriber a signal.
 """
@@ -499,37 +499,13 @@ def _draw_close_card(trade: Trade, update: TradeUpdate) -> bytes:
 
 
 # ---------------------------------------------------------------- reports
-METHODOLOGY_LINE = "النتائج كما أُغلقت فعليًا — لا نحسب حالة رابحة لمجرد أنها لامست مستوى ثم انعكست"
-MODEL_NOTE_LINE = "النموذج الافتراضي لأغراض التوضيح فقط — ليست نتائج حساب حقيقي"
 DISCLAIMER_LINE = "محتوى تعليمي وليس توصية استثمارية — الخيارات عالية المخاطر والقرار مسؤوليتك"
-# the hypothetical sizing behind every $ figure on the report cards: $1000
-# per single-position unit, scaled by each trade's recommended size factor
-MODEL_DOLLARS_PER_TRADE = 1000.0
-
-
-def _report_tail(draw: ImageDraw.ImageDraw, y: int, height: int) -> None:
-    """The methodology line and the disclaimers, shared by both report cards."""
-    for line in _wrap(draw, METHODOLOGY_LINE, _font(26, bold=True), W - 2 * MARGIN - 60)[:2]:
-        _rtl(draw, (W / 2, y), line, _font(26, bold=True), GOLD, "mm")
-        y += 40
-    _rtl(draw, (W / 2, height - 116), MODEL_NOTE_LINE, _font(22), MUTED, "mm")
-    _rtl(draw, (W / 2, height - 78), DISCLAIMER_LINE, _font(22), MUTED, "mm")
-
-
-def _dollars(pct_sum: float) -> str:
-    value = pct_sum / 100.0 * MODEL_DOLLARS_PER_TRADE
-    return f"${value:+,.0f}"
 
 
 ARABIC_MONTHS = (
     "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
     "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 )
-# how much vertical room _report_tail needs below the last panel: two wrapped
-# methodology lines, then the model note and the disclaimer pinned to the base
-REPORT_TAIL_HEIGHT = 246
-
-
 def arabic_date(day) -> str:
     """"17 أغسطس 2026" rather than an ISO date.
 
@@ -545,11 +521,8 @@ def _result_color(pct: float) -> str:
 
 
 # ---------------------------------------------------------------- report parts
-# The daily and the monthly report are deliberately different objects. A daily
-# card is a receipt: what happened today, in order, small enough to read at a
-# glance. A monthly card is a statement: shape over time, which is a picture,
-# not a list. Drawing both from the same row-stack made them interchangeable —
-# and a follower who cannot tell them apart stops reading either.
+# The parts MIRSAD 9's report card is built from: a split bar, a KPI tile,
+# a cumulative curve and a column per period.
 def _split_bar(
     draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], win: float, loss: float
 ) -> None:
@@ -695,218 +668,6 @@ def _week_bars(
         )
         _rtl(draw, (center_x, inner_b + 26), labels[index], _font(24), MUTED, "mm")
     draw.line([(inner_l, zero_y), (inner_r, zero_y)], fill=BORDER, width=2)
-
-
-def render_daily_report_card(day, rows: list[dict]) -> bytes:
-    """The day's receipt: the net, how it split, and every study in order.
-
-    ``rows``: label / return_pct / shared. Kept tight and chronological — a
-    daily card is read once, on a phone, the evening it is posted.
-    """
-    returns = [float(r["return_pct"]) for r in rows]
-    total = sum(returns)
-    gross_win = sum(r for r in returns if r > 0)
-    gross_loss = sum(r for r in returns if r < 0)
-    wins = sum(1 for r in returns if r > 1)
-    losses = sum(1 for r in returns if r < -1)
-    accent = _result_color(total)
-
-    height = 226 + 300 + 148 + (110 + len(rows) * 60 + 24) + REPORT_TAIL_HEIGHT
-    img, draw = _canvas(height)
-    y = _header(draw, f"بيان الجلسة — {arabic_date(day)}")
-
-    # hero: the net as a percentage and as the model's dollars, side by side,
-    # with the profit/loss split drawn to scale underneath
-    _panel(draw, (MARGIN, y, W - MARGIN, y + 274), outline=accent)
-    _chip(draw, W / 2, y + 44, "تقرير يومي — سجل شفاف", GOLD)
-    draw.text((W / 2, y + 132), f"{total:+.1f}%", font=_font(96, bold=True),
-              fill=accent, anchor="mm")
-    draw.text((W / 2, y + 196), _dollars(total), font=_font(38, bold=True),
-              fill=MUTED, anchor="mm")
-    _split_bar(draw, (MARGIN + 40, y + 226, W - MARGIN - 40, y + 254), gross_win, gross_loss)
-    y += 300
-
-    # three tiles instead of another stack of rows — the daily card's own shape
-    tile_w = (W - 2 * MARGIN - 2 * 20) / 3
-    for index, (label, value, color) in enumerate(
-        (
-            ("دراسات اليوم", str(len(rows)), TEXT),
-            ("رابحة", str(wins), GREEN),
-            ("خاسرة", str(losses), RED),
-        )
-    ):
-        left = MARGIN + index * (tile_w + 20)
-        _tile(draw, (int(left), y, int(left + tile_w), y + 124), label, value, color)
-    y += 148
-
-    row_y, y = _titled_panel(draw, y, "دراسات اليوم", len(rows))
-    for row in rows:
-        result = float(row["return_pct"])
-        label = str(row["label"])
-        if row.get("shared"):
-            label += " — نُشر حيًا هنا"
-        _row(draw, row_y, label, f"{result:+.1f}%  ({_dollars(result)})", _result_color(result))
-        row_y += 60
-
-    _report_tail(draw, y + 10, height)
-    return _png(img)
-
-
-def render_monthly_report_card(
-    month,
-    stats,
-    daily_returns: list[tuple[object, float]],
-    channel_rows: list[dict] | None = None,
-) -> bytes:
-    """The month as a statement, not a list.
-
-    A month of daily cards already told the reader what happened on each day.
-    What a month adds is *shape* — the curve, the drawdowns, which weeks
-    carried it — and shape has to be drawn. ``daily_returns`` is
-    (date, net percent) per session, in order.
-    """
-    channel_rows = channel_rows or []
-    values = [float(v) for _, v in daily_returns]
-    cumulative: list[float] = []
-    running = 0.0
-    for value in values:
-        running += value
-        cumulative.append(running)
-    total = running
-
-    green_days = sum(1 for v in values if v > 1)
-    red_days = sum(1 for v in values if v < -1)
-    # peak-to-trough on the cumulative curve: the number that tells a reader
-    # what holding this month would actually have felt like
-    peak, drawdown = 0.0, 0.0
-    for value in cumulative:
-        peak = max(peak, value)
-        drawdown = min(drawdown, value - peak)
-
-    weeks: list[float] = []
-    labels: list[str] = []
-    for index in range(0, len(values), 5):
-        weeks.append(sum(values[index : index + 5]))
-        labels.append(f"الأسبوع {len(weeks)}")
-
-    gross_win = stats.avg_win_pct * stats.wins
-    gross_loss = stats.avg_loss_pct * stats.losses
-    accent = _result_color(total)
-
-    tiles = [
-        ("الحالات المغلقة", str(stats.closed), TEXT, False),
-        ("نسبة الرابحة", f"{stats.win_rate:.0f}%", GOLD, False),
-        ("متوسط الحالة", f"{stats.expectancy_pct:+.1f}%", _result_color(stats.expectancy_pct), False),
-        ("أفضل حالة", f"{stats.best_pct:+.1f}%", GREEN, False),
-        ("أسوأ حالة", f"{stats.worst_pct:+.1f}%", RED, False),
-        ("أقصى تراجع", f"{drawdown:+.1f}%", RED, False),
-        ("جلسات رابحة", str(green_days), GREEN, False),
-        ("جلسات خاسرة", str(red_days), RED, False),
-    ]
-    tile_rows = (len(tiles) + 1) // 2
-    channel_panel = (110 + len(channel_rows) * 60 + 24) if channel_rows else 0
-    height = (
-        226 + 274 + 300 + (tile_rows * 144 + 24) + 300
-        + (110 + 3 * 60 + 24) + channel_panel + REPORT_TAIL_HEIGHT
-    )
-
-    with _stage("month"):
-        img, draw = _canvas(height)
-        label = f"{ARABIC_MONTHS[month.month - 1]} {month.year}"
-        y = _header(draw, f"البيان الشهري — {label}")
-
-        _panel(draw, (MARGIN, y, W - MARGIN, y + 250), outline=accent)
-        _chip(draw, W / 2, y + 44, "حصيلة الشهر كما أُغلقت فعليًا", GOLD)
-        draw.text((W / 2, y + 132), f"{total:+.1f}%", font=_font(104, bold=True),
-                  fill=accent, anchor="mm")
-        draw.text((W / 2, y + 202), _dollars(total), font=_font(40, bold=True),
-                  fill=MUTED, anchor="mm")
-        y += 274
-
-        _rtl(draw, (W - MARGIN, y - 6), "مسار الشهر التراكمي", _font(30, bold=True), GOLD, "rm")
-        span_labels = (
-            (arabic_date(daily_returns[0][0]), arabic_date(daily_returns[-1][0]))
-            if daily_returns
-            else None
-        )
-        _curve(draw, (MARGIN, y + 16, W - MARGIN, y + 276), cumulative, span_labels)
-        y += 300
-
-        for index, (tile_label, value, color, rtl_value) in enumerate(tiles):
-            column, row = index % 2, index // 2
-            tile_w = (W - 2 * MARGIN - 20) / 2
-            # RTL: the first tile of a pair belongs on the right
-            left = MARGIN + (1 - column) * (tile_w + 20)
-            top = y + row * 144
-            _tile(draw, (int(left), int(top), int(left + tile_w), int(top + 124)),
-                  tile_label, value, color, value_rtl=rtl_value)
-        y += tile_rows * 144 + 24
-
-        _rtl(draw, (W - MARGIN, y - 6), "أداء كل أسبوع", _font(30, bold=True), GOLD, "rm")
-        _week_bars(draw, (MARGIN, y + 16, W - MARGIN, y + 276), weeks, labels)
-        y += 300
-
-        row_y, y = _titled_panel(draw, y, "الحصيلة — نموذج افتراضي 1000$ لكل حالة", 3)
-        _row(draw, row_y, "إجمالي الأرباح", f"{_dollars(gross_win)}  ({gross_win:+.1f}%)", GREEN)
-        _row(draw, row_y + 60, "إجمالي الخسائر",
-             f"{_dollars(gross_loss)}  ({gross_loss:+.1f}%)", RED)
-        _row(draw, row_y + 120, "الصافي", f"{_dollars(total)}  ({total:+.1f}%)", GOLD)
-
-        if channel_rows:
-            row_y, y = _titled_panel(
-                draw, y, "حالات وُثّقت في القناة قبل نتيجتها", len(channel_rows)
-            )
-            for row in channel_rows:
-                result = float(row.get("return_pct") or 0)
-                _row(draw, row_y, str(row.get("label", "?")),
-                     f"{result:+.1f}%", _result_color(result))
-                row_y += 60
-
-        _report_tail(draw, y + 10, height)
-        return _png(img)
-
-
-def render_weekly_report_card(stats, channel_rows: list[dict]) -> bytes:
-    """The weekly scoreboard as a table, with the live-share proof section."""
-    positive = stats.expectancy_pct > 0
-    gross_win = stats.avg_win_pct * stats.wins
-    gross_loss = stats.avg_loss_pct * stats.losses
-    net = stats.expectancy_pct * stats.closed
-    stat_rows: list[tuple[str, str, str]] = [
-        ("إجمالي الحالات المغلقة", str(stats.closed), TEXT),
-        ("الرابحة", str(stats.wins), GREEN),
-        ("الخاسرة", str(stats.losses), RED),
-        ("نسبة الحالات الرابحة", f"{stats.win_rate:.0f}%", GOLD),
-        ("إجمالي الأرباح", f"{_dollars(gross_win)}  ({gross_win:+.1f}%)", GREEN),
-        ("إجمالي الخسائر", f"{_dollars(gross_loss)}  ({gross_loss:+.1f}%)", RED),
-        ("الصافي — نموذج 1000$ لكل حالة", f"{_dollars(net)}  ({net:+.1f}%)", GOLD),
-        ("متوسط نتيجة الحالة", f"{stats.expectancy_pct:+.1f}%", GREEN if positive else RED),
-        ("أفضل حالة", f"{stats.best_pct:+.1f}%", GREEN),
-        ("أسوأ حالة", f"{stats.worst_pct:+.1f}%", RED),
-    ]
-
-    channel_panel = (110 + len(channel_rows) * 60 + 24) if channel_rows else 0
-    height = 226 + (110 + len(stat_rows) * 60 + 24) + channel_panel + 110 + 60
-    img, draw = _canvas(height)
-    y = _header(draw, "التقرير الأسبوعي — الرابح والخاسر كما أُغلق فعليًا")
-
-    row_y, y = _titled_panel(draw, y, "حصيلة الأسبوع", len(stat_rows))
-    for label, value, fill in stat_rows:
-        _row(draw, row_y, label, value, fill)
-        row_y += 60
-
-    if channel_rows:
-        row_y, y = _titled_panel(
-            draw, y, "حالات وُثّقت في القناة قبل نتيجتها", len(channel_rows)
-        )
-        for row in channel_rows:
-            result = float(row.get("return_pct") or 0)
-            fill = GREEN if result > 1 else (MUTED if result >= -1 else RED)
-            _row(draw, row_y, str(row.get("label", "?")), f"{result:+.1f}%", fill)
-            row_y += 60
-
-    _report_tail(draw, y + 10, height)
-    return _png(img)
 
 
 # ---------------------------------------------------------------- MIRSAD 9 reports
@@ -1164,16 +925,6 @@ def render_watch_card(
 # ---------------------------------------------------------------------------
 # Self-test — proof, on every boot, that the cards actually render in Arabic.
 # ---------------------------------------------------------------------------
-def _sample_stats():
-    """Stand-in period statistics for the self-test and the operator preview."""
-    from qqq_alpha.live.review import ReviewStats
-
-    return ReviewStats(
-        closed=8, wins=5, losses=3, win_rate=62.5, expectancy_pct=8.9,
-        avg_win_pct=23.0, avg_loss_pct=-14.8, best_pct=44.0, worst_pct=-21.0,
-    )
-
-
 def _glyph_is_missing(font: ImageFont.FreeTypeFont, char: str) -> bool:
     """True when the font has no glyph for this character.
 
@@ -1255,16 +1006,12 @@ def self_test() -> tuple[bool, str]:
             ("بطاقة قيد التكوّن", lambda: render_watch_card(
                 "QQQ", "صعود CALL", "اختراق 580.10 بحجم", 7, trade.opened_at, level=578.40
             )),
-            ("التقرير اليومي", lambda: render_daily_report_card(
-                date(2026, 8, 14),
-                [{"label": "QQQ 580 CALL", "return_pct": 50.0, "shared": True},
-                 {"label": "QQQ 578 PUT", "return_pct": -33.3, "shared": False}],
-            )),
-            ("البيان الشهري", lambda: render_monthly_report_card(
-                date(2026, 8, 1), _sample_stats(),
-                [(date(2026, 8, 3 + i), value) for i, value in
-                 enumerate([12.5, -8.0, 31.2, -15.4, 22.0, 5.5, -21.0, 44.0])],
-                [{"label": "QQQ 580 CALL", "return_pct": 44.0}],
+            ("تقرير مِرصاد ٩", lambda: render_indicator_report_card(
+                "daily", date(2026, 8, 14), date(2026, 8, 14),
+                [{"symbol": "NVDA", "label": "NVDA 180C", "side": 1, "entry": 2.1,
+                  "peak": 3.4, "exit": 3.05, "pct": 45.2, "peak_pct": 61.9,
+                  "how": "الهدف الثاني", "day": date(2026, 8, 14)}],
+                [{"label": "AAPL 235C", "entry": 1.9, "mark": 2.35}],
             )),
         ]
         for label, render in renders:
