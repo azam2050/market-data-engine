@@ -429,6 +429,13 @@ def create_app(
             ),
         )
 
+    @app.get("/subscribers/{chat_id}/messages")
+    def subscriber_messages(chat_id: str, request: Request, _: str = Depends(login)):
+        """The full conversation between the bot and one person."""
+        return templates.TemplateResponse(
+            request, "messages.html", _ctx(chat=data.conversation(settings, chat_id))
+        )
+
     @app.post("/subscribers/{chat_id}/extend")
     async def extend_subscriber(chat_id: str, request: Request, _: str = Depends(login)):
         """Grant more free days, and tell the subscriber they were granted.

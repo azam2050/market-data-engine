@@ -181,6 +181,8 @@ class LiveEngine:
             if self.settings.telegram_bot_token and self.settings.telegram_chat_id
             else None
         )
+        if self.commands is not None:
+            self.commands.journal = self.memory.log_message
         self._command_task: asyncio.Task | None = None
         self._dashboard_task: asyncio.Task | None = None
         self._watchdog_task: asyncio.Task | None = None
@@ -1550,6 +1552,9 @@ class LiveEngine:
 
         now = datetime.now(UTC)
         name = press.username or press.first_name or press.user_id
+        self.memory.log_message(
+            press.user_id, "in", "[زر] " + ("✅ أوافق وأقر" if press.data == CONSENT_YES else "❌ لا أوافق")
+        )
 
         if press.data == CONSENT_NO:
             if private:
@@ -1645,6 +1650,7 @@ class LiveEngine:
             "inbound from non-operator chat %s (%s): %r",
             message.chat_id, message.username or message.first_name, message.text
         )
+        self.memory.log_message(message.chat_id, "in", message.text)
 
         private = self.settings.telegram_private_channel_id
 

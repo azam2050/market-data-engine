@@ -790,3 +790,27 @@ def test_the_bias_page_renders_with_data_and_without(tmp_path):
     assert "دراسة الانحياز" in body
     assert "قمم" in body  # the ceiling disclaimer is part of the page's honesty
     assert client.get("/bias").status_code == 401
+
+
+# ---------------------------------------------------------------- conversations
+def test_subscriber_conversation_page_shows_both_directions(tmp_path):
+    """The operator reads what a subscriber sent and what the bot answered,
+    in order, with button taps shown as inbound lines."""
+    settings, memory = _with_subscribers(tmp_path)
+    memory.set_tv_username("111", "layth_tv")
+    memory.log_message("111", "in", "/start")
+    memory.log_message("111", "out", "أهلاً بك في مِرصاد ٩")
+    memory.log_message("111", "in", "[زر] ✅ أوافق وأقر")
+    memory.log_message("111", "out", "الخطوة الأخيرة: أرسل اسم المستخدم")
+
+    client = TestClient(create_app(settings))
+    roster = client.get("/subscribers", auth=AUTH).text
+    assert "layth_tv" in roster  # the TradingView name on the roster
+    assert "/subscribers/111/messages" in roster and "💬 4" in roster
+
+    page = client.get("/subscribers/111/messages", auth=AUTH).text
+    assert "layth_tv" in page
+    assert page.index("/start") < page.index("أهلاً بك في مِرصاد ٩") < page.index("[زر] ✅ أوافق")
+
+    # an unknown chat renders an empty conversation, not an error
+    assert "لا رسائل مسجلة" in client.get("/subscribers/999/messages", auth=AUTH).text

@@ -67,6 +67,8 @@
         <th>ينتهي في</th>
         <th>المتبقي</th>
         <th>الحالة</th>
+        <th>اسم TradingView</th>
+        <th>الرسائل</th>
         <th>داخل القناة</th>
         <th>الإجراءات</th>
       </tr>
@@ -93,6 +95,17 @@
           {% else %}
           <span class="muted">● {{ row.status_label }}</span>
           {% endif %}
+        </td>
+        <td>
+          {% if row.tv_username %}
+          <code>{{ row.tv_username }}</code>
+          {% else %}
+          <span class="muted small" title="لم يرسل اسمه بعد">—</span>
+          {% endif %}
+        </td>
+        <td>
+          <a href="/subscribers/{{ row.chat_id }}/messages">💬 {{ row.message_count }}</a>
+          {% if row.last_message_at %}<br><span class="small muted">{{ row.last_message_at.strftime("%m-%d %H:%M") }}</span>{% endif %}
         </td>
         <td>
           {% if row.in_channel is none %}
@@ -123,7 +136,10 @@
     مدة جديدة من اليوم إن كان منتهيًا — فلا تضيع الأيام في الماضي. ويصل المشترك
     إشعار بالتمديد.<br>
     <strong>الحذف</strong> يمسح السجل <em>ويخرجه من القناة الخاصة</em> في نفس
-    الخطوة، لأن حذف السجل وحده كان سيتركه يستقبل الإشارات بلا أثر يدلّ عليه.
+    الخطوة، لأن حذف السجل وحده كان سيتركه يستقبل الإشارات بلا أثر يدلّ عليه.<br>
+    <strong>اسم TradingView</strong> هو ما أرسله المشترك للبوت ويُحفظ هنا. منح الوصول
+    نفسه يدوي من TradingView: افتح السكربت ← إدارة الوصول ← أضف الاسم. وكلمة
+    «المؤشرات» في البوت تعطيك قائمة المنح والإزالة كاملة.
   </p>
   {% else %}
   <div class="empty">لا يوجد مشتركون مسجّلون بعد</div>

@@ -18,6 +18,7 @@ import contextlib
 import html
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -380,6 +381,15 @@ class TelegramCommandListener:
     for operator commands is enforced there by chat id, never here.
     """
 
+    # set by the engine: (chat_id, direction, text) → None. Every reply the
+    # listener sends is journaled so the dashboard can show the conversation
+    journal: Callable[[str, str, str], None] | None = None
+
+    def _note_out(self, chat_id: str, text: str) -> None:
+        if self.journal is not None:
+            with contextlib.suppress(Exception):
+                self.journal(str(chat_id), "out", text)
+
     def __init__(self, token: str, chat_id: str, client: httpx.AsyncClient | None = None):
         self.token = token
         self.chat_id = str(chat_id)
@@ -569,6 +579,9 @@ class TelegramCommandListener:
                     "buttoned message to %s rejected (%s): %s",
                     chat_id, response.status_code, response.text[:200],
                 )
+            else:
+                labels = " | ".join(label for label, _ in buttons)
+                self._note_out(chat_id, text + (f"\n[أزرار: {labels}]" if labels else ""))
             return response.status_code == 200
         except (httpx.TransportError, httpx.TimeoutException) as exc:
             log.warning("buttoned message to %s failed (%s)", chat_id, exc)
@@ -645,6 +658,8 @@ class TelegramCommandListener:
                     "telegram reply to %s rejected (%s): %s",
                     chat_id, response.status_code, response.text[:200]
                 )
+            else:
+                self._note_out(chat_id, text)
             return response.status_code == 200
         except (httpx.TransportError, httpx.TimeoutException) as exc:
             log.warning("telegram reply to %s failed (%s)", chat_id, exc)

@@ -125,6 +125,18 @@ CREATE TABLE IF NOT EXISTS start_pings (
     first_seen  TEXT NOT NULL
 );
 
+-- every message between the bot and a person, both directions, so the
+-- operator can read any conversation from the dashboard instead of
+-- guessing what a subscriber saw. Button taps are logged as inbound text.
+CREATE TABLE IF NOT EXISTS messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id     TEXT NOT NULL,
+    direction   TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS messages_chat ON messages (chat_id, id);
+
 -- every Moyasar payment that activated (or tried to activate) a
 -- subscription. The PRIMARY KEY on the gateway's payment id is the
 -- idempotency guard: a webhook replayed ten times extends the
@@ -690,6 +702,46 @@ class Memory:
                 (when.isoformat(), str(chat_id)),
             )
             conn.commit()
+
+    def log_message(
+        self, chat_id: str, direction: str, text: str, when: datetime | None = None
+    ) -> None:
+        """One line of the conversation: ``direction`` is "in" (from the
+        person) or "out" (from the bot). Never raises — a logging failure
+        must not break the reply it describes."""
+        try:
+            with closing(self._connect()) as conn:
+                conn.execute(
+                    "INSERT INTO messages (chat_id, direction, text, at) VALUES (?,?,?,?)",
+                    (
+                        str(chat_id),
+                        "in" if direction == "in" else "out",
+                        (text or "")[:4000],
+                        (when or datetime.now(UTC)).isoformat(),
+                    ),
+                )
+                conn.commit()
+        except sqlite3.Error as exc:  # pragma: no cover - defensive
+            log.warning("message log failed for %s: %s", chat_id, exc)
+
+    def messages_for(self, chat_id: str, limit: int = 300) -> list[dict[str, Any]]:
+        """The conversation with one chat, oldest first."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT chat_id, direction, text, at FROM messages WHERE chat_id = ?"
+                " ORDER BY id DESC LIMIT ?",
+                (str(chat_id), int(limit)),
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def conversation_summary(self) -> dict[str, dict[str, Any]]:
+        """Per chat: how many lines and when the last one landed."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT chat_id, COUNT(*) AS n, MAX(at) AS last_at FROM messages"
+                " GROUP BY chat_id"
+            ).fetchall()
+        return {r["chat_id"]: {"count": r["n"], "last_at": r["last_at"]} for r in rows}
 
     def record_start_language(self, chat_id: str, language: str, when: datetime) -> None:
         """Remember the app language of everyone who ever pressed /start.

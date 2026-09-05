@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}محادثة {{ chat.name }} — QQQ Alpha{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>💬 محادثة البوت مع {{ chat.name }}</h2>
+  <div class="grid">
+    <div class="stat"><div class="n" style="font-size:16px">{{ chat.chat_id }}</div><div class="l">المعرّف</div></div>
+    <div class="stat"><div class="n" style="font-size:16px">{% if chat.username %}@{{ chat.username }}{% else %}—{% endif %}</div><div class="l">تيليجرام</div></div>
+    <div class="stat"><div class="n" style="font-size:16px">{{ chat.tv_username or "—" }}</div><div class="l">اسم TradingView</div></div>
+    <div class="stat"><div class="n" style="font-size:16px">{{ chat.expires_at.strftime("%Y-%m-%d") if chat.expires_at else "—" }}</div><div class="l">ينتهي في</div></div>
+    <div class="stat"><div class="n">{{ chat.lines|length }}</div><div class="l">رسالة</div></div>
+  </div>
+  <p class="small muted" style="margin-top:10px">
+    كل ما أرسله هذا الشخص للبوت، وكل ما رد به البوت عليه، بالترتيب الزمني. ضغطات الأزرار تظهر كرسائل واردة بعلامة [زر].
+    الرسائل قبل تفعيل السجل لا تظهر.
+    <a href="/subscribers">← العودة إلى المشتركين</a>
+  </p>
+</div>
+
+<div class="card">
+  {% if chat.lines %}
+  <div style="display:flex;flex-direction:column;gap:10px;max-width:760px">
+    {% for m in chat.lines %}
+    <div style="align-self:{{ 'flex-start' if m.direction == 'in' else 'flex-end' }};max-width:85%;
+                background:{{ 'var(--panel-2)' if m.direction == 'in' else 'rgba(14,159,110,.18)' }};
+                border:1px solid var(--border);border-radius:12px;padding:10px 14px;white-space:pre-wrap;word-break:break-word">
+      <div class="small muted" style="margin-bottom:4px">
+        {{ 'المشترك' if m.direction == 'in' else 'البوت' }} ·
+        {{ m.at.strftime("%Y-%m-%d %H:%M") if m.at else "" }} UTC
+      </div>{{ m.text }}</div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">لا رسائل مسجلة مع هذا الشخص بعد</div>
+  {% endif %}
+</div>
+
+{% endblock %}

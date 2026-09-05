@@ -480,8 +480,10 @@ def subscribers(settings: Settings) -> list[dict]:
     """
     memory = Memory(settings.data_dir / "memory.db")
     now = datetime.now(UTC)
+    talk = memory.conversation_summary()
     rows = []
     for row in memory.all_subscribers():
+        chat = talk.get(str(row.get("chat_id")), {})
         expires = _as_utc(row.get("expires_at"))
         joined = _as_utc(row.get("joined_at"))
         # a row can still read 'trial' after its expiry: the sweep that flips
@@ -505,11 +507,42 @@ def subscribers(settings: Settings) -> list[dict]:
                 ),
                 "status": status,
                 "status_label": SUBSCRIBER_STATUS_AR.get(status, status),
-                "plan": f"تجريبي مجاني — {settings.trial_days} يومًا",
+                "plan": (
+                    f"مدفوع — {row.get('plan')}" if row.get("plan")
+                    else f"تجريبي مجاني — {settings.trial_days} يومًا"
+                ),
                 "active": not lapsed,
+                "tv_username": row.get("tv_username") or "",
+                "consented_at": _as_utc(row.get("consented_at")),
+                "message_count": chat.get("count", 0),
+                "last_message_at": _as_utc(chat.get("last_at")),
             }
         )
     return rows
+
+
+def conversation(settings: Settings, chat_id: str) -> dict:
+    """One subscriber's chat with the bot, oldest first, with the row itself."""
+    memory = Memory(settings.data_dir / "memory.db")
+    row = memory.subscriber(chat_id) or {}
+    lines = []
+    for m in memory.messages_for(chat_id):
+        lines.append(
+            {
+                "direction": m["direction"],
+                "text": m["text"],
+                "at": _as_utc(m["at"]),
+            }
+        )
+    return {
+        "chat_id": chat_id,
+        "name": row.get("first_name") or row.get("username") or chat_id,
+        "username": row.get("username") or "",
+        "tv_username": row.get("tv_username") or "",
+        "status": row.get("status") or "",
+        "expires_at": _as_utc(row.get("expires_at")),
+        "lines": lines,
+    }
 
 
 def start_languages(settings: Settings) -> list[dict]:
