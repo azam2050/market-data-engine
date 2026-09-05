@@ -225,6 +225,13 @@ def test_occ_symbol_roundtrip():
     assert (underlying, expiry, option_type, strike) == ("QQQ", date(2026, 8, 3), OptionType.CALL, 485.0)
 
 
+def test_next_expiry_skips_market_holidays():
+    # Saturday 5 September 2026 → Monday is Labor Day → Tuesday the 8th
+    assert next_expiry(date(2026, 9, 5), 0) == date(2026, 9, 8)
+    # Good Friday 2026 (3 April) is shut: a Friday DTE lands on the Monday after
+    assert next_expiry(date(2026, 4, 2), 1) == date(2026, 4, 6)
+
+
 def test_next_expiry_skips_weekend():
     friday = date(2026, 8, 7)
     assert next_expiry(friday, 1) == date(2026, 8, 10)

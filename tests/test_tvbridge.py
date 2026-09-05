@@ -95,8 +95,8 @@ def test_qqq_moon_signal_books_next_trading_day() -> None:
 
 
 def test_qqq_friday_moon_rolls_over_weekend() -> None:
-    # Friday 2026-09-04 late signal → Monday 2026-09-07
-    assert next_expiry("QQQ", _ny(2026, 9, 4, 15, 50), moon=True) == date(2026, 9, 7)
+    # Friday 2026-09-04 late signal: Monday 7 September 2026 is Labor Day: the next expiry is Tuesday
+    assert next_expiry("QQQ", _ny(2026, 9, 4, 15, 50), moon=True) == date(2026, 9, 8)
 
 
 def test_stock_gets_nearest_friday() -> None:

@@ -43,9 +43,12 @@ def occ_symbol(underlying: str, expiry: date, option_type: OptionType, strike: f
 
 
 def next_expiry(as_of: date, dte: int) -> date:
-    """Resolve a requested DTE into a real weekday expiry."""
+    """Resolve a requested DTE into a real expiry: a weekday that is not a
+    market holiday (QQQ lists an expiry every trading day)."""
+    from qqq_alpha.data.calendar import is_trading_day
+
     target = as_of + timedelta(days=max(dte, 0))
-    while target.weekday() >= 5:  # QQQ has weekday expiries
+    while not is_trading_day(target):
         target += timedelta(days=1)
     return target
 

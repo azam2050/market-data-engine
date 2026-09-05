@@ -228,24 +228,25 @@ def next_expiry(symbol: str, now_utc: datetime, moon: bool) -> date:
     expiry — the operator's own rule, learned from a trade that signalled at
     the close and paid the next morning.
     """
+    from qqq_alpha.data.calendar import is_trading_day, next_trading_day
+
     now = now_utc.astimezone(NY)
     today = now.date()
 
-    def next_trading_day(d: date) -> date:
-        d += timedelta(days=1)
-        while d.weekday() >= 5:
-            d += timedelta(days=1)
-        return d
-
     if symbol.upper() in DAILY_EXPIRY:
-        usable_today = today.weekday() < 5 and now.hour < 16 and not moon
+        usable_today = is_trading_day(today) and now.hour < 16 and not moon
         return today if usable_today else next_trading_day(today)
 
+    def weekly(friday: date) -> date:
+        # a Friday the exchange is shut (Good Friday) expires the day before
+        return friday if is_trading_day(friday) else friday - timedelta(days=1)
+
     friday = today + timedelta(days=(4 - today.weekday()) % 7)
-    same_friday_ok = friday > today or (now.hour < 16 and not moon)
-    if not same_friday_ok:
-        friday += timedelta(days=7)
-    return friday
+    expiry = weekly(friday)
+    same_week_ok = expiry > today or (expiry == today and now.hour < 16 and not moon)
+    if not same_week_ok:
+        expiry = weekly(friday + timedelta(days=7))
+    return expiry
 
 
 def resolve_underlying(symbol: str, spot: float | None) -> tuple[str, float | None]:

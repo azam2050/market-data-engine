@@ -125,7 +125,15 @@ async def _check_option_chain(settings: Settings) -> CheckResult:
         detail = pricer.last_error or "سبب غير معروف"
         if "NOT_AUTHORIZED" in detail or "403" in detail:
             detail = "اشتراك الخيارات لا يغطي سلسلة العقود — راجع الباقة"
-        return CheckResult("سلسلة الخيارات", False, detail[:200], fatal=True)
+            return CheckResult("سلسلة الخيارات", False, detail[:200], fatal=True)
+        # an empty or unreachable chain outside trading hours (weekend, a
+        # holiday the calendar does not know) must not strand the bot: the
+        # engine refreshes the chain on its own once the market is back
+        return CheckResult(
+            "سلسلة الخيارات",
+            False,
+            f"{detail[:120]} — سيُعاد الجلب تلقائياً عند فتح السوق (المحرك يعمل رغم ذلك)",
+        )
 
     count = len(pricer.snapshot.contracts) if pricer.snapshot else 0
     return CheckResult(

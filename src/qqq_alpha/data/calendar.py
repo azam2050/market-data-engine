@@ -39,6 +39,33 @@ CALENDAR_PATH = Path(__file__).with_name("economic_calendar.yaml")
 # time fits it, because it landed while the market was shut
 BEFORE_OPEN = "قبل الافتتاح"
 
+# NYSE full-day closures. Kept as plain dates so a glance shows what is
+# covered; extend the table each autumn when the exchange publishes the next
+# year. A date missing here degrades to "treated as a trading day", which is
+# the pre-existing behaviour, not a crash.
+US_MARKET_HOLIDAYS: frozenset[date] = frozenset({
+    # 2026
+    date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16), date(2026, 4, 3),
+    date(2026, 5, 25), date(2026, 6, 19), date(2026, 7, 3), date(2026, 9, 7),
+    date(2026, 11, 26), date(2026, 12, 25),
+    # 2027
+    date(2027, 1, 1), date(2027, 1, 18), date(2027, 2, 15), date(2027, 3, 26),
+    date(2027, 5, 31), date(2027, 6, 18), date(2027, 7, 5), date(2027, 9, 6),
+    date(2027, 11, 25), date(2027, 12, 24),
+})
+
+
+def is_trading_day(day: date) -> bool:
+    return day.weekday() < 5 and day not in US_MARKET_HOLIDAYS
+
+
+def next_trading_day(day: date) -> date:
+    """The first trading day strictly after ``day``."""
+    probe = day + timedelta(days=1)
+    while not is_trading_day(probe):
+        probe += timedelta(days=1)
+    return probe
+
 
 def _first_friday(year: int, month: int) -> date:
     day = date(year, month, 1)
