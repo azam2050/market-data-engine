@@ -436,6 +436,37 @@ def create_app(
             request, "messages.html", _ctx(chat=data.conversation(settings, chat_id))
         )
 
+    @app.get("/tradingview")
+    def tradingview_board(request: Request, _: str = Depends(login)):
+        """Who is owed indicator access on TradingView, who holds it, and
+        whose access is due to be removed — the manual click's to-do list."""
+        return templates.TemplateResponse(
+            request,
+            "tradingview.html",
+            _ctx(
+                board=data.tradingview(settings),
+                connected=on_subscriber_change is not None,
+            ),
+        )
+
+    @app.post("/tradingview/{chat_id}/granted")
+    async def tradingview_granted(chat_id: str, _: str = Depends(login)):
+        """The operator added the name under Manage access; the subscriber
+        hears that the indicator is live on their account."""
+        row = Memory(settings.data_dir / "memory.db").set_tv_granted(chat_id, datetime.now(UTC))
+        if row is not None and on_subscriber_change is not None:
+            await on_subscriber_change("tv_granted", row, None)
+        return RedirectResponse(url="/tradingview", status_code=303)
+
+    @app.post("/tradingview/{chat_id}/revoked")
+    async def tradingview_revoked(chat_id: str, _: str = Depends(login)):
+        """The operator removed the name on TradingView, so the row leaves the
+        removal list; the subscriber is told the access ended."""
+        row = Memory(settings.data_dir / "memory.db").set_tv_granted(chat_id, None)
+        if row is not None and on_subscriber_change is not None:
+            await on_subscriber_change("tv_revoked", row, None)
+        return RedirectResponse(url="/tradingview", status_code=303)
+
     @app.post("/subscribers/{chat_id}/extend")
     async def extend_subscriber(chat_id: str, request: Request, _: str = Depends(login)):
         """Grant more free days, and tell the subscriber they were granted.

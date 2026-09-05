@@ -2540,6 +2540,29 @@ class LiveEngine:
             await self.notifier.note(f"🎁 مُدّد اشتراك {name} بـ {days} يومًا")
             return
 
+        if action == "tv_granted":
+            tv = row.get("tv_username") or ""
+            expires = str(row.get("expires_at") or "")[:10]
+            await self.commands.send(
+                chat_id,
+                f"✅ تم تفعيل مِرصاد ٩ على حسابك في TradingView‏: {tv}\n"
+                "افتح الشارت ← المؤشرات ← «Invite-only scripts» وأضف مِرصاد ٩.\n"
+                + (f"الوصول ساري حتى {expires}.\n" if expires else "")
+                + "دليل البداية في الرسائل السابقة، وإن احتجت شيئاً اكتب لنا هنا.",
+            )
+            await self.notifier.note(f"🖥️ سُجّل تفعيل {tv} ({name}) في TradingView")
+            return
+
+        if action == "tv_revoked":
+            tv = row.get("tv_username") or ""
+            await self.commands.send(
+                chat_id,
+                f"انتهى وصول حسابك {tv} إلى مِرصاد ٩ في TradingView.\n"
+                "للعودة في أي وقت أرسل /start 🤍",
+            )
+            await self.notifier.note(f"⛔ سُجّلت إزالة {tv} ({name}) من TradingView")
+            return
+
         if action == "removed":
             if private:
                 # the channel removal IS the cutoff; the DM only explains it

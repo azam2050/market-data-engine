@@ -521,6 +521,46 @@ def subscribers(settings: Settings) -> list[dict]:
     return rows
 
 
+def tradingview(settings: Settings) -> dict:
+    """The TradingView access board: who is owed a grant, who holds one,
+    whose access must be clicked away, and who has not sent a name yet.
+
+    Access itself lives on TradingView's site and is granted by hand, so the
+    board tracks the operator's own confirmations (``tv_granted_at``) against
+    what each subscription entitles right now.
+    """
+    memory = Memory(settings.data_dir / "memory.db")
+    now = datetime.now(UTC)
+    board: dict[str, list[dict]] = {"pending": [], "granted": [], "revoke": [], "waiting": []}
+    for row in memory.all_subscribers():
+        expires = _as_utc(row.get("expires_at"))
+        active = expires is not None and expires > now
+        plan = row.get("plan") or ""
+        entitled = active and plan in ("", "indicator", "vip")
+        name = (row.get("tv_username") or "").strip()
+        granted = _as_utc(row.get("tv_granted_at"))
+        item = {
+            "chat_id": row.get("chat_id"),
+            "name": row.get("first_name") or row.get("username") or row.get("chat_id"),
+            "username": row.get("username") or "",
+            "tv_username": name,
+            "plan": f"مدفوع — {plan}" if plan else "تجريبي",
+            "expires_at": expires,
+            "granted_at": granted,
+        }
+        if not name:
+            if entitled:
+                board["waiting"].append(item)
+            continue
+        if entitled:
+            board["granted" if granted else "pending"].append(item)
+        elif granted:
+            board["revoke"].append(item)
+    for key in board:
+        board[key].sort(key=lambda r: r["expires_at"] or now)
+    return board
+
+
 def conversation(settings: Settings, chat_id: str) -> dict:
     """One subscriber's chat with the bot, oldest first, with the row itself."""
     memory = Memory(settings.data_dir / "memory.db")

@@ -814,3 +814,57 @@ def test_subscriber_conversation_page_shows_both_directions(tmp_path):
 
     # an unknown chat renders an empty conversation, not an error
     assert "لا رسائل مسجلة" in client.get("/subscribers/999/messages", auth=AUTH).text
+
+
+# ---------------------------------------------------------------- tradingview board
+def test_tradingview_board_renders_with_nobody_signed_up(tmp_path):
+    body = TestClient(create_app(_settings(tmp_path))).get("/tradingview", auth=AUTH).text
+    assert "إدارة الوصول" in body
+    assert "لا أحد بانتظار المنح" in body
+
+
+def test_tradingview_board_sorts_names_into_grant_and_revoke_lists(tmp_path):
+    """A live subscriber with a name is owed a grant until the operator
+    confirms it; a lapsed one is only on the removal list if access was
+    actually granted; a live one without a name is simply waiting."""
+    settings, memory = _with_subscribers(tmp_path)
+    now = datetime.now(UTC)
+    memory.add_subscriber("333", "noor", "Noor", now - timedelta(days=1), now + timedelta(days=29))
+    memory.set_tv_username("111", "layth_tv")
+    memory.set_tv_username("222", "saud_tv")
+
+    heard: list[tuple] = []
+
+    async def carry(action, row, days):
+        heard.append((action, row["chat_id"]))
+
+    client = TestClient(create_app(settings, on_subscriber_change=carry))
+    page = client.get("/tradingview", auth=AUTH).text
+    assert page.index("⏳ بانتظار المنح") < page.index("layth_tv") < page.index("⛔ يجب إزالته")
+    assert "saud_tv" not in page  # lapsed, but never granted: nothing to remove
+    assert "Noor" in page and "لم يرسل اسمه" in page
+
+    # the operator clicks "granted": the row moves, the subscriber is told
+    response = client.post("/tradingview/111/granted", auth=AUTH)
+    assert response.status_code == 200
+    assert heard == [("tv_granted", "111")]
+    assert memory.subscriber("111")["tv_granted_at"]
+    page = client.get("/tradingview", auth=AUTH).text
+    assert page.index("✅ مفعّل الآن") < page.index("layth_tv")
+
+    # a granted name that lapses is on the removal list until confirmed
+    memory.set_tv_granted("222", now - timedelta(days=30))
+    page = client.get("/tradingview", auth=AUTH).text
+    assert page.index("⛔ يجب إزالته") < page.index("saud_tv") < page.index("✅ مفعّل الآن")
+    client.post("/tradingview/222/revoked", auth=AUTH)
+    assert heard[-1] == ("tv_revoked", "222")
+    assert memory.subscriber("222")["tv_granted_at"] is None
+    assert "saud_tv" not in client.get("/tradingview", auth=AUTH).text
+
+    # re-sending the same name keeps the grant; a different name is a new grant to make
+    memory.set_tv_username("111", "@layth_tv")
+    assert memory.subscriber("111")["tv_granted_at"]
+    memory.set_tv_username("111", "layth_new")
+    assert memory.subscriber("111")["tv_granted_at"] is None
+    page = client.get("/tradingview", auth=AUTH).text
+    assert page.index("⏳ بانتظار المنح") < page.index("layth_new") < page.index("⛔ يجب إزالته")

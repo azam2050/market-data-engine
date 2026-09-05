@@ -319,6 +319,11 @@ class Memory:
             # this is the name on the daily grant/revoke list
             conn.execute("ALTER TABLE subscribers ADD COLUMN tv_username TEXT")
         with suppress(sqlite3.OperationalError):
+            # when the operator confirmed, from the dashboard, that the name
+            # above was added under Manage access on TradingView. NULL means
+            # the click is still owed (or was undone after an expiry)
+            conn.execute("ALTER TABLE subscribers ADD COLUMN tv_granted_at TEXT")
+        with suppress(sqlite3.OperationalError):
             conn.execute("ALTER TABLE payments ADD COLUMN plan TEXT")
 
     @staticmethod
@@ -954,13 +959,31 @@ class Memory:
         """Attach the subscriber's TradingView username. False if unknown chat."""
         if self.subscriber(chat_id) is None:
             return False
+        clean = username.strip().lstrip("@")
         with closing(self._connect()) as conn:
+            # a new name is a new grant to make: the old confirmation no
+            # longer says anything about the name now on file
             conn.execute(
-                "UPDATE subscribers SET tv_username = ? WHERE chat_id = ?",
-                (username.strip().lstrip("@"), str(chat_id)),
+                "UPDATE subscribers SET tv_username = ?,"
+                " tv_granted_at = CASE WHEN tv_username = ? THEN tv_granted_at END"
+                " WHERE chat_id = ?",
+                (clean, clean, str(chat_id)),
             )
             conn.commit()
         return True
+
+    def set_tv_granted(self, chat_id: str, when: datetime | None) -> dict[str, Any] | None:
+        """Record that access on TradingView was granted (``when``) or taken
+        away again (``None``). Returns the row, or None for an unknown chat."""
+        if self.subscriber(chat_id) is None:
+            return None
+        with closing(self._connect()) as conn:
+            conn.execute(
+                "UPDATE subscribers SET tv_granted_at = ? WHERE chat_id = ?",
+                (when.isoformat() if when else None, str(chat_id)),
+            )
+            conn.commit()
+        return self.subscriber(chat_id)
 
     def indicator_roster(self, now: datetime) -> dict[str, list[dict[str, Any]]]:
         """The daily grant/revoke list for the TradingView indicator.

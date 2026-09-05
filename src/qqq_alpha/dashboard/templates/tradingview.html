@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}TradingView — QQQ Alpha{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>🖥️ صلاحيات مِرصاد ٩ في TradingView</h2>
+  <div class="grid">
+    <div class="stat"><div class="n" style="color:var(--yellow)">{{ board.pending|length }}</div><div class="l">بانتظار المنح</div></div>
+    <div class="stat"><div class="n" style="color:var(--green)">{{ board.granted|length }}</div><div class="l">مفعّل</div></div>
+    <div class="stat"><div class="n" style="color:var(--red)">{{ board.revoke|length }}</div><div class="l">يجب إزالته</div></div>
+    <div class="stat"><div class="n" style="color:var(--muted)">{{ board.waiting|length }}</div><div class="l">لم يرسل اسمه</div></div>
+  </div>
+  <p class="small muted" style="margin-top:12px">
+    TradingView لا يتيح أي ربط برمجي لمنح الوصول، فالمنح نفسه ضغطة يدوية عندك:
+    افتح السكربت في TradingView ← <strong>إدارة الوصول</strong> ← أضف الاسم وحدّد
+    <strong>تاريخ الانتهاء</strong> الظاهر هنا، ثم اضغط «تم المنح» فيسجَّل ذلك ويصل
+    المشترك إشعار بأن المؤشر فعّال على حسابه.
+  </p>
+  {% if not connected %}
+  <p class="small" style="color:var(--yellow)">
+    ⚠️ اللوحة تعمل منفصلة عن البوت الآن، فالضغطات هنا تُسجَّل في قاعدة البيانات فقط
+    ولن تصل رسالة للمشترك.
+  </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 style="color:var(--yellow)">⏳ بانتظار المنح ({{ board.pending|length }})</h2>
+  {% if board.pending %}
+  <table>
+    <thead><tr><th>اسم TradingView</th><th>المشترك</th><th>الاشتراك</th><th>تاريخ الانتهاء (ضعه في TradingView)</th><th></th></tr></thead>
+    <tbody>
+      {% for row in board.pending %}
+      <tr>
+        <td><code style="font-size:15px">{{ row.tv_username }}</code></td>
+        <td><strong>{{ row.name }}</strong>{% if row.username %}<br><span class="small muted">@{{ row.username }}</span>{% endif %}</td>
+        <td class="small">{{ row.plan }}</td>
+        <td><strong>{{ row.expires_at.strftime("%Y-%m-%d") if row.expires_at else "—" }}</strong></td>
+        <td>
+          <form class="inline" method="post" action="/tradingview/{{ row.chat_id }}/granted">
+            <button type="submit">✅ تم المنح</button>
+          </form>
+          <a class="small" href="/subscribers/{{ row.chat_id }}/messages">💬</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">لا أحد بانتظار المنح</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 style="color:var(--red)">⛔ يجب إزالته من TradingView ({{ board.revoke|length }})</h2>
+  {% if board.revoke %}
+  <p class="small muted">انتهى اشتراكهم وما زال المنح مسجلاً. إن كنت حدّدت تاريخ الانتهاء عند المنح فقد أُزيل تلقائياً، واضغط «تمت الإزالة» لتصفية القائمة.</p>
+  <table>
+    <thead><tr><th>اسم TradingView</th><th>المشترك</th><th>انتهى في</th><th>مُنح في</th><th></th></tr></thead>
+    <tbody>
+      {% for row in board.revoke %}
+      <tr>
+        <td><code style="font-size:15px">{{ row.tv_username }}</code></td>
+        <td><strong>{{ row.name }}</strong></td>
+        <td class="small">{{ row.expires_at.strftime("%Y-%m-%d") if row.expires_at else "—" }}</td>
+        <td class="small">{{ row.granted_at.strftime("%Y-%m-%d") if row.granted_at else "—" }}</td>
+        <td>
+          <form class="inline" method="post" action="/tradingview/{{ row.chat_id }}/revoked">
+            <button type="submit" class="reject">🗑️ تمت الإزالة</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">لا أحد يجب إزالته</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 style="color:var(--green)">✅ مفعّل الآن ({{ board.granted|length }})</h2>
+  {% if board.granted %}
+  <table>
+    <thead><tr><th>اسم TradingView</th><th>المشترك</th><th>الاشتراك</th><th>ينتهي في</th><th>مُنح في</th><th></th></tr></thead>
+    <tbody>
+      {% for row in board.granted %}
+      <tr>
+        <td><code>{{ row.tv_username }}</code></td>
+        <td><strong>{{ row.name }}</strong></td>
+        <td class="small">{{ row.plan }}</td>
+        <td class="small">{{ row.expires_at.strftime("%Y-%m-%d") if row.expires_at else "—" }}</td>
+        <td class="small">{{ row.granted_at.strftime("%Y-%m-%d %H:%M") if row.granted_at else "—" }}</td>
+        <td>
+          <form class="inline" method="post" action="/tradingview/{{ row.chat_id }}/revoked"
+                onsubmit="return confirm('تسجيل إزالة {{ row.tv_username }}؟ يصل المشترك إشعار بانتهاء الوصول.');">
+            <button type="submit" class="reject">إلغاء التفعيل</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">لا تفعيلات مسجلة بعد</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 style="color:var(--muted)">⌛ اشتراك فعّال ولم يرسل اسمه بعد ({{ board.waiting|length }})</h2>
+  {% if board.waiting %}
+  <p class="small muted">البوت طلب منهم الاسم بعد الموافقة ويذكّرهم في كل حالة اشتراك. لا شيء يُمنح قبل وصول الاسم.</p>
+  <table>
+    <thead><tr><th>المشترك</th><th>الاشتراك</th><th>ينتهي في</th><th></th></tr></thead>
+    <tbody>
+      {% for row in board.waiting %}
+      <tr>
+        <td><strong>{{ row.name }}</strong>{% if row.username %}<br><span class="small muted">@{{ row.username }}</span>{% endif %}</td>
+        <td class="small">{{ row.plan }}</td>
+        <td class="small">{{ row.expires_at.strftime("%Y-%m-%d") if row.expires_at else "—" }}</td>
+        <td><a class="small" href="/subscribers/{{ row.chat_id }}/messages">💬 المحادثة</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">كل المشتركين الفعّالين أرسلوا أسماءهم</div>
+  {% endif %}
+</div>
+
+{% endblock %}
