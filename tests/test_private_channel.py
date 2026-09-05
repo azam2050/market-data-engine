@@ -235,16 +235,29 @@ async def test_expiry_sends_the_farewell_and_evicts_nobody(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_preview_command_sends_terms_guide_and_sample_cards(tmp_path):
+async def test_preview_command_replays_the_whole_customer_journey(tmp_path):
+    """The operator asked to see every message a customer gets, in the same
+    form: the preview sends the journey verbatim, in order, buttons included,
+    and registers nothing."""
     calls: list[tuple[str, dict]] = []
     engine = _engine(tmp_path, calls)
 
     await engine._handle_command("معاينه")  # the common taa/haa misspelling counts
 
-    methods = _methods(calls)
-    assert methods.count("sendPhoto") >= 5  # watch, entry, live, scale-out, closes
+    texts = [p.get("text", "") for m, p in calls if m == "sendMessage"]
+    joined = "\n".join(texts)
+    for stage in ("/start", "أوافق وأقر", "TradingView", "تم المنح", "بيومين", "اشتراك", "بعد الدفع", "انتهاء الفترة"):
+        assert stage in joined
+    # the order the customer lives it
+    assert (
+        joined.index("مِرصاد") < joined.index("إقرار وإخلاء مسؤولية")
+        < joined.index("سُجّل اسمك") < joined.index("تم تفعيل مِرصاد ٩ على حسابك")
+        < joined.index("انتهت فترتك المجانية")
+    )
     consent = next(p for m, p in calls if m == "sendMessage" and "reply_markup" in p)
     assert "إقرار وإخلاء مسؤولية" in consent["text"]
+    assert "sendPhoto" not in _methods(calls)  # no sample cards of the old product
+    assert engine.memory.all_subscribers() == []  # a preview registers nobody
 
 
 # ---------------------------------------------------------------- delivery proof

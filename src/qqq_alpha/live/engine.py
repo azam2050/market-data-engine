@@ -1953,27 +1953,7 @@ class LiveEngine:
             await self.notifier.note("\n".join(lines))
             return
         if parts and parts[0].strip().lower() in {"معاينة", "معاينه", "preview"}:
-            # the operator sees the consent gate exactly as a subscriber
-            # would — real buttons, zero side effects
-            from qqq_alpha.live.telegram import (
-                PREVIEW_NO,
-                PREVIEW_YES,
-                consent_terms_message,
-                tv_username_prompt,
-            )
-
-            if self.commands is not None:
-                admin = str(self.settings.telegram_chat_id)
-                await self.commands.send(admin, self._pitch())
-                await self.commands.send_with_buttons(
-                    admin,
-                    consent_terms_message(),
-                    [("✅ أوافق وأقر", PREVIEW_YES), ("❌ لا أوافق", PREVIEW_NO)],
-                )
-                await self.commands.send(admin, tv_username_prompt())
-                await self.commands.send(admin, self._guide())
-                for caption, png in self._preview_cards():
-                    await self.commands.send_photo(admin, png, caption)
+            await self._preview_journey()
             return
         # the operator types on a tablet, in a hurry, in Arabic: "رابط جديد",
         # "ارسل الرابط الجديد" and "جدد الرابط" all mean the same thing. An
@@ -2181,6 +2161,103 @@ class LiveEngine:
             self.memory.set_lesson_status(lesson_id, "rejected")
             await self.notifier.note(f"🚫 رُفض الدرس #{lesson_id}")
 
+    async def _preview_journey(self) -> None:
+        """Every message a customer receives, verbatim and in order, sent to
+        the operator's own chat. Real buttons where the customer gets
+        buttons; zero side effects — nothing is registered."""
+        from qqq_alpha.live.telegram import (
+            PREVIEW_NO,
+            PREVIEW_YES,
+            consent_accepted_note,
+            consent_terms_message,
+            farewell_message,
+            payment_activated_note,
+            plans_offer_message,
+            renewal_reminder_message,
+            trial_status_message,
+            tv_granted_note,
+            tv_revoked_note,
+            tv_username_booked_note,
+            tv_username_prompt,
+        )
+        from qqq_alpha.payments import DEFAULT_PLAN, PLAN_LABELS
+
+        if self.commands is None:
+            return
+        admin = str(self.settings.telegram_chat_id)
+        days = self.settings.trial_days
+        expires_on = (datetime.now(UTC) + timedelta(days=days)).date().isoformat()
+        sample_tv = "mirsad_trader"
+        plan_buttons = self._plan_buttons(admin)
+        send = self.commands.send
+
+        async def stage(title: str) -> None:
+            await send(admin, f"— {title} —")
+
+        await send(
+            admin,
+            "👀 معاينة رحلة العميل كاملة\n"
+            "كل رسالة بعد هذا السطر هي ما يصل العميل حرفياً وبالترتيب. "
+            "الأزرار حقيقية ولا تسجّل شيئاً.",
+        )
+        await stage("1️⃣ عند إرسال /start")
+        await send(admin, self._pitch())
+        await self.commands.send_with_buttons(
+            admin,
+            consent_terms_message(),
+            [("✅ أوافق وأقر", PREVIEW_YES), ("❌ لا أوافق", PREVIEW_NO)],
+        )
+        await stage("2️⃣ بعد ضغط «أوافق وأقر»")
+        await send(admin, consent_accepted_note(days, expires_on))
+        await send(admin, tv_username_prompt())
+        await stage("3️⃣ بعد إرسال اسمه في TradingView")
+        await send(admin, tv_username_booked_note(sample_tv, expires_on))
+        await send(admin, self._guide())
+        await stage("4️⃣ بعد ضغطك «تم المنح» في صفحة TradingView بالداشبورد")
+        await send(admin, tv_granted_note(sample_tv, expires_on))
+        await stage("5️⃣ أي رسالة يرسلها أثناء الفترة المجانية")
+        await send(admin, trial_status_message(days, sample_tv))
+        await stage("6️⃣ قبل انتهاء الفترة بيومين")
+        reminder = renewal_reminder_message(
+            expires_on, self.settings.price_indicator_sar, bool(plan_buttons)
+        )
+        if plan_buttons:
+            await self.commands.send_with_buttons(admin, reminder, plan_buttons)
+        else:
+            await send(admin, reminder)
+        await stage("7️⃣ عند كتابة «اشتراك»")
+        if plan_buttons:
+            await self.commands.send_with_buttons(
+                admin,
+                plans_offer_message(
+                    self.settings.price_indicator_sar,
+                    self.settings.price_channel_sar,
+                    self.settings.price_vip_sar,
+                    self.settings.subscription_days,
+                ),
+                plan_buttons,
+            )
+        else:
+            await send(admin, "الدفع غير مفعّل بعد — سيصلك إشعار عند إتاحته.")
+        await stage("8️⃣ بعد الدفع")
+        paid_until = (
+            datetime.now(UTC) + timedelta(days=self.settings.subscription_days)
+        ).date().isoformat()
+        await send(admin, payment_activated_note(PLAN_LABELS[DEFAULT_PLAN], paid_until))
+        await stage("9️⃣ عند انتهاء الفترة بلا اشتراك")
+        buttons = list(plan_buttons)
+        if self.settings.youtube_url:
+            buttons.append(("▶️ مقاطعنا اليومية", self.settings.youtube_url))
+        if self.settings.post_trial_channel_url:
+            buttons.append(("📢 القناة العامة المجانية", self.settings.post_trial_channel_url))
+        if buttons:
+            await self.commands.send_with_buttons(admin, farewell_message(True), buttons)
+        else:
+            await send(admin, farewell_message(False))
+        await stage("🔟 بعد ضغطك «تمت الإزالة» في الداشبورد")
+        await send(admin, tv_revoked_note(sample_tv))
+        await send(admin, "✅ انتهت المعاينة.")
+
     @staticmethod
     def _preview_cards() -> list[tuple[str, bytes]]:
         """Sample renders of every card type, for the operator's معاينة.
@@ -2316,25 +2393,19 @@ class LiveEngine:
             return
 
         if action == "tv_granted":
+            from qqq_alpha.live.telegram import tv_granted_note
+
             tv = row.get("tv_username") or ""
             expires = str(row.get("expires_at") or "")[:10]
-            await self.commands.send(
-                chat_id,
-                f"✅ تم تفعيل مِرصاد ٩ على حسابك في TradingView‏: {tv}\n"
-                "افتح الشارت ← المؤشرات ← «Invite-only scripts» وأضف مِرصاد ٩.\n"
-                + (f"الوصول ساري حتى {expires}.\n" if expires else "")
-                + "دليل البداية في الرسائل السابقة، وإن احتجت شيئاً اكتب لنا هنا.",
-            )
+            await self.commands.send(chat_id, tv_granted_note(tv, expires))
             await self.notifier.note(f"🖥️ سُجّل تفعيل {tv} ({name}) في TradingView")
             return
 
         if action == "tv_revoked":
+            from qqq_alpha.live.telegram import tv_revoked_note
+
             tv = row.get("tv_username") or ""
-            await self.commands.send(
-                chat_id,
-                f"انتهى وصول حسابك {tv} إلى مِرصاد ٩ في TradingView.\n"
-                "للعودة في أي وقت أرسل /start 🤍",
-            )
+            await self.commands.send(chat_id, tv_revoked_note(tv))
             await self.notifier.note(f"⛔ سُجّلت إزالة {tv} ({name}) من TradingView")
             return
 
@@ -2368,11 +2439,9 @@ class LiveEngine:
         plan = str(info.get("plan") or "vip")
         plan_label = PLAN_LABELS.get(plan, plan)
         if self.commands is not None:
-            message = (
-                f"✅ تم تفعيل اشتراكك — {plan_label} — شكرًا لك 🤍\n"
-                f"اشتراكك فعال حتى {expires}."
-            )
-            await self.commands.send(chat_id, message)
+            from qqq_alpha.live.telegram import payment_activated_note
+
+            await self.commands.send(chat_id, payment_activated_note(plan_label, expires))
             if plan_includes_indicator(plan) and not row.get("tv_username"):
                 from qqq_alpha.live.telegram import tv_username_prompt
 

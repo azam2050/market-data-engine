@@ -988,6 +988,30 @@ def tv_username_booked_note(username: str, expires_on: str = "") -> str:
     )
 
 
+def tv_granted_note(username: str, expires_on: str = "") -> str:
+    """The operator confirmed the grant on TradingView: the indicator is live."""
+    return (
+        f"✅ تم تفعيل مِرصاد ٩ على حسابك في TradingView‏: {username}\n"
+        "افتح الشارت ← المؤشرات ← «Invite-only scripts» وأضف مِرصاد ٩.\n"
+        + (f"الوصول ساري حتى {expires_on}.\n" if expires_on else "")
+        + "دليل البداية في الرسائل السابقة، وإن احتجت شيئاً اكتب لنا هنا."
+    )
+
+
+def tv_revoked_note(username: str) -> str:
+    return (
+        f"انتهى وصول حسابك {username} إلى مِرصاد ٩ في TradingView.\n"
+        "للعودة في أي وقت أرسل /start 🤍"
+    )
+
+
+def payment_activated_note(plan_label: str, expires_on: str) -> str:
+    return (
+        f"✅ تم تفعيل اشتراكك — {plan_label} — شكرًا لك 🤍\n"
+        f"اشتراكك فعال حتى {expires_on}."
+    )
+
+
 def farewell_message(has_buttons: bool) -> str:
     text = (
         "انتهت فترتك المجانية في مِرصاد ٩ وأُزيل الوصول من TradingView. "
