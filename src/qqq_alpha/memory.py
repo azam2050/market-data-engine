@@ -137,6 +137,27 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_chat ON messages (chat_id, id);
 
+-- every contract the TradingView bridge closed on a MIRSAD 9 signal: the
+-- record the indicator's daily, weekly and monthly report cards are drawn
+-- from, so a restart between two signals never loses a week
+CREATE TABLE IF NOT EXISTS tv_trades (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol      TEXT NOT NULL,
+    label       TEXT NOT NULL,
+    side        INTEGER NOT NULL,
+    entry       REAL NOT NULL,
+    exit        REAL NOT NULL,
+    peak        REAL NOT NULL,
+    opened      TEXT NOT NULL,
+    closed      TEXT NOT NULL,
+    r_text      TEXT,
+    how         TEXT,
+    entry_stock REAL,
+    reason      TEXT,
+    tf          TEXT
+);
+CREATE INDEX IF NOT EXISTS tv_trades_closed ON tv_trades (closed);
+
 -- every Moyasar payment that activated (or tried to activate) a
 -- subscription. The PRIMARY KEY on the gateway's payment id is the
 -- idempotency guard: a webhook replayed ten times extends the
@@ -265,6 +286,13 @@ def _fingerprint(snapshot: MarketSnapshot | None) -> dict[str, Any]:
             default=str,
         ),
     }
+
+
+def _iso(value: object) -> str:
+    """A datetime (or an ISO string already) as the stored ISO text."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value or datetime.now(UTC).isoformat())
 
 
 def _as_aware(stamp: str | None) -> datetime | None:
@@ -728,6 +756,52 @@ class Memory:
                 conn.commit()
         except sqlite3.Error as exc:  # pragma: no cover - defensive
             log.warning("message log failed for %s: %s", chat_id, exc)
+
+    def record_tv_trade(self, row: dict[str, Any]) -> None:
+        """One closed indicator contract. Never raises — the card that
+        announces the close must go out even if the ledger hiccups."""
+        try:
+            with closing(self._connect()) as conn:
+                conn.execute(
+                    "INSERT INTO tv_trades (symbol, label, side, entry, exit, peak, opened,"
+                    " closed, r_text, how, entry_stock, reason, tf)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        str(row.get("symbol") or ""), str(row.get("label") or ""),
+                        int(row.get("side") or 0), float(row.get("entry") or 0.0),
+                        float(row.get("exit") or 0.0), float(row.get("peak") or 0.0),
+                        _iso(row.get("opened")), _iso(row.get("closed")),
+                        row.get("r_text") or "", row.get("how") or "",
+                        row.get("entry_stock"), row.get("reason") or "", row.get("tf") or "",
+                    ),
+                )
+                conn.commit()
+        except sqlite3.Error as exc:  # pragma: no cover - defensive
+            log.warning("tv trade record failed: %s", exc)
+
+    def tv_trades_between(self, since: date, until: date) -> list[dict[str, Any]]:
+        """Closed indicator contracts whose New York close date falls in
+        [since, until], oldest first, with parsed datetimes and the derived
+        percentages the reports print."""
+        with closing(self._connect()) as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT * FROM tv_trades ORDER BY closed"
+            ).fetchall()]
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            closed = _as_aware(row["closed"])
+            opened = _as_aware(row["opened"])
+            if closed is None:
+                continue
+            day = closed.astimezone(MARKET_TZ).date()
+            if day < since or day > until:
+                continue
+            entry = float(row["entry"] or 0.0)
+            row["opened"], row["closed"], row["day"] = opened, closed, day
+            row["pct"] = (row["exit"] - entry) / entry * 100.0 if entry > 0 else 0.0
+            row["peak_pct"] = (row["peak"] - entry) / entry * 100.0 if entry > 0 else 0.0
+            out.append(row)
+        return out
 
     def messages_for(self, chat_id: str, limit: int = 300) -> list[dict[str, Any]]:
         """The conversation with one chat, oldest first."""

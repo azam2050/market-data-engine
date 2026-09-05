@@ -4,7 +4,8 @@ chosen unpredictably, reported honestly, and never able to break the desk."""
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -451,3 +452,89 @@ async def test_reports_still_publish_with_no_private_channel_configured(tmp_path
     await engine._publish_channel_daily(DAY)
 
     assert posted == ["public"]
+
+
+# ---------------------------------------------------------------- MIRSAD 9 report cards
+def _tv_row(symbol, side, entry, peak, exit_px, how, day):
+    return {
+        "symbol": symbol, "label": f"{symbol} 180{'C' if side > 0 else 'P'}", "side": side,
+        "entry": entry, "peak": peak, "exit": exit_px, "how": how, "day": day,
+        "pct": (exit_px - entry) / entry * 100, "peak_pct": (peak - entry) / entry * 100,
+        "closed": datetime(day.year, day.month, day.day, 20, tzinfo=UTC),
+    }
+
+
+def test_the_indicator_report_card_renders_for_every_period_and_for_nothing():
+    from qqq_alpha.live import cards
+
+    d = date(2026, 9, 4)
+    rows = [
+        _tv_row("NVDA", 1, 2.1, 3.4, 3.05, "الهدف الثاني", d),
+        _tv_row("TSLA", -1, 4.0, 4.2, 3.1, "وقف الخسارة", d),
+    ]
+    daily = cards.render_indicator_report_card(
+        "daily", d, d, rows, [{"label": "AAPL 235C", "entry": 1.9, "mark": 2.35}]
+    )
+    week_rows = rows + [_tv_row("AMD", 1, 1.2, 1.5, 1.4, "الهدف الأول", date(2026, 9, 2))]
+    weekly = cards.render_indicator_report_card("weekly", date(2026, 8, 31), d, week_rows)
+    month_rows = week_rows + [_tv_row("META", 1, 5.0, 5.1, 4.0, "وقف", date(2026, 8, 12))]
+    monthly = cards.render_indicator_report_card("monthly", date(2026, 8, 1), date(2026, 8, 31), month_rows)
+    empty = cards.render_indicator_report_card("daily", d, d, [])
+    for png in (daily, weekly, monthly, empty):
+        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    # the week and the month carry their charts, so they are taller than a day
+    assert len(weekly) > 0 and len(monthly) > 0
+
+
+@pytest.mark.asyncio
+async def test_the_indicator_report_reaches_both_rooms_as_a_card(tmp_path):
+    """After the bell MIRSAD 9's own scoreboard goes to the public channel
+    and the updates channel alike, as a photo with the ledger as caption."""
+    engine = _reporting_engine(tmp_path)
+    friday = date(2026, 9, 4)
+    ny = ZoneInfo("America/New_York")
+    engine.memory.record_tv_trade({
+        "symbol": "NVDA", "label": "NVDA 180C", "side": 1, "entry": 2.0, "exit": 3.0, "peak": 3.2,
+        "opened": datetime(2026, 9, 4, 10, tzinfo=ny), "closed": datetime(2026, 9, 4, 15, tzinfo=ny),
+        "how": "الهدف الثاني",
+    })
+    photos: list[tuple[str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.content
+        if request.url.path.endswith("sendPhoto"):
+            chat = "@public" if b"@public" in body else "-1009999"
+            photos.append((chat, body))
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
+
+    for channel in engine._report_channels:
+        channel._notifier._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    await engine._publish_indicator_reports(friday)
+
+    chats = [chat for chat, _ in photos]
+    # Friday: the daily card and the weekly card, each to both rooms
+    assert chats.count("@public") == 2 and chats.count("-1009999") == 2
+    assert all("مِرصاد ٩".encode() in body for _, body in photos)
+    assert any("الأسبوعي".encode() in body for _, body in photos)
+    for channel in engine._report_channels:
+        await channel._notifier._client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_week_posts_the_daily_card_only(tmp_path):
+    engine = _reporting_engine(tmp_path)
+    posts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        posts.append(request.url.path.rsplit("/", 1)[-1])
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 7}})
+
+    for channel in engine._report_channels:
+        channel._notifier._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    await engine._publish_indicator_reports(date(2026, 9, 4))  # a Friday with no record
+
+    assert posts.count("sendPhoto") == 2  # one daily card per room, no weekly
+    for channel in engine._report_channels:
+        await channel._notifier._client.aclose()

@@ -11,23 +11,8 @@
     <div class="stat"><div class="n">{{ subscribers|length }}</div><div class="l">إجمالي المسجّلين</div></div>
     <div class="stat"><div class="n" style="color:var(--green)">{{ active|length }}</div><div class="l">اشتراك نشط</div></div>
     <div class="stat"><div class="n" style="color:var(--muted)">{{ lapsed|length }}</div><div class="l">منتهي</div></div>
-    {% if channel_total is not none %}
-    <div class="stat">
-      <div class="n" style="color:{{ 'var(--yellow)' if channel_total - 1 > subscribers|length else 'var(--text)' }}">{{ channel_total }}</div>
-      <div class="l">داخل القناة الخاصة فعليًا</div>
-    </div>
-    {% endif %}
   </div>
 
-  {% if channel_total is not none and channel_total - 1 > subscribers|length %}
-  <p class="small" style="color:var(--yellow);margin-top:12px">
-    ⚠️ داخل القناة <strong>{{ channel_total - 1 }}</strong> شخصًا (عدا البوت)، والمسجّلون هنا
-    <strong>{{ subscribers|length }}</strong>. الفرق أشخاص دخلوا قبل تفعيل التتبّع التلقائي —
-    تليجرام لا يتيح للبوت سرد أعضاء القناة إطلاقًا، فلا يمكن استرجاعهم بأثر رجعي.
-    من الآن فصاعدًا <strong>أي شخص يدخل القناة يُسجَّل تلقائيًا</strong>. ولإدراج
-    الحاليين: اطلب منهم إرسال <code>/start</code> للبوت، أو أخرجهم وأعد دعوتهم.
-  </p>
-  {% endif %}
 
   <p class="small muted" style="margin-top:12px">
     هذي القائمة تعرض <strong>كل من سجّل</strong>، نشطًا كان أو منتهيًا. العدّاد في
@@ -50,7 +35,7 @@
   {% if not connected %}
   <p class="small" style="color:var(--yellow)">
     ⚠️ اللوحة تعمل منفصلة عن البوت الآن، فالتعديلات هنا تمسّ قاعدة البيانات فقط —
-    لن تصل رسالة للمشترك ولن يُحذف من القناة الخاصة.
+    لن تصل رسالة للمشترك.
   </p>
   {% endif %}
 </div>
@@ -71,7 +56,6 @@
         <th>الحالة</th>
         <th>اسم TradingView</th>
         <th>الرسائل</th>
-        <th>داخل القناة</th>
         <th>الإجراءات</th>
       </tr>
     </thead>
@@ -110,22 +94,13 @@
           {% if row.last_message_at %}<br><span class="small muted">{{ row.last_message_at.strftime("%m-%d %H:%M") }}</span>{% endif %}
         </td>
         <td>
-          {% if row.in_channel is none %}
-          <span class="muted small">—</span>
-          {% elif row.in_channel %}
-          <span style="color:var(--green)">✅</span>
-          {% else %}
-          <span style="color:var(--red)" title="مسجّل لكنه خارج القناة">❌</span>
-          {% endif %}
-        </td>
-        <td>
           <form class="inline" method="post" action="/subscribers/{{ row.chat_id }}/extend">
             <input type="number" name="days" value="30" min="1" max="365"
                    style="width:64px;padding:6px;border-radius:6px;border:1px solid var(--border);background:var(--panel-2);color:var(--text)">
             <button type="submit">🎁 تمديد</button>
           </form>
           <form class="inline" method="post" action="/subscribers/{{ row.chat_id }}/remove"
-                onsubmit="return confirm('حذف {{ row.name }} نهائيًا وإخراجه من القناة الخاصة؟');">
+                onsubmit="return confirm('حذف تسجيل {{ row.name }} نهائيًا؟');">
             <button type="submit" class="reject">🗑️ حذف</button>
           </form>
         </td>
@@ -137,8 +112,8 @@
     <strong>التمديد</strong> يضيف الأيام فوق المتبقي إن كان الاشتراك نشطًا، ويبدأ
     مدة جديدة من اليوم إن كان منتهيًا — فلا تضيع الأيام في الماضي. ويصل المشترك
     إشعار بالتمديد.<br>
-    <strong>الحذف</strong> يمسح السجل <em>ويخرجه من القناة الخاصة</em> في نفس
-    الخطوة، لأن حذف السجل وحده كان سيتركه يستقبل الإشارات بلا أثر يدلّ عليه.<br>
+    <strong>الحذف</strong> يمسح السجل ويصل المشترك إشعار. قناة التحديثات مجانية
+    للجميع ولا يُخرج منها أحد.<br>
     <strong>اسم TradingView</strong> هو ما أرسله المشترك للبوت ويُحفظ هنا. المنح والإزالة
     وتأكيدهما في صفحة <a href="/tradingview">TradingView</a>.
   </p>

@@ -909,6 +909,199 @@ def render_weekly_report_card(stats, channel_rows: list[dict]) -> bytes:
     return _png(img)
 
 
+# ---------------------------------------------------------------- MIRSAD 9 reports
+# The indicator's scoreboard. One card family for the day, the week and the
+# month, so a reader learns its shape once: the net at the top, how many and
+# how well underneath, the ledger table, and — for a week or a month — the
+# bars that show which sessions carried the number.
+_IND_THEME = ("#070B17", "#0F1526", "#0C1222", "#3A4A7A")
+_STAGE_THEMES["mirsad"] = _IND_THEME
+_REPORT_KIND_AR = {"daily": "اليومي", "weekly": "الأسبوعي", "monthly": "الشهري"}
+_SIDE_AR = {1: "كول", -1: "بوت"}
+
+
+def _indicator_header(draw: ImageDraw.ImageDraw, kind: str, span: str) -> int:
+    _panel(draw, (MARGIN, 56, W - MARGIN, 208))
+    _rtl(draw, (W / 2, 108), "مِرصاد ٩", _font(58, bold=True), GOLD, "mm")
+    _rtl(draw, (W / 2, 158), f"تقرير الأداء {_REPORT_KIND_AR.get(kind, kind)} — {span}",
+         _font(30), TEXT, "mm")
+    _rtl(draw, (W / 2, 190), "إشارات المؤشر كما وقعت، على عقود حقيقية من السوق", _font(22), MUTED, "mm")
+    return 238
+
+
+def _fit(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
+    """Trim a cell to its column, with an ellipsis, so no row ever overruns."""
+    if _rtl_length(draw, text, font) <= max_width:
+        return text
+    while text and _rtl_length(draw, text + "…", font) > max_width:
+        text = text[:-1]
+    return text.rstrip() + "…"
+
+
+# ledger columns, from the right edge inwards: the contract, then the numbers,
+# then the reason hugging the left edge
+_COL_LABEL_R = W - MARGIN - 28
+_COL_ENTRY, _COL_PEAK, _COL_EXIT, _COL_RESULT = 700, 600, 500, 388
+_COL_REASON_L = MARGIN + 28
+_REASON_W = 220
+_LEDGER_ROW = 56
+
+
+def _ledger_header(draw: ImageDraw.ImageDraw, y: int) -> None:
+    font = _font(24, bold=True)
+    _rtl(draw, (_COL_LABEL_R, y), "العقد", font, MUTED, "rm")
+    for x, title in ((_COL_ENTRY, "الدخول"), (_COL_PEAK, "الأعلى"), (_COL_EXIT, "الخروج"),
+                     (_COL_RESULT, "النتيجة")):
+        _rtl(draw, (x, y), title, font, MUTED, "mm")
+    _rtl(draw, (_COL_REASON_L, y), "السبب", font, MUTED, "lm")
+
+
+def _ledger_row(draw: ImageDraw.ImageDraw, y: int, row: dict, with_day: bool) -> None:
+    left, right = MARGIN + 16, W - MARGIN - 16
+    draw.rounded_rectangle([left, y - 24, right, y + 24], radius=10, fill=BG, outline=GRID)
+    pct = float(row["pct"])
+    color = _result_color(pct)
+    side = _SIDE_AR.get(int(row.get("side") or 0), "")
+    label = f"{row['symbol']} {side} {row['label']}"
+    if with_day and row.get("day") is not None:
+        label = f"{row['day'].day}/{row['day'].month} · " + label
+    _rtl(draw, (_COL_LABEL_R, y), _fit(draw, label, _font(26, bold=True), 250), _font(26, bold=True), TEXT, "rm")
+    num = _font(26)
+    draw.text((_COL_ENTRY, y), f"{row['entry']:.2f}", font=num, fill=TEXT, anchor="mm")
+    draw.text((_COL_PEAK, y), f"{row['peak']:.2f}", font=num, fill=GREEN if row["peak"] > row["entry"] else TEXT, anchor="mm")
+    draw.text((_COL_EXIT, y), f"{row['exit']:.2f}", font=num, fill=TEXT, anchor="mm")
+    draw.text((_COL_RESULT, y), f"{pct:+.0f}%", font=_font(28, bold=True), fill=color, anchor="mm")
+    reason = str(row.get("how") or row.get("reason") or "")
+    _rtl(draw, (_COL_REASON_L, y), _fit(draw, reason, _font(22), _REASON_W), _font(22), MUTED, "lm")
+
+
+def render_indicator_report_card(
+    kind: str,
+    since,
+    until,
+    rows: list[dict],
+    open_rows: list[dict] | None = None,
+) -> bytes:
+    """MIRSAD 9's report card for a day, a week or a month.
+
+    ``rows`` are the persisted closed contracts (symbol, label, side, entry,
+    peak, exit, pct, peak_pct, how, day). A daily card lists every row and
+    what is still open; a weekly card adds a bar per session; a monthly card
+    adds the cumulative curve and a bar per week, and lists the best and the
+    worst rather than everything.
+    """
+    kind = kind if kind in _REPORT_KIND_AR else "daily"
+    open_rows = open_rows or []
+    pcts = [float(r["pct"]) for r in rows]
+    total = sum(pcts)
+    wins = sum(1 for p in pcts if p > 0)
+    losses = len(pcts) - wins
+    hit = round(wins / len(pcts) * 100) if pcts else 0
+    accent = _result_color(total) if pcts else MUTED
+    span = arabic_date(until) if since == until else f"من {arabic_date(since)} إلى {arabic_date(until)}"
+
+    if kind == "daily":
+        listed = list(rows)
+    elif kind == "weekly":
+        listed = sorted(rows, key=lambda r: (r.get("day"), r.get("closed")))[-14:]
+    else:
+        ranked = sorted(rows, key=lambda r: float(r["pct"]), reverse=True)
+        listed = ranked[:5] + [r for r in ranked[-3:] if r not in ranked[:5]]
+    chart_h = 0 if kind == "daily" else 300
+    ledger_h = 100 + max(len(listed), 1) * _LEDGER_ROW + 30
+    open_h = (76 + len(open_rows) * 56 + 8) if (kind == "daily" and open_rows) else 0
+    height = 238 + 250 + 150 + chart_h + ledger_h + open_h + 24 + 190
+
+    with _stage("month" if kind == "monthly" else "mirsad"):
+        img, draw = _canvas(height)
+        y = _indicator_header(draw, kind, span)
+
+        # hero: the net across every closed contract, the split drawn to scale
+        _panel(draw, (MARGIN, y, W - MARGIN, y + 226), outline=accent)
+        _chip(draw, W / 2, y + 42, "مجموع نتائج العقود", GOLD)
+        draw.text((W / 2, y + 122), f"{total:+.1f}%" if pcts else "—", font=_font(92, bold=True),
+                  fill=accent, anchor="mm")
+        _split_bar(draw, (MARGIN + 40, y + 180, W - MARGIN - 40, y + 206),
+                   sum(p for p in pcts if p > 0), sum(p for p in pcts if p < 0))
+        y += 250
+
+        tile_w = (W - 2 * MARGIN - 3 * 16) / 4
+        for index, (label, value, color) in enumerate((
+            ("الصفقات", str(len(pcts)), TEXT),
+            ("رابحة", str(wins), GREEN),
+            ("خاسرة", str(losses), RED),
+            ("نسبة النجاح", f"{hit}%", accent),
+        )):
+            left = MARGIN + index * (tile_w + 16)
+            _tile(draw, (int(left), y, int(left + tile_w), y + 124), label, value, color)
+        y += 150
+
+        if kind == "weekly":
+            by_day: dict = {}
+            for r in rows:
+                by_day[r["day"]] = by_day.get(r["day"], 0.0) + float(r["pct"])
+            days = sorted(by_day)
+            _week_bars(draw, (MARGIN, y, W - MARGIN, y + 276), [by_day[d] for d in days],
+                       [f"{d.day}/{d.month}" for d in days])
+            y += chart_h
+        elif kind == "monthly":
+            by_day = {}
+            for r in rows:
+                by_day[r["day"]] = by_day.get(r["day"], 0.0) + float(r["pct"])
+            days = sorted(by_day)
+            running, series = 0.0, []
+            for d in days:
+                running += by_day[d]
+                series.append(running)
+            half = (W - 2 * MARGIN - 16) / 2
+            _curve(draw, (MARGIN, y, int(MARGIN + half), y + 276), series,
+                   (f"{days[0].day}/{days[0].month}", f"{days[-1].day}/{days[-1].month}") if days else None)
+            by_week: dict = {}
+            for d in days:
+                by_week[d.isocalendar()[1]] = by_week.get(d.isocalendar()[1], 0.0) + by_day[d]
+            weeks = sorted(by_week)
+            _week_bars(draw, (int(W - MARGIN - half), y, W - MARGIN, y + 276),
+                       [by_week[w] for w in weeks], [f"أسبوع {i + 1}" for i in range(len(weeks))])
+            y += chart_h
+
+        title = {"daily": "صفقات اليوم", "weekly": "صفقات الأسبوع",
+                 "monthly": "الأفضل والأسوأ في الشهر"}[kind]
+        _panel(draw, (MARGIN, y, W - MARGIN, y + ledger_h))
+        _rtl(draw, (W - MARGIN - 28, y + 40), title, _font(30, bold=True), GOLD, "rm")
+        if len(listed) < len(rows):
+            _rtl(draw, (MARGIN + 28, y + 40), f"{len(listed)} من {len(rows)}", _font(24), MUTED, "lm")
+        row_y = y + 84
+        _ledger_header(draw, row_y)
+        row_y += 44
+        if listed:
+            for r in listed:
+                _ledger_row(draw, row_y, r, with_day=kind != "daily")
+                row_y += _LEDGER_ROW
+        else:
+            _rtl(draw, (W / 2, row_y + 4), "لا صفقات مقفلة في هذه الفترة", _font(26), MUTED, "mm")
+        y += ledger_h + 24
+
+        if open_h:
+            _panel(draw, (MARGIN, y, W - MARGIN, y + open_h))
+            _rtl(draw, (W - MARGIN - 28, y + 40), "ما زال مفتوحاً", _font(30, bold=True), GOLD, "rm")
+            oy = y + 90
+            for t in open_rows:
+                mark, entry = t.get("mark"), float(t.get("entry") or 0.0)
+                now = f"{mark:.2f}$  ({(mark - entry) / entry * 100:+.0f}%)" if mark and entry else "—"
+                _row(draw, oy, str(t["label"]) + f" · دخول {entry:.2f}$", now,
+                     _result_color((mark - entry) / entry * 100) if mark and entry else MUTED)
+                oy += 56
+            y += open_h + 24
+
+        foot = height - 150
+        _rtl(draw, (W / 2, foot), "أسعار العقود من بيانات السوق وقت الإشارة — استرشادية، وقد تختلف عن تنفيذك",
+             _font(24, bold=True), GOLD, "mm")
+        _rtl(draw, (W / 2, foot + 42), "الإشارات على الشارت لحظية · النتائج كما أُغلقت فعلياً بلا انتقاء",
+             _font(22), MUTED, "mm")
+        _rtl(draw, (W / 2, foot + 80), DISCLAIMER_LINE, _font(22), MUTED, "mm")
+        return _png(img)
+
+
 # ---------------------------------------------------------------- watch
 def render_watch_card(
     symbol: str,

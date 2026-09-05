@@ -117,9 +117,9 @@ async def test_listener_surfaces_join_requests_and_promotions():
 
 # ---------------------------------------------------------------- join flow
 @pytest.mark.asyncio
-async def test_new_join_request_gets_the_consent_gate_not_auto_approval(tmp_path):
-    """Nobody enters before pressing أوافق: the request stays pending, the
-    terms arrive with buttons, and nothing is registered yet."""
+async def test_join_requests_are_approved_on_sight_and_register_nothing(tmp_path):
+    """The updates channel is free: whoever knocks is let in, and reading it
+    is not a subscription, so no trial row appears."""
     calls: list[tuple[str, dict]] = []
     engine = _engine(tmp_path, calls)
 
@@ -128,18 +128,13 @@ async def test_new_join_request_gets_the_consent_gate_not_auto_approval(tmp_path
     )
 
     methods = _methods(calls)
-    assert "approveChatJoinRequest" not in methods  # gate first
-    # two messages: the pitch first, then the terms carrying the buttons
-    payloads = [p for m, p in calls if m == "sendMessage"]
-    assert len(payloads) == 2
-    assert "مِرصاد" in payloads[0]["text"] and "reply_markup" not in payloads[0]
-    assert "reply_markup" in payloads[1]
-    assert "إقرار وإخلاء مسؤولية" in payloads[1]["text"]
-    assert engine.memory.subscriber("777") is None  # nothing recorded yet
+    assert "approveChatJoinRequest" in methods
+    assert "sendMessage" not in methods  # no pitch, no terms — just the door
+    assert engine.memory.subscriber("777") is None
 
 
 @pytest.mark.asyncio
-async def test_pressing_agree_admits_registers_and_records_consent(tmp_path):
+async def test_pressing_agree_registers_and_records_consent(tmp_path):
     from qqq_alpha.live.telegram import CONSENT_YES, ButtonPress
 
     calls: list[tuple[str, dict]] = []
@@ -153,7 +148,7 @@ async def test_pressing_agree_admits_registers_and_records_consent(tmp_path):
     )
 
     methods = _methods(calls)
-    assert "approveChatJoinRequest" in methods
+    assert "approveChatJoinRequest" not in methods  # consent opens no channel door
     assert "answerCallbackQuery" in methods
     assert "editMessageText" in methods  # the buttons are retired in place
     row = engine.memory.subscriber("777")
@@ -179,7 +174,7 @@ async def test_pressing_decline_rejects_and_records_nothing(tmp_path):
     )
 
     methods = _methods(calls)
-    assert "declineChatJoinRequest" in methods
+    assert "declineChatJoinRequest" not in methods  # the channel is not part of the deal
     assert "approveChatJoinRequest" not in methods
     assert engine.memory.subscriber("888") is None  # a decline burns nothing
     # ...so coming back a minute later and agreeing works as a first-timer
@@ -196,7 +191,8 @@ async def test_pressing_decline_rejects_and_records_nothing(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_expired_subscriber_join_request_is_declined(tmp_path):
+async def test_expired_subscriber_join_request_is_still_approved(tmp_path):
+    """An ended trial ends the indicator, never the free channel."""
     calls: list[tuple[str, dict]] = []
     engine = _engine(tmp_path, calls)
     past = datetime.now(UTC) - timedelta(days=40)
@@ -208,8 +204,8 @@ async def test_expired_subscriber_join_request_is_declined(tmp_path):
     )
 
     methods = _methods(calls)
-    assert "declineChatJoinRequest" in methods
-    assert "approveChatJoinRequest" not in methods
+    assert "approveChatJoinRequest" in methods
+    assert "declineChatJoinRequest" not in methods
 
 
 @pytest.mark.asyncio
@@ -227,7 +223,7 @@ async def test_foreign_channel_requests_are_ignored(tmp_path):
 
 # ---------------------------------------------------------------- expiry
 @pytest.mark.asyncio
-async def test_expiry_kicks_from_the_private_channel(tmp_path):
+async def test_expiry_sends_the_farewell_and_evicts_nobody(tmp_path):
     calls: list[tuple[str, dict]] = []
     engine = _engine(tmp_path, calls)
     past = datetime.now(UTC) - timedelta(days=40)
@@ -236,8 +232,7 @@ async def test_expiry_kicks_from_the_private_channel(tmp_path):
     await engine._expire_subscribers()
 
     methods = _methods(calls)
-    assert "banChatMember" in methods  # the removal
-    assert "unbanChatMember" in methods  # so a future paid re-join works
+    assert "banChatMember" not in methods  # the channel stays theirs for good
     assert "sendMessage" in methods  # the farewell DM
 
 

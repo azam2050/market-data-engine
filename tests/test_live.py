@@ -779,9 +779,9 @@ async def test_start_shows_pitch_and_terms_but_registers_nothing(settings, tmp_p
 
 
 @pytest.mark.asyncio
-async def test_consent_press_registers_and_issues_a_personal_link(settings, tmp_path):
-    """The أوافق press is the admission ticket: registration, consent stamp,
-    and — with no pending join request — a personal single-use link."""
+async def test_consent_press_registers_and_issues_no_channel_link(settings, tmp_path):
+    """The أوافق press registers the trial and stamps consent. The channel is
+    free now, so no personal link is issued or promised."""
     from qqq_alpha.live.telegram import ButtonPress, InboundMessage
 
     engine = _subscriber_engine(settings, tmp_path)
@@ -800,8 +800,8 @@ async def test_consent_press_registers_and_issues_a_personal_link(settings, tmp_
     row = engine.memory.subscriber("555")
     assert row is not None and row["status"] == "trial"
     assert row["consented_at"]  # the legal stamp exists
-    assert engine.commands.links_issued == 1
-    assert any("t.me/+personal" in text for _, text in engine.commands.sent)
+    assert engine.commands.links_issued == 0
+    assert not any("t.me/+personal" in text for _, text in engine.commands.sent)
     assert any("مشترك" in note for note in engine.notifier.notes)
 
 
@@ -1031,12 +1031,11 @@ class _KickTrackingCommands(_FakeCommands):
 
 
 @pytest.mark.asyncio
-async def test_removing_a_subscriber_from_the_dashboard_also_kicks_them(
+async def test_removing_a_subscriber_from_the_dashboard_tells_them_and_evicts_nobody(
     settings, tmp_path
 ):
-    """Deleting the row alone would leave them inside the private channel,
-    still receiving every signal, and now with no record that they are there —
-    strictly worse than not deleting at all."""
+    """The channel is free for everyone; deleting a registration ends the
+    indicator trial and says so, and touches the channel not at all."""
     scoped = settings.model_copy(update={"telegram_private_channel_id": "-100999"})
     engine = _engine(scoped, tmp_path)
     engine.commands = _KickTrackingCommands()
@@ -1045,7 +1044,7 @@ async def test_removing_a_subscriber_from_the_dashboard_also_kicks_them(
         "removed", {"chat_id": "777", "first_name": "Saud"}, None
     )
 
-    assert engine.commands.kicked == [("-100999", "777")]
+    assert engine.commands.kicked == []
     assert any(chat == "777" for chat, _ in engine.commands.sent)
 
 
@@ -1084,11 +1083,9 @@ def _membership(user_id: str, joined: bool, chat_id: str = "-100999"):
 
 
 @pytest.mark.asyncio
-async def test_walking_into_the_private_channel_registers_you(settings, tmp_path):
-    """2026-08-20: two friends inside the private channel, one name on the
-    roster, and that name came from the old DM funnel. The consent gate only
-    ever fires for joins that need approving, while the funnel's own single-use
-    invite links admit people with no join request at all."""
+async def test_walking_into_the_updates_channel_is_noted_and_registers_nothing(settings, tmp_path):
+    """The channel is free: a reader is not a trial, so a join is a note to
+    the operator and no row on the roster."""
     scoped = settings.model_copy(
         update={"telegram_private_channel_id": "-100999", "trial_days": 30}
     )
@@ -1097,24 +1094,8 @@ async def test_walking_into_the_private_channel_registers_you(settings, tmp_path
 
     await engine._handle_membership_change(_membership("555", joined=True))
 
-    row = engine.memory.subscriber("555")
-    assert row is not None
-    assert row["status"] == "trial"
-
-
-@pytest.mark.asyncio
-async def test_rejoining_does_not_restart_a_running_trial(settings, tmp_path):
-    scoped = settings.model_copy(
-        update={"telegram_private_channel_id": "-100999", "trial_days": 30}
-    )
-    engine = _engine(scoped, tmp_path)
-    engine.commands = _KickTrackingCommands()
-
-    await engine._handle_membership_change(_membership("555", joined=True))
-    first = engine.memory.subscriber("555")["expires_at"]
-    await engine._handle_membership_change(_membership("555", joined=True))
-
-    assert engine.memory.subscriber("555")["expires_at"] == first
+    assert engine.memory.subscriber("555") is None
+    assert any("قناة التحديثات" in note for note in engine.notifier.notes)
 
 
 @pytest.mark.asyncio
@@ -1131,18 +1112,22 @@ async def test_a_join_to_some_other_chat_is_not_ours_to_record(settings, tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_leaving_is_reported_without_deleting_the_record(settings, tmp_path):
-    """Someone who walks out may walk back in; the trial clock is theirs."""
+async def test_leaving_is_reported_without_touching_the_record(settings, tmp_path):
+    """Someone who walks out of the channel keeps their indicator trial."""
+    from datetime import UTC
+
     scoped = settings.model_copy(
         update={"telegram_private_channel_id": "-100999", "trial_days": 30}
     )
     engine = _engine(scoped, tmp_path)
     engine.commands = _KickTrackingCommands()
-    await engine._handle_membership_change(_membership("555", joined=True))
+    now = datetime.now(UTC)
+    engine.memory.add_subscriber("555", "u", "U", now, now + timedelta(days=30))
 
     await engine._handle_membership_change(_membership("555", joined=False))
 
     assert engine.memory.subscriber("555") is not None
+    assert any("غادر" in note for note in engine.notifier.notes)
 
 
 class _CannedTelegram:

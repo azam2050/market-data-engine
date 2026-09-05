@@ -367,10 +367,9 @@ class LiveEngine:
             )
         if self.settings.telegram_private_channel_id:
             await self.notifier.note(
-                "🔒 قناة المشتركين الخاصة مفعّلة — دراسات الحالة تُنشر فيها منشورًا "
-                "واحدًا، والتقرير اليومي والأسبوعي والشهري يصل إليها كما يصل "
-                "للقناة العامة، والانضمام بطلب يوافق عليه البوت آليًا، "
-                "والمنتهون يُخرَجون تلقائيًا"
+                "📢 قناة تحديثات مِرصاد ٩ مفعّلة — مجانية للجميع، طلبات الانضمام "
+                "تُقبل آلياً، وتقارير أداء المؤشر اليومية والأسبوعية والشهرية تصل "
+                "إليها وإلى القناة العامة"
             )
         await self._report_channel_health()
         # from here on, a market-data outage is announced instead of silent
@@ -1112,11 +1111,9 @@ class LiveEngine:
             closed = list(self.manager.closed_trades)
             for channel in targets:
                 await channel.post_daily_report(day, closed)
-            # the indicator's trades have their own report: contract entry,
-            # peak and exit for every signal that closed today
-            if self._tv_bridge is not None:
-                with contextlib.suppress(Exception):
-                    await self._tv_bridge.post_daily_report(day)
+            # the indicator's own performance cards: daily always, weekly on
+            # Friday, monthly on the month's last session — both rooms
+            await self._publish_indicator_reports(day)
             if day.weekday() == 4:  # Friday: the weekly scoreboard
                 period = load_period(
                     self.settings.journal_dir, since=day - timedelta(days=6), until=day
@@ -1161,6 +1158,53 @@ class LiveEngine:
                 return False
             probe += timedelta(days=1)
         return True
+
+    async def _publish_indicator_reports(self, day: date) -> None:
+        """MIRSAD 9's own scoreboard, drawn from the persisted record.
+
+        Daily every session, weekly on Friday, monthly on the month's last
+        session — each a card to both rooms, with the text ledger as the
+        fallback. Read from memory rather than the bridge so a restart between
+        two signals never loses a week.
+        """
+        from qqq_alpha.live import cards
+        from qqq_alpha.live.tvbridge import indicator_report_text
+
+        targets = self._report_channels
+        if not targets:
+            return
+        bridge = self._tv_bridge
+        open_rows = [
+            {
+                "label": f"{t.signal_symbol} {t.label()}",
+                "entry": t.contract_entry,
+                "mark": t.last_mark,
+            }
+            for t in (bridge.open_trades() if bridge is not None else [])
+        ]
+        periods: list[tuple[str, date, date]] = [("daily", day, day)]
+        if day.weekday() == 4:
+            periods.append(("weekly", day - timedelta(days=6), day))
+        if self._is_last_session_of_month(day):
+            periods.append(("monthly", day.replace(day=1), day))
+        for kind, since, until in periods:
+            rows = self.memory.tv_trades_between(since, until)
+            notes = bridge.day_notes(day) if (bridge is not None and kind == "daily") else []
+            if kind != "daily" and not rows:
+                continue  # a week or a month with no signal has nothing to say
+            text = indicator_report_text(kind, since, until, rows, notes, open_rows)
+            try:
+                png = cards.render_indicator_report_card(
+                    kind, since, until, rows, open_rows if kind == "daily" else None
+                )
+            except Exception:  # noqa: BLE001 - the text ledger is the content
+                log.exception("indicator report card failed")
+                png = None
+            for channel in targets:
+                await channel._post_card(png, text.split("\n", 1)[0], text)
+            await self.notifier.note("📊 " + text)
+        if bridge is not None:
+            bridge.forget_day(day)
 
     async def _publish_channel_monthly(self, day: date) -> None:
         """The month's statement. Its daily series and its trade statistics are
@@ -1373,44 +1417,17 @@ class LiveEngine:
             self.commands.channel_promotions = []
 
     async def _handle_membership_change(self, change) -> None:
-        """Put anyone who walks into the private channel onto the books.
-
-        The consent gate only ever sees people whose join needs approving. Our
-        own funnel hands out single-use invite links, and a link admits its
-        holder with no join request at all — so the one route the engine
-        invites people through was the one route it could not see. The result
-        on 2026-08-20: two friends inside the channel, receiving every signal,
-        and a roster showing one name that came from the old DM funnel.
-
-        Registering here is deliberately quiet. It records who is inside so
-        the roster is true; it does not send the welcome or the terms, because
-        this person did not just agree to anything.
-        """
+        """Somebody walked into, or out of, the free updates channel. The
+        operator hears about it; nothing is registered, because reading the
+        channel is not a subscription."""
         private = self.settings.telegram_private_channel_id
         if not private or str(change.chat_id) != str(private):
             return
-        if self.settings.trial_days <= 0:
-            return
-
         name = change.first_name or change.username or change.user_id
-        if not change.joined:
-            await self.notifier.note(f"👋 غادر القناة الخاصة: {name}")
-            return
-
-        now = datetime.now(UTC)
-        added = self.memory.add_subscriber(
-            chat_id=change.user_id,
-            username=change.username,
-            first_name=change.first_name,
-            joined_at=now,
-            expires_at=now + timedelta(days=self.settings.trial_days),
-        )
-        if added:
-            active = len(self.memory.active_subscriber_ids(now))
-            await self.notifier.note(
-                f"👤 انضم للقناة الخاصة: {name} — سُجّل تلقائيًا، "
-                f"النشطون الآن: {active}"
-            )
+        if change.joined:
+            await self.notifier.note(f"📢 دخل قناة التحديثات: {name}")
+        else:
+            await self.notifier.note(f"👋 غادر قناة التحديثات: {name}")
 
     def _walkthrough_url(self) -> str:
         """The live walkthrough served from our own domain, or "" until the
@@ -1434,56 +1451,22 @@ class LiveEngine:
         return cards_guide_message(self._walkthrough_url(), self.settings.youtube_url)
 
     async def _handle_join_request(self, request) -> None:
-        """The private channel's front door — now a consent gate.
+        """The updates channel's front door is open.
 
-        Nobody enters and no trial starts until they press "أوافق وأقر" on
-        the legal terms. Declining (or never answering) leaves them outside
-        with nothing recorded. Telegram permits messaging anyone with a
-        pending join request, which is exactly what makes this gate work.
+        The channel used to be the paid room; it is now the free home of the
+        indicator's news and its daily, weekly and monthly reports, so every
+        join request is approved on sight. Nothing is registered: a channel
+        member is a reader, and the subscription (the indicator itself) is a
+        separate conversation with the bot.
         """
-        from qqq_alpha.live.telegram import (
-            CONSENT_BUTTONS,
-            consent_terms_message,
-            trial_status_message,
-        )
-
         private = self.settings.telegram_private_channel_id
         if self.commands is None or not private or request.channel_id != str(private):
             return  # a request for some other chat is not ours to judge
-
-        now = datetime.now(UTC)
-        row = self.memory.subscriber(request.user_id)
         name = request.username or request.first_name or request.user_id
-
-        if row is not None:
-            expires = datetime.fromisoformat(row["expires_at"])
-            if row["status"] == "trial" and expires > now:
-                # a known active subscriber re-joining (new phone, left by
-                # accident): let them back in on their existing clock —
-                # their consent is already on record
-                await self.commands.approve_join_request(private, request.user_id)
-                await self.commands.send(
-                    request.user_id, trial_status_message((expires - now).days)
-                )
-                return
-            await self.commands.decline_join_request(private, request.user_id)
-            await self._send_farewell(request.user_id)
-            await self.notifier.note(f"⛔ طلب انضمام من مشترك منتهي: {name} — رُفض تلقائيًا")
-            return
-
-        if self.settings.trial_days <= 0:
-            await self.commands.decline_join_request(private, request.user_id)
-            return
-
-        # first-timer: the request stays pending; the verdict is theirs to press
-        await self.commands.send(request.user_id, self._pitch())
-        delivered = await self.commands.send_with_buttons(
-            request.user_id, consent_terms_message(), CONSENT_BUTTONS
-        )
-        if not delivered:
-            await self.notifier.note(
-                f"⚠️ تعذر إرسال رسالة الإقرار لطالب الانضمام {name} — طلبه معلق"
-            )
+        if await self.commands.approve_join_request(private, request.user_id):
+            await self.notifier.note(f"📢 انضم لقناة التحديثات: {name}")
+        else:
+            await self.notifier.note(f"⚠️ تعذر قبول طلب انضمام {name} لقناة التحديثات")
 
     async def _handle_button_press(self, press) -> None:
         """Route inline-button taps: the consent verdicts and operator previews."""
@@ -1507,7 +1490,6 @@ class LiveEngine:
             )
             return
 
-        private = self.settings.telegram_private_channel_id
         if press.data not in (CONSENT_YES, CONSENT_NO):
             await self.commands.answer_button(press.callback_id)
             return
@@ -1519,8 +1501,6 @@ class LiveEngine:
         )
 
         if press.data == CONSENT_NO:
-            if private:
-                await self.commands.decline_join_request(private, press.user_id)
             await self.commands.answer_button(press.callback_id, "لم يُسجَّل شيء")
             await self.commands.replace_message(
                 press.chat_id, press.message_id,
@@ -1529,41 +1509,15 @@ class LiveEngine:
             await self.commands.send(press.user_id, consent_declined_note())
             return
 
-        # consent:yes. Two doors lead here and both are now behind this one
-        # button: a pending join request (they tapped a channel link) gets
-        # approved, and a /start conversation (no request exists to approve)
-        # gets a personal single-use invite link instead. Consent first,
-        # admission second — in both cases the press is the admission ticket.
+        # consent:yes — the free window starts. The channel needs no ticket
+        # any more, so the press registers the trial and nothing else.
         existing = self.memory.subscriber(press.user_id)
         if existing is not None and existing["status"] != "trial":
             # an expired subscriber pressing an old consent button must not
-            # re-enter for free — that would be a permanent unkickable leak
-
+            # restart a free window
             await self.commands.answer_button(press.callback_id)
             await self._send_farewell(press.user_id)
             return
-
-        link = ""
-        if private and not await self.commands.approve_join_request(private, press.user_id):
-            # a channel deployment: no pending request means /start brought
-            # them here, so a personal single-use link is their admission
-            link = (
-                await self.commands.create_invite_link(
-                    private, name=f"consent-{press.user_id}"
-                )
-                or ""
-            )
-            if not link:
-                await self.commands.answer_button(press.callback_id, "تعذر إصدار الرابط")
-                await self.commands.send(
-                    press.user_id,
-                    "تعذر إصدار رابط الدخول مؤقتاً — أرسل /start من جديد بعد "
-                    "قليل وسيصلك رابطك.",
-                )
-                await self.notifier.note(
-                    f"⚠️ تعذر إصدار رابط دخول لمن أقرّ بالشروط: {name}"
-                )
-                return
 
         expires = now + timedelta(days=self.settings.trial_days)
         self.memory.add_subscriber(
@@ -1581,9 +1535,7 @@ class LiveEngine:
         )
         await self.commands.send(
             press.user_id,
-            consent_accepted_note(
-                self.settings.trial_days, expires.date().isoformat(), link
-            ),
+            consent_accepted_note(self.settings.trial_days, expires.date().isoformat()),
         )
         # the indicator needs one thing from them: their TradingView name.
         # The guide follows once it lands, so the steps arrive in order.
@@ -1613,8 +1565,6 @@ class LiveEngine:
             message.chat_id, message.username or message.first_name, message.text
         )
         self.memory.log_message(message.chat_id, "in", message.text)
-
-        private = self.settings.telegram_private_channel_id
 
         if row is None:
             if not message.text.lower().startswith("/start"):
@@ -1649,12 +1599,6 @@ class LiveEngine:
         if row["status"] == "trial" and expires > now:
             days_left = (expires - now).days
             status = trial_status_message(days_left, row.get("tv_username") or "")
-            if private:
-                link = await self.commands.create_invite_link(
-                    private, name=f"status-{message.chat_id}"
-                )
-                if link:
-                    status += f"\n\n🔗 إن لم تكن داخل القناة الخاصة بعد، هذا رابطك:\n{link}"
             await self.commands.send(message.chat_id, status)
         else:
             await self._send_farewell(message.chat_id)
@@ -1789,12 +1733,9 @@ class LiveEngine:
 
         now = datetime.now(UTC)
         due = self.memory.expire_due_subscribers(now)
-        private = self.settings.telegram_private_channel_id
         for row in due:
-            if private:
-                # removal from the private channel IS the cutoff; the DM only
-                # explains it and points at the follow-up channel
-                await self.commands.kick(private, row["chat_id"])
+            # the channel stays open to them for good; what ends is the
+            # indicator, and that is a manual click the operator is told about
             await self._send_farewell(row["chat_id"])
             if row.get("tv_username"):
                 # channel removal is automatic; TradingView access is a manual
@@ -1860,19 +1801,13 @@ class LiveEngine:
         Every alert the indicator fires arrives here through the secret
         webhook. The bridge parses it, picks a real option contract for
         entries (QQQ same-day, stocks nearest weekly Friday, 🌙 next
-        expiry) and posts the card to the private channel; targets and
-        exits become follow-ups quoting the live contract price. The
+        expiry) and reports the card to the operator; targets and exits
+        become follow-ups quoting the live contract price. The
         bridge instance lives across signals so follow-ups find the trade
         their entry opened.
         """
         if self._tv_bridge is None:
             from qqq_alpha.live.tvbridge import TvBridge
-
-            async def channel_send(text: str) -> bool:
-                target = str(self.settings.telegram_private_channel_id or "")
-                if not target or self.commands is None:
-                    return False
-                return await self.commands.send(target, text)
 
             async def chain_fetch(symbol, expiry, want):
                 async with MassiveClient(self.settings) as client:
@@ -1884,11 +1819,16 @@ class LiveEngine:
             from qqq_alpha.live.tvbrain import ContractAnalyst
 
             analyst = ContractAnalyst(self.settings)
+            # the channels get the reports, not the play-by-play: every
+            # signal card goes to the operator, and every closed contract
+            # is written down so the weekly and monthly cards can be drawn
+            # from the record rather than from one process's memory
             self._tv_bridge = TvBridge(
                 admin_send=self.notifier.note,
-                channel_send=channel_send,
+                channel_send=None,
                 chain_fetch=chain_fetch,
                 analyst=analyst.choose if analyst.configured else None,
+                store=self.memory.record_tv_trade,
             )
         try:
             await self._tv_bridge.handle(raw)
@@ -2485,7 +2425,6 @@ class LiveEngine:
             return
         chat_id = str(row.get("chat_id") or "")
         name = row.get("first_name") or row.get("username") or chat_id
-        private = self.settings.telegram_private_channel_id
 
         if action == "extended":
             expires = row.get("expires_at", "")[:10]
@@ -2522,13 +2461,10 @@ class LiveEngine:
             return
 
         if action == "removed":
-            if private:
-                # the channel removal IS the cutoff; the DM only explains it
-                await self.commands.kick(private, chat_id)
             await self.commands.send(
-                chat_id, "انتهى وصولك إلى القناة الخاصة. شكرًا لك 🤍"
+                chat_id, "أُلغي تسجيلك في مِرصاد ٩. قناة التحديثات تبقى مفتوحة لك، وللعودة أرسل /start 🤍"
             )
-            await self.notifier.note(f"🗑️ حُذف المشترك {name} وأُخرج من القناة")
+            await self.notifier.note(f"🗑️ حُذف المشترك {name}")
 
     async def _on_payment(self, action: str, chat_id: str, info: dict) -> None:
         """A verified Moyasar payment reaches Telegram: the subscriber gets
@@ -2546,46 +2482,23 @@ class LiveEngine:
         if action != "activated":
             return
 
-        from qqq_alpha.payments import (
-            PLAN_LABELS,
-            plan_includes_channel,
-            plan_includes_indicator,
-        )
+        from qqq_alpha.payments import PLAN_LABELS, plan_includes_indicator
 
         row = info.get("row") or {}
         expires = str(row.get("expires_at") or "")[:10]
         amount_sar = int(info.get("amount") or 0) // 100
         plan = str(info.get("plan") or "vip")
         plan_label = PLAN_LABELS.get(plan, plan)
-        private = self.settings.telegram_private_channel_id
         if self.commands is not None:
             message = (
                 f"✅ تم تفعيل اشتراكك — {plan_label} — شكرًا لك 🤍\n"
                 f"اشتراكك فعال حتى {expires}."
             )
-            if private and plan_includes_channel(plan):
-                link = await self.commands.create_invite_link(
-                    private, name=f"paid-{chat_id}"
-                )
-                if link:
-                    message += (
-                        "\n\n🔗 إن لم تكن داخل القناة الخاصة بعد، هذا رابط "
-                        f"دخولك (صالح لشخص واحد):\n{link}"
-                    )
             await self.commands.send(chat_id, message)
             if plan_includes_indicator(plan) and not row.get("tv_username"):
                 from qqq_alpha.live.telegram import tv_username_prompt
 
                 await self.commands.send(chat_id, tv_username_prompt())
-            if not plan_includes_channel(plan) and private:
-                # they chose the indicator-only plan: the trial's channel
-                # access ends here, politely and immediately
-                await self.commands.kick(private, chat_id)
-                await self.commands.send(
-                    chat_id,
-                    "باقتك الحالية تشمل المؤشر فقط، لذا انتهى وصولك للقناة "
-                    "الخاصة. للجمع بينهما راسلنا بكلمة «الباقات» في أي وقت.",
-                )
         name = row.get("first_name") or row.get("username") or chat_id
         await self.notifier.note(
             f"💳 دفعة مؤكدة: {name} — {plan_label} — {amount_sar} ريال، "

@@ -594,3 +594,76 @@ def test_contract_analyst_parses_the_tool_call_and_rejects_strays() -> None:
     # nothing configured: the analyst stays silent rather than raising
     quiet = ContractAnalyst(Settings(anthropic_api_key="", anthropic_model=""))
     assert not quiet.configured and _run(quiet.choose(ctx)) is None
+
+
+# ---------------------------------------------------------------- record + no channel
+def test_bridge_without_a_channel_reports_to_the_operator_and_writes_the_record() -> None:
+    """The channels get the report cards, not the play-by-play: with no
+    channel wired every card reaches the operator, and every close is
+    handed to the store the reports are drawn from."""
+    wire = _Wire([_c(352.5, 1.9, 2.0), _c(355, 1.0, 1.06)])
+    stored: list[dict] = []
+    bridge = TvBridge(wire.admin_send, None, wire.chain_fetch, store=stored.append)
+
+    async def flow() -> None:
+        await bridge.handle(ENTRY)
+        wire.chain = [_c(352.5, 2.95, 3.05), _c(355, 1.6, 1.7)]
+        await bridge.handle("✅ خروج — كسر الوقف المتحرك | TSLA | النتيجة +1.8R")
+
+    _run(flow())
+    assert wire.channel == []
+    assert any("⭐️ صفقة كول" in text for text in wire.admin)
+    assert not any("تعذر النشر" in text for text in wire.admin)
+    assert len(stored) == 1
+    row = stored[0]
+    assert row["symbol"] == "TSLA" and row["label"] == "TSLA 352.5C" and row["side"] == 1
+    assert row["entry"] == 2.0 and row["exit"] == 2.95 and row["peak"] == 2.95  # no mark between
+    assert row["entry_stock"] == 351.0 and "اختراق" in row["reason"]
+    assert bridge.day_notes(datetime.now(ZoneInfo("America/New_York")).date()) == []
+
+
+def test_memory_keeps_indicator_trades_by_new_york_close_date(tmp_path) -> None:
+    from qqq_alpha.memory import Memory
+
+    memory = Memory(tmp_path / "m.db")
+    ny = ZoneInfo("America/New_York")
+    late = datetime(2026, 9, 4, 15, 50, tzinfo=ny)  # Friday afternoon in New York
+    memory.record_tv_trade({
+        "symbol": "NVDA", "label": "NVDA 180C", "side": 1, "entry": 2.0, "exit": 3.0, "peak": 3.2,
+        "opened": late.replace(hour=10), "closed": late, "how": "الهدف الثاني", "reason": "اختراق",
+    })
+    # 23:30 UTC on the 4th is still the 4th in New York — the report's day
+    memory.record_tv_trade({
+        "symbol": "QQQ", "label": "QQQ 480P", "side": -1, "entry": 1.0, "exit": 0.8, "peak": 1.1,
+        "opened": "2026-09-04T22:00:00+00:00", "closed": "2026-09-04T23:30:00+00:00", "how": "وقف",
+    })
+
+    week = memory.tv_trades_between(date(2026, 8, 31), date(2026, 9, 4))
+    assert [r["symbol"] for r in week] == ["NVDA", "QQQ"]
+    assert week[0]["pct"] == 50.0 and round(week[0]["peak_pct"]) == 60
+    assert week[1]["day"] == date(2026, 9, 4)
+    assert memory.tv_trades_between(date(2026, 9, 5), date(2026, 9, 5)) == []
+
+
+def test_indicator_report_text_is_a_full_ledger() -> None:
+    from qqq_alpha.live.tvbridge import indicator_report_text
+
+    rows = [
+        {"symbol": "NVDA", "label": "NVDA 180C", "side": 1, "entry": 2.0, "exit": 3.0, "peak": 3.2,
+         "pct": 50.0, "peak_pct": 60.0, "how": "الهدف الثاني", "day": date(2026, 9, 4)},
+        {"symbol": "QQQ", "label": "QQQ 480P", "side": -1, "entry": 1.0, "exit": 0.8, "peak": 1.1,
+         "pct": -20.0, "peak_pct": 10.0, "how": "وقف", "day": date(2026, 9, 4)},
+    ]
+    text = indicator_report_text(
+        "daily", date(2026, 9, 4), date(2026, 9, 4), rows,
+        notes=[{"symbol": "AMD", "text": "كول بلا عقد"}],
+        open_rows=[{"label": "META 610C", "entry": 5.0, "mark": 6.0}],
+    )
+    head = text.split("\n", 1)[0]
+    assert "مِرصاد ٩" in head and "اليومي" in head and "4 سبتمبر 2026" in head
+    assert "الصفقات: 2 · رابحة 1 · خاسرة 1 · نسبة النجاح 50%" in text
+    assert "NVDA كول NVDA 180C: 2.00 ← 3.00 (+50%)" in text and "الهدف الثاني" in text
+    assert "AMD: كول بلا عقد" in text
+    assert "META 610C · دخول 5.00$ · الآن 6.00$ (+20%)" in text
+    weekly = indicator_report_text("weekly", date(2026, 8, 31), date(2026, 9, 4), [])
+    assert "الأسبوعي" in weekly and "لا صفقات مقفلة" in weekly

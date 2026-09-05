@@ -292,9 +292,9 @@ def test_reminder_sweep_targets_only_the_two_day_window_once(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_paid_activation_message_carries_expiry_and_door_key(tmp_path):
-    """The engine's _on_payment: subscriber DM with expiry + single-use link,
-    operator note with the amount."""
+async def test_paid_activation_message_carries_expiry_and_no_door_key(tmp_path):
+    """The engine's _on_payment: subscriber DM with the expiry, operator note
+    with the amount. The channel is free, so no link rides along."""
     from test_live import _FakeCommands, _subscriber_engine
 
     engine_settings = Settings(
@@ -313,7 +313,7 @@ async def test_paid_activation_message_carries_expiry_and_door_key(tmp_path):
         {"payment_id": "pay_9", "row": {"expires_at": "2026-09-22T20:00:00+00:00"}, "amount": 19900},
     )
     sent = "\n".join(text for _, text in engine.commands.sent)
-    assert "2026-09-22" in sent and "t.me/+personal" in sent
+    assert "2026-09-22" in sent and "t.me/+personal" not in sent
     assert any("199" in note and "💳" in note for note in engine.notifier.notes)
 
 
@@ -431,8 +431,8 @@ async def test_indicator_only_activation_drops_channel_and_asks_for_tv_name(tmp_
         },
     )
     sent = "\n".join(text for _, text in engine.commands.sent)
-    assert "t.me/+personal" not in sent, "no channel door for an indicator-only plan"
-    assert kicked == [("-100999", "555")]
+    assert "t.me/+personal" not in sent, "no channel door: the channel is free"
+    assert kicked == []  # and nobody is evicted from it either
     assert "مؤشر" in sent  # the TradingView-username prompt went out
 
 

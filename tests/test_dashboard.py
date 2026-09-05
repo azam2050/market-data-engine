@@ -387,11 +387,10 @@ def test_editing_an_unknown_subscriber_is_a_no_op_not_a_crash(tmp_path):
     assert calls == []  # nothing to announce about somebody who does not exist
 
 
-def test_the_page_shows_how_many_are_actually_in_the_channel(tmp_path):
-    """The operator's real question was "why does it say 1 when two friends
-    are in the channel?". Telegram cannot list channel members — no such
-    endpoint exists — but it can count them, and the count is what turns a
-    number that looked broken into a gap that can be acted on."""
+def test_the_page_no_longer_grades_channel_membership(tmp_path):
+    """The channel is free for everyone now, so the roster stops comparing
+    itself to the member count: the probe may still run, but nothing on
+    the page says who is inside."""
     settings, _ = _with_subscribers(tmp_path)
 
     async def _roster(chat_ids):
@@ -401,8 +400,8 @@ def test_the_page_shows_how_many_are_actually_in_the_channel(tmp_path):
         "/subscribers", auth=AUTH
     ).text
 
-    assert "داخل القناة الخاصة فعليًا" in body
-    assert "لا يتيح للبوت سرد أعضاء القناة" in body  # the gap is explained, not hidden
+    assert "داخل القناة الخاصة فعليًا" not in body
+    assert "لا يتيح للبوت سرد أعضاء القناة" not in body
 
 
 def test_no_gap_warning_when_the_roster_matches_the_channel(tmp_path):

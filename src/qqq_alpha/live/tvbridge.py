@@ -394,6 +394,9 @@ class ClosedTrade:
     closed: datetime
     r_text: str = ""
     how: str = ""
+    entry_stock: float | None = None
+    reason: str = ""
+    tf: str = ""
 
     @property
     def pct(self) -> float:
@@ -402,6 +405,16 @@ class ClosedTrade:
     @property
     def peak_pct(self) -> float:
         return _pct(self.peak, self.entry)
+
+    def as_row(self) -> dict[str, Any]:
+        """The persisted shape — what the report cards are drawn from."""
+        return {
+            "symbol": self.signal_symbol, "label": self.label, "side": self.side,
+            "entry": self.entry, "exit": self.exit, "peak": self.peak,
+            "opened": self.opened, "closed": self.closed,
+            "r_text": self.r_text, "how": self.how,
+            "entry_stock": self.entry_stock, "reason": self.reason, "tf": self.tf,
+        }
 
 
 @dataclass
@@ -415,6 +428,62 @@ class _DayNote:
     at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+REPORT_KIND_AR = {"daily": "اليومي", "weekly": "الأسبوعي", "monthly": "الشهري"}
+
+
+def indicator_report_text(
+    kind: str,
+    since: date,
+    until: date,
+    rows: list[dict[str, Any]],
+    notes: list[dict[str, str]] | None = None,
+    open_rows: list[dict[str, Any]] | None = None,
+) -> str:
+    """The report as text: the card's caption line first, then the ledger
+    that stands in for the card wherever a photo cannot be posted."""
+    from qqq_alpha.live.cards import arabic_date
+
+    span = arabic_date(until) if since == until else f"من {arabic_date(since)} إلى {arabic_date(until)}"
+    lines = [f"📊 مِرصاد ٩ — تقرير الأداء {REPORT_KIND_AR.get(kind, kind)} · {span}", "━━━━━━━━━━━━━━"]
+    if rows:
+        wins = [r for r in rows if r["pct"] > 0]
+        total = sum(r["pct"] for r in rows)
+        best = max(rows, key=lambda r: r["pct"])
+        worst = min(rows, key=lambda r: r["pct"])
+        lines += [
+            f"الصفقات: {len(rows)} · رابحة {len(wins)} · خاسرة {len(rows) - len(wins)}"
+            f" · نسبة النجاح {round(len(wins) / len(rows) * 100)}%",
+            f"مجموع نتائج العقود: {_signed(total)} · متوسط الصفقة {_signed(total / len(rows))}",
+            f"الأفضل: {best['symbol']} {best['label']} {_signed(best['pct'])} (أعلى {_signed(best['peak_pct'])})",
+            f"الأسوأ: {worst['symbol']} {worst['label']} {_signed(worst['pct'])}",
+            "",
+        ]
+        shown = rows if kind == "daily" else sorted(rows, key=lambda r: r["day"])[-15:]
+        for r in shown:
+            side = "كول" if r["side"] > 0 else "بوت"
+            when = f"{r['day']:%d-%m} " if kind != "daily" else ""
+            lines.append(
+                f"• {when}{r['symbol']} {side} {r['label']}: {r['entry']:.2f} ← {r['exit']:.2f}"
+                f" ({_signed(r['pct'])}) · أعلى {_signed(r['peak_pct'])}"
+                + (f" · {r['how']}" if r.get("how") else "")
+            )
+        if len(shown) < len(rows):
+            lines.append(f"… و{len(rows) - len(shown)} صفقة أخرى في البطاقة")
+    else:
+        lines.append("لا صفقات مقفلة" + (" اليوم" if kind == "daily" else ""))
+    if notes:
+        lines += ["", "إشارات بلا عقد متتبَّع:"]
+        lines += [f"• {n['symbol']}: {n['text']}" for n in notes]
+    if open_rows and kind == "daily":
+        lines += ["", "ما زال مفتوحاً:"]
+        for t in open_rows:
+            mark = t.get("mark")
+            now = f" · الآن {mark:.2f}$ ({_signed(_pct(mark, t['entry']))})" if mark and t["entry"] else ""
+            lines.append(f"• {t['label']} · دخول {t['entry']:.2f}${now}")
+    lines += ["", "أسعار العقود من بيانات السوق وقت الإشارة — استرشادية. محتوى تعليمي وليس توصية."]
+    return "\n".join(lines)
+
+
 # TradingView re-sends an alert when the webhook answers slowly; the same
 # text inside this window is the same signal, not a second trade
 DUPLICATE_WINDOW_SEC = 90
@@ -424,14 +493,16 @@ class TvBridge:
     def __init__(
         self,
         admin_send: Callable[[str], Awaitable[None]],
-        channel_send: Callable[[str], Awaitable[bool]],
+        channel_send: Callable[[str], Awaitable[bool]] | None,
         chain_fetch: Callable[[str, date, OptionType], Awaitable[list[OptionContract]]],
         analyst: Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]] | None = None,
+        store: Callable[[dict[str, Any]], None] | None = None,
     ):
         self._admin = admin_send
         self._channel = channel_send
         self._chain = chain_fetch
         self._analyst = analyst
+        self._store = store
         self._open: dict[str, _OpenTrade] = {}
         self._closed: list[ClosedTrade] = []
         self._notes: list[_DayNote] = []
@@ -447,7 +518,12 @@ class TvBridge:
         return False
 
     async def _record(self, text: str, admin_prefix: str = "📡 ") -> bool:
-        """Post to the private channel, and echo to the operator either way."""
+        """Post to the channel when one is wired, and echo to the operator
+        either way. With no channel the operator is the only audience and
+        the prefix says so."""
+        if self._channel is None:
+            await self._admin("📡 " + text)
+            return False
         posted = await self._channel(text)
         await self._admin((admin_prefix if posted else "⚠️ تعذر النشر في القناة:\n") + text)
         return posted
@@ -652,8 +728,14 @@ class TvBridge:
             signal_symbol=trade.signal_symbol, label=trade.label(), side=trade.side,
             entry=trade.contract_entry, exit=px, peak=max(trade.peak, px),
             opened=trade.opened, closed=datetime.now(UTC), r_text=r_text, how=how,
+            entry_stock=trade.entry_stock, reason=trade.reason, tf=trade.tf,
         )
         self._closed.append(closed)
+        if self._store is not None:
+            try:
+                self._store(closed.as_row())
+            except Exception:  # noqa: BLE001 - the record must not block the card
+                log.exception("tv trade store failed")
         return closed
 
     @staticmethod
@@ -714,6 +796,18 @@ class TvBridge:
     def open_trades(self) -> list[_OpenTrade]:
         return list(self._open.values())
 
+    def day_notes(self, day: date) -> list[dict[str, str]]:
+        """Signals that got no contract today, for the report's ledger."""
+        return [
+            {"symbol": n.symbol, "text": n.text}
+            for n in self._notes if n.at.astimezone(NY).date() == day
+        ]
+
+    def forget_day(self, day: date) -> None:
+        """The day has been reported; drop its in-memory copies."""
+        self._closed = [c for c in self._closed if c.closed.astimezone(NY).date() != day]
+        self._notes = [n for n in self._notes if n.at.astimezone(NY).date() != day]
+
     def daily_report(self, day: date | None = None) -> str:
         """The day's record: every closed contract, every signal that got no
         contract, and what is still open. Never empty — a quiet day is a
@@ -757,6 +851,5 @@ class TvBridge:
         day = day or datetime.now(NY).date()
         text = self.daily_report(day)
         posted = await self._record(text, admin_prefix="📊 ")
-        self._closed = [c for c in self._closed if c.closed.astimezone(NY).date() != day]
-        self._notes = [n for n in self._notes if n.at.astimezone(NY).date() != day]
+        self.forget_day(day)
         return posted
