@@ -39,11 +39,13 @@ MOYASAR_API = "https://api.moyasar.com/v1"
 # the three monthly plans. Codes are wire format — they ride pay links and
 # payment metadata, so they never change; labels and prices are display.
 PLAN_LABELS: dict[str, str] = {
-    "indicator": "📊 المؤشر",
+    "indicator": "📊 مِرصاد ٩ — المؤشر",
     "channel": "⭐️ القناة الخاصة",
     "vip": "👑 VIP — القناة والمؤشر معاً",
 }
-DEFAULT_PLAN = "vip"
+# the product is the indicator; the other two codes stay valid so links and
+# payments issued in the channel era still resolve
+DEFAULT_PLAN = "indicator"
 
 
 def plan_price_sar(settings: Settings, plan: str) -> int:

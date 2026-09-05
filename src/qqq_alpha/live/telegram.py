@@ -949,42 +949,44 @@ def _days_ar(days: int) -> str:
     return f"{days} أيام" if 3 <= days <= 10 else f"{days} يوماً"
 
 
-def welcome_pitch_message(trial_days: int, price_sar: int) -> str:
-    """Message one of the funnel: the value first, in case-study language.
-
-    Deliberately free of the advisory-room register — no live calls, no
-    follow-alongs, nothing imperative. The reader is a student watching
-    documented case studies, and the sentence about the public channel is
-    the whole sales argument: the free feed is a window, this is the hall.
+def welcome_pitch_message(
+    trial_days: int, price_sar: int, walkthrough_url: str = "", youtube_url: str = ""
+) -> str:
+    """Message one of the funnel: what the indicator draws for you, the two
+    places to see it working (the live walkthrough and the daily videos),
+    and the free week. Deliberately free of the advisory-room register: the
+    indicator is an analysis assistant, the decision stays with the reader.
     """
-    return (
-        "أهلاً بك في بوت عقود الخيارات 👋\n\n"
-        "منصة تعليمية آلية متخصصة حصرياً في عقود خيارات صندوق QQQ الأمريكي "
-        "(ناسداك-100) — تشاهد كيف تُبنى الصفقة الاحترافية خطوة بخطوة: اختيار "
-        "العقد، تحديد المحطات، وضع وقف الحماية، إدارة رأس المال، وتوثيق "
-        "النتيجة كما وقعت فعلاً — ربحاً أو خسارة.\n\n"
-        "ما يصلك داخل القناة الخاصة:\n\n"
-        "⚡ جميع دراسات الحالة كاملة، أولاً بأول — من القراءة إلى المجريات "
-        "إلى الخلاصة\n"
-        "🔄 بطاقة المجريات تتجدد تلقائياً كل ربع ساعة — تعرف تطور المشهد "
-        "بنظرة واحدة\n"
-        "🛡️ اللحظات المفصلية — تأمين التكلفة وبلوغ المحطات — موثقة في وقتها\n"
-        "📚 منهج إدارة المخاطر ورأس المال\n"
-        "📅 التقرير اليومي بعد كل جلسة، و📊 التقرير الأسبوعي الشامل — الرابح "
-        "بالأخضر والخاسر بالأحمر\n\n"
-        "(القناة العامة تعرض دراستي حالة أسبوعياً فقط كنموذج — المشترك "
-        "يشاهد كل شيء.)\n\n"
-        "🖥️ وإلى جانب القناة: مؤشر TradingView الخاص بنا — نفس المنهجية "
-        "على شاشتك مباشرة، بأهدافه ووقفه ولوحة نتائجه الصادقة.\n\n"
-        f"🎁 فترة اطلاع مجانية {_days_ar(trial_days)} تشمل الاثنين معاً — "
-        "القناة والمؤشر، كاملة المزايا، بدون بطاقة وبدون أي التزام. "
-        f"وبعدها لمن أحب الاستمرار باقات شهرية تبدأ من {price_sar} ريال.\n\n"
-        "وقبل الدخول، اطّلع على الإقرار في الرسالة التالية 👇"
-    )
+    lines = [
+        "أهلاً بك في مِرصاد ٩ 👋",
+        "",
+        "مؤشر على TradingView يقرأ الشموع عنك ويرسم لك على الشارت مباشرة:",
+        "",
+        "🟢 الإشارة كول أو بوت مع درجة جودتها من ١٠٠",
+        "🟠 خط الدخول البرتقالي: تدخل عند لمسه لا عند الإشارة",
+        "🔴 الوقف، و● ● ● ثلاثة أهداف تنوّر واحداً واحداً",
+        "½ تنبيه «بع النصف» يؤمّن الصفقة وينقل الوقف إلى الدخول",
+        "🎯 الستررايك والانتهاء المناسبان لكل صفقة",
+        "📋 شاشة مراقبة لعشر شركات تختارها، كل صفقة بنتيجتها",
+        "",
+        "يعمل على أي فريم: من الدقيقة إلى اليومي والأسبوعي. مساعدك في التحليل، والقرار لك.",
+    ]
+    if walkthrough_url:
+        lines += ["", f"🎬 شاهد العرض الحي (دقيقتان):\n{walkthrough_url}"]
+    if youtube_url:
+        lines += ["", f"▶️ مقاطعنا اليومية على الصفقات:\n{youtube_url}"]
+    lines += [
+        "",
+        f"🎁 {_days_ar(trial_days)} مجانية كاملة على حسابك في TradingView، "
+        f"بلا بطاقة وبلا التزام. وبعدها {price_sar} ريال شهرياً لمن أحب الاستمرار.",
+        "",
+        "قبل التفعيل اقرأ الإقرار في الرسالة التالية 👇",
+    ]
+    return "\n".join(lines)
 
 
 def consent_terms_message() -> str:
-    """The legal gate: operator-approved wording, shown BEFORE any content.
+    """The legal gate: shown BEFORE any access is granted.
 
     The subscriber's explicit button press on this exact text is recorded
     with a timestamp — the platform's proof of informed consent. Static on
@@ -993,115 +995,123 @@ def consent_terms_message() -> str:
     """
     return (
         "إقرار وإخلاء مسؤولية:\n\n"
-        "تعريف الخدمة: منصة تعليمية آلية متخصصة حصراً في عقود خيارات صندوق "
-        "QQQ الأمريكي، تعرض دراسات حالة توضيحية موثقة بنتائجها كما وقعت "
-        "فعلاً — ربحاً أو خسارة.\n\n"
-        "١. جميع ما يُنشر هو محتوى تعليمي وتوضيحي حصراً، ولا يُعد بأي حال من "
-        "الأحوال توصية استثمارية، أو استشارة مالية، أو دعوة لشراء أو بيع أي "
-        "أداة مالية.\n\n"
-        "٢. تداول عقود الخيارات ينطوي على مخاطر عالية جداً قد تصل إلى خسارة "
+        "تعريف الخدمة: مِرصاد ٩ أداة تحليل فني برمجية (مؤشر) تعمل داخل منصة "
+        "TradingView، تعرض إشارات ومستويات محسوبة آلياً من بيانات الأسعار "
+        "لمساعدة المستخدم على قراءة الشارت.\n\n"
+        "١. كل ما يعرضه المؤشر من إشارات ومستويات وأهداف هو حساب آلي لأغراض "
+        "تعليمية وتحليلية حصراً، ولا يُعد بأي حال توصية استثمارية أو استشارة "
+        "مالية أو دعوة لشراء أو بيع أي أداة مالية.\n\n"
+        "٢. تداول الأسهم وعقود الخيارات ينطوي على مخاطر عالية قد تصل إلى خسارة "
         "كامل المبلغ، وقد لا يكون مناسباً لجميع الأشخاص.\n\n"
-        "٣. النتائج ودراسات الحالة السابقة — أياً كانت — لا تضمن ولا تشير "
-        "إلى نتائج مستقبلية مماثلة.\n\n"
-        "٤. أي قرار يتخذه المستخدم هو قراره الشخصي وعلى مسؤوليته الكاملة "
-        "وحده، ولا تتحمل هذه المنصة أي مسؤولية عن قرارات أو نتائج أي "
-        "مستخدم.\n\n"
-        "٥. المستخدم يعلم ويقر بأن المنصة لا تقدم أي خدمات وساطة أو تنفيذ "
-        "مالي، ولا تنفذ صفقات نيابة عن أحد، ولا تدير أموالاً أو محافظ — "
-        "وأي قرار عملي هو قرار مستقل يخص المستخدم وحده عبر حسابه الخاص "
-        "لدى وسيطه المالي المرخص.\n\n"
-        "٦. تنبيه أمني: قنواتنا الرسمية الوحيدة هي القناة والبوت المرسل لهذه "
-        "الرسالة فقط. لا نراسل أحداً بشكل خاص أبداً ولا نطلب تحويلات — "
-        "فاحذر أي جهة تنتحل اسمنا.\n\n"
+        "٣. النتائج السابقة للمؤشر، على الشارت أو في التقارير أو المقاطع، لا "
+        "تضمن ولا تشير إلى نتائج مستقبلية مماثلة.\n\n"
+        "٤. أي قرار يتخذه المستخدم هو قراره الشخصي وعلى مسؤوليته الكاملة وحده، "
+        "ولا تتحمل هذه المنصة أي مسؤولية عن قرارات أو نتائج أي مستخدم.\n\n"
+        "٥. المنصة لا تقدم أي خدمات وساطة أو تنفيذ، ولا تنفذ صفقات نيابة عن "
+        "أحد، ولا تدير أموالاً أو محافظ. والمؤشر لا ينفذ أي أمر في حساب "
+        "المستخدم.\n\n"
+        "٦. أسعار عقود الخيارات لا تُعرض داخل المؤشر لأن بيانات الخيارات في "
+        "TradingView متأخرة بلا وسيط مربوط؛ سعر العقد والتنفيذ من منصة "
+        "المستخدم لدى وسيطه المرخص.\n\n"
+        "٧. الوصول شخصي ويُمنح لاسم مستخدم واحد في TradingView يقدمه المستخدم "
+        "بنفسه. لا نطلب كلمة مرور ولا رمز دخول أبداً، ولا يجوز مشاركة الوصول.\n\n"
+        "٨. تنبيه أمني: قنواتنا الرسمية الوحيدة هي القناة والبوت المرسل لهذه "
+        "الرسالة. لا نراسل أحداً بشكل خاص أبداً ولا نطلب تحويلات، فاحذر أي جهة "
+        "تنتحل اسمنا.\n\n"
         "بالضغط على زر الموافقة أدناه، فأنت تقر بأنك قرأت ما سبق وفهمته "
         "ووافقت عليه:"
     )
 
 
 def consent_accepted_note(trial_days: int, expires_on: str = "", link: str = "") -> str:
-    """Post-consent confirmation. ``link`` is included only for the /start
-    path, where no pending join request exists to approve — the personal
-    single-use link IS their admission."""
+    """Post-consent confirmation: the free window is now running. ``link``
+    is a private-channel invite for deployments that still run one; the
+    indicator-only product leaves it empty."""
     lines = [
-        "✅ تم تسجيل إقرارك — أهلاً بك معنا 🎉",
-        f"بدأت فترة اطلاعك المجانية لمدة {_days_ar(trial_days)}"
+        "✅ تم تسجيل إقرارك، أهلاً بك في مِرصاد ٩ 🎉",
+        f"بدأت فترتك المجانية ({_days_ar(trial_days)})"
         + (f"، وتنتهي بتاريخ {expires_on}." if expires_on else "."),
     ]
     if link:
-        lines.append(
-            "\n🔗 هذا رابط دخولك الشخصي للقناة الخاصة (صالح لشخص واحد):\n" + link
-        )
+        lines.append("\n🔗 رابط دخولك الشخصي للقناة الخاصة (صالح لشخص واحد):\n" + link)
     return "\n".join(lines)
 
 
 def consent_declined_note() -> str:
     return (
-        "نحترم قرارك — لم يُسجَّل أي شيء.\n"
+        "نحترم قرارك، ولم يُسجَّل أي شيء.\n"
         "بابنا مفتوح متى غيّرت رأيك: أرسل /start من جديد وستصلك هذه "
         "الرسالة مرة أخرى."
     )
 
 
-def cards_guide_message() -> str:
-    """Post-consent orientation: how to read the channel at a glance."""
-    return (
-        "دليل ألوان البطاقات — احفظه وستقرأ القناة بنظرة واحدة 🎨\n\n"
-        "🔵 بطاقة زرقاء — حالة قيد التكوّن:\n"
-        "فرصة تتشكل ولم تصدر دراستها بعد. قد يكتمل شرطها فتصدر دراسة الحالة "
-        "كاملة، وقد لا يكتمل فلا يصدر شيء — والانضباط أهم من الحماس.\n\n"
-        "🌑 بطاقة كحلية (لون العلامة) — دراسة حالة جديدة:\n"
-        "صدرت الآن دراسة حالة بكامل تفاصيلها: العقد، محطات الدراسة، وقف "
-        "الحماية، ونموذج إدارة رأس المال.\n\n"
-        "🟢 بطاقة خضراء نابضة — مجريات الحالة:\n"
-        "نفس البطاقة تتجدد تلقائياً بالسعر الحالي كل ربع ساعة — تعرف تطور "
-        "المشهد بنظرة واحدة دون أي رسائل إضافية.\n\n"
-        "🟢 خضراء بالنتيجة — خلاصة رابحة | 🔴 حمراء — خلاصة خاسرة:\n"
-        "ننشر الرابح والخاسر بنفس الوضوح والتصميم، مع العبرة من كل خلاصة — "
-        "فالسجل الصادق هو منتجنا.\n\n"
-        "لست مضطراً لقراءة كل بطاقة — اللون يخبرك بالحالة من أول نظرة، "
-        "والتفاصيل لمن أراد التعمق 📊"
-    )
+def cards_guide_message(walkthrough_url: str = "", youtube_url: str = "") -> str:
+    """Orientation after the TradingView name is booked: how to find the
+    indicator once access lands, which frame to open, and which four alerts
+    to switch on. The live walkthrough carries the visual version."""
+    lines = [
+        "📖 دليل البداية، خطوة بخطوة:",
+        "",
+        "١. حين تصلك دعوة الوصول: افتح أي شارت في TradingView ← المؤشرات ← "
+        "«النصوص البرمجية بدعوة فقط» ← مِرصاد ٩ ← أضفه.",
+        "٢. الفريم المقترح للبداية ٣ دقائق للصفقات اليومية. يعمل على ٥ و١٥ "
+        "واليومي والأسبوعي بلا تغيير إعدادات.",
+        "٣. الإشارة «كول» أو «بوت» مع رقم الجودة. لا تدخل عندها، انتظر الخط "
+        "البرتقالي: الدخول عند لمسه.",
+        "٤. مع الدخول تُرسم لك الوقف والأهداف الثلاثة وخط بيع النصف. عند "
+        "«½ بع النصف» تبيع نصف الكمية والوقف ينتقل إلى الدخول.",
+        "٥. فعّل التنبيهات الأربعة من زر التنبيه على الشارت: كول، بوت، تأمين، "
+        "خروج، لتصلك على الجوال.",
+        "٦. شاشة المراقبة: من الإعدادات ضع شركاتك حتى عشر، وكل صفقة تبقى "
+        "بنتيجتها في صفها.",
+        "٧. سعر العقد من منصتك لا من الشارت؛ الشارت يعطيك الستررايك والانتهاء.",
+    ]
+    if walkthrough_url:
+        lines += ["", f"🎬 كل هذا مرئياً في العرض الحي:\n{walkthrough_url}"]
+    if youtube_url:
+        lines += ["", f"▶️ ومقاطع اليوم بيوم على اليوتيوب:\n{youtube_url}"]
+    return "\n".join(lines)
 
 
-def trial_status_message(days_left: int) -> str:
-    return (
-        f"فترة الاطلاع المجانية فعّالة — المتبقي {max(days_left, 0)} يوماً.\n"
-        "دراسات الحالة والتقارير تصلك تلقائياً داخل القناة، لا يلزمك أي إجراء."
-    )
+def trial_status_message(days_left: int, tv_username: str = "") -> str:
+    lines = [f"فترتك المجانية في مِرصاد ٩ فعّالة، المتبقي {_days_ar(max(days_left, 0))}."]
+    if tv_username:
+        lines.append(f"الوصول على حساب TradingView‏: {tv_username}")
+    else:
+        lines.append("لم يصلنا اسم المستخدم في TradingView بعد. أرسله هنا كما هو في ملفك.")
+    return "\n".join(lines)
 
 
 PAY_BUTTON = "💳 ادفع الآن"
 
 
-def plans_offer_message(ind_sar: int, ch_sar: int, vip_sar: int, days: int) -> str:
-    """The three-plan menu above the plan buttons — each button carries its
-    own signed pay URL, so the message stays clean of raw links."""
+def plans_offer_message(ind_sar: int, ch_sar: int = 0, vip_sar: int = 0, days: int = 30) -> str:
+    """The subscription offer above the pay button. One product now, the
+    indicator; the older plan arguments are accepted and ignored so callers
+    written for the three-plan era keep working."""
     return (
-        "💳 الباقات الشهرية — اختر ما يناسبك:\n\n"
-        f"📊 المؤشر — {ind_sar} ريال\n"
-        "مؤشر TradingView على شاشتك: الإشارات والأهداف والوقف ولوحة "
-        "النتائج الصادقة\n\n"
-        f"⭐️ القناة الخاصة — {ch_sar} ريال\n"
-        "دراسات الحالة كاملة بالعقود المختارة والمتابعة أولاً بأول\n\n"
-        f"👑 VIP — {vip_sar} ريال\n"
-        "الاثنان معاً — القناة والمؤشر بسعر واحد\n\n"
-        f"📦 كل باقة شهرية ({_days_ar(days)}) — بدون تجديد تلقائي\n"
-        "⚡ التفعيل تلقائي فور الدفع — يصلك التأكيد هنا خلال لحظات\n"
+        "💳 اشتراك مِرصاد ٩\n\n"
+        f"📊 {ind_sar} ريال لكل {_days_ar(days)}\n"
+        "المؤشر كاملاً على حساب TradingView الخاص بك: الإشارات، خط الدخول، "
+        "الوقف والأهداف، تنبيه بيع النصف، الستررايك، وشاشة المراقبة.\n\n"
+        "📦 بلا تجديد تلقائي، تدفع حين تريد الاستمرار\n"
+        "⚡ التفعيل تلقائي فور الدفع، ويصلك التأكيد هنا خلال لحظات\n"
         "🔒 دفع آمن عبر بوابة مرخصة من البنك المركزي السعودي\n\n"
-        "اضغط باقتك 👇"
+        "اضغط الزر 👇"
     )
 
 
 def renewal_reminder_message(expires_on: str, from_sar: int, with_button: bool) -> str:
-    """The two-days-left nudge — sent once per trial window. The pay URLs
-    ride inline buttons, never the text."""
+    """The two-days-left nudge — sent once per trial window. The pay URL
+    rides an inline button, never the text."""
     lines = [
-        f"⏳ تنبيه ودّي: تنتهي فترة اطلاعك المجانية بتاريخ {expires_on}.",
+        f"⏳ تنبيه ودّي: تنتهي فترتك المجانية في مِرصاد ٩ بتاريخ {expires_on}، "
+        "وبعدها يُزال الوصول من TradingView تلقائياً.",
     ]
     if with_button:
         lines.append(
-            f"\nللاستمرار بلا انقطاع اختر باقتك (تبدأ من {from_sar} ريال شهرياً) — "
-            "التفعيل تلقائي فور الدفع 👇"
+            f"\nللاستمرار بلا انقطاع: {from_sar} ريال شهرياً، والتفعيل فوري بعد "
+            "الدفع 👇"
         )
     else:
         lines.append("\nتفاصيل الاستمرار ستصلك قبل انتهاء الفترة.")
@@ -1109,20 +1119,31 @@ def renewal_reminder_message(expires_on: str, from_sar: int, with_button: bool) 
 
 
 def tv_username_prompt() -> str:
-    """How a subscriber activates the indicator half of their access."""
+    """The one thing the trial needs: their TradingView name."""
     return (
-        "🖥️ لتفعيل مؤشر TradingView على حسابك:\n"
-        "أرسل هنا كلمة «مؤشر» ثم اسم المستخدم الخاص بك في TradingView — "
-        "مثال:\n\nمؤشر Ahmed_Trader\n\n"
-        "وستصلك دعوة الوصول داخل TradingView من حسابنا الرسمي MirsadTech "
-        "خلال ساعات (التفعيل يدوي من إدارة المنصة)."
+        "🖥️ الخطوة الأخيرة: أرسل هنا اسم المستخدم الخاص بك في TradingView كما "
+        "يظهر في ملفك، بالحروف الإنجليزية. مثال:\n\nAhmed_Trader\n\n"
+        "تصلك دعوة الوصول داخل TradingView من حسابنا الرسمي MirsadTech خلال "
+        "ساعات. لا نطلب كلمة مرور ولا رمز دخول أبداً."
+    )
+
+
+def tv_username_booked_note(username: str, expires_on: str = "") -> str:
+    return (
+        f"✅ سُجّل اسمك في TradingView‏: {username}\n"
+        "ستصلك دعوة الوصول داخل TradingView خلال ساعات"
+        + (f"، وفترتك المجانية حتى {expires_on}." if expires_on else ".")
+        + "\nفي انتظارها، اقرأ دليل البداية في الرسالة التالية 👇"
     )
 
 
 def farewell_message(has_buttons: bool) -> str:
-    text = "انتهت فترة الاطلاع المجانية في بوت عقود الخيارات — شكراً لبقائك معنا 🙏"
+    text = (
+        "انتهت فترتك المجانية في مِرصاد ٩ وأُزيل الوصول من TradingView. "
+        "شكراً لبقائك معنا 🙏"
+    )
     if has_buttons:
-        text += "\n\nخياراتك بضغطة زر 👇"
+        text += "\n\nللاستمرار أو لمتابعة مقاطعنا، خياراتك بضغطة زر 👇"
     return text
 
 

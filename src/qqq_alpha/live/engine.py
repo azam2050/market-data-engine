@@ -1448,6 +1448,27 @@ class LiveEngine:
                 f"النشطون الآن: {active}"
             )
 
+    def _walkthrough_url(self) -> str:
+        """The live walkthrough served from our own domain, or "" until the
+        public URL is configured."""
+        base = (self.settings.public_base_url or "").rstrip("/")
+        return f"{base}/mirsad" if base else ""
+
+    def _pitch(self) -> str:
+        from qqq_alpha.live.telegram import welcome_pitch_message
+
+        return welcome_pitch_message(
+            self.settings.trial_days,
+            self.settings.price_indicator_sar,
+            self._walkthrough_url(),
+            self.settings.youtube_url,
+        )
+
+    def _guide(self) -> str:
+        from qqq_alpha.live.telegram import cards_guide_message
+
+        return cards_guide_message(self._walkthrough_url(), self.settings.youtube_url)
+
     async def _handle_join_request(self, request) -> None:
         """The private channel's front door — now a consent gate.
 
@@ -1460,7 +1481,6 @@ class LiveEngine:
             CONSENT_BUTTONS,
             consent_terms_message,
             trial_status_message,
-            welcome_pitch_message,
         )
 
         private = self.settings.telegram_private_channel_id
@@ -1492,12 +1512,7 @@ class LiveEngine:
             return
 
         # first-timer: the request stays pending; the verdict is theirs to press
-        await self.commands.send(
-            request.user_id,
-            welcome_pitch_message(
-                self.settings.trial_days, self.settings.price_indicator_sar
-            ),
-        )
+        await self.commands.send(request.user_id, self._pitch())
         delivered = await self.commands.send_with_buttons(
             request.user_id, consent_terms_message(), CONSENT_BUTTONS
         )
@@ -1513,10 +1528,10 @@ class LiveEngine:
             CONSENT_YES,
             PREVIEW_NO,
             PREVIEW_YES,
-            cards_guide_message,
             consent_accepted_note,
             consent_declined_note,
             consent_terms_message,
+            tv_username_prompt,
         )
 
         if self.commands is None:
@@ -1529,7 +1544,7 @@ class LiveEngine:
             return
 
         private = self.settings.telegram_private_channel_id
-        if press.data not in (CONSENT_YES, CONSENT_NO) or not private:
+        if press.data not in (CONSENT_YES, CONSENT_NO):
             await self.commands.answer_button(press.callback_id)
             return
 
@@ -1537,7 +1552,8 @@ class LiveEngine:
         name = press.username or press.first_name or press.user_id
 
         if press.data == CONSENT_NO:
-            await self.commands.decline_join_request(private, press.user_id)
+            if private:
+                await self.commands.decline_join_request(private, press.user_id)
             await self.commands.answer_button(press.callback_id, "لم يُسجَّل شيء")
             await self.commands.replace_message(
                 press.chat_id, press.message_id,
@@ -1561,7 +1577,9 @@ class LiveEngine:
             return
 
         link = ""
-        if not await self.commands.approve_join_request(private, press.user_id):
+        if private and not await self.commands.approve_join_request(private, press.user_id):
+            # a channel deployment: no pending request means /start brought
+            # them here, so a personal single-use link is their admission
             link = (
                 await self.commands.create_invite_link(
                     private, name=f"consent-{press.user_id}"
@@ -1600,9 +1618,8 @@ class LiveEngine:
                 self.settings.trial_days, expires.date().isoformat(), link
             ),
         )
-        await self.commands.send(press.user_id, cards_guide_message())
-        from qqq_alpha.live.telegram import tv_username_prompt
-
+        # the indicator needs one thing from them: their TradingView name.
+        # The guide follows once it lands, so the steps arrive in order.
         await self.commands.send(press.user_id, tv_username_prompt())
         active = len(self.memory.active_subscriber_ids(now))
         await self.notifier.note(
@@ -1617,7 +1634,6 @@ class LiveEngine:
             CONSENT_BUTTONS,
             consent_terms_message,
             trial_status_message,
-            welcome_pitch_message,
         )
 
         if self.settings.trial_days <= 0 or self.commands is None:
@@ -1640,12 +1656,7 @@ class LiveEngine:
             self.memory.record_start_language(
                 message.chat_id, message.language or "", now
             )
-            await self.commands.send(
-                message.chat_id,
-                welcome_pitch_message(
-                    self.settings.trial_days, self.settings.price_indicator_sar
-                ),
-            )
+            await self.commands.send(message.chat_id, self._pitch())
             delivered = await self.commands.send_with_buttons(
                 message.chat_id, consent_terms_message(), CONSENT_BUTTONS
             )
@@ -1669,7 +1680,7 @@ class LiveEngine:
         expires = datetime.fromisoformat(row["expires_at"])
         if row["status"] == "trial" and expires > now:
             days_left = (expires - now).days
-            status = trial_status_message(days_left)
+            status = trial_status_message(days_left, row.get("tv_username") or "")
             if private:
                 link = await self.commands.create_invite_link(
                     private, name=f"status-{message.chat_id}"
@@ -1692,29 +1703,38 @@ class LiveEngine:
         the format instead of falling through to the status message).
         """
         parts = message.text.strip().split()
-        if not parts or parts[0] not in ("مؤشر", "المؤشر", "/tv", "tv"):
+        if not parts:
+            return False
+        keyword = parts[0] in ("مؤشر", "المؤشر", "/tv", "tv")
+        # the prompt asks for the bare name, so a lone token that looks like
+        # a TradingView name is taken as one while none is booked yet
+        bare = (
+            len(parts) == 1
+            and not row.get("tv_username")
+            and not parts[0].startswith("/")
+            and self._TV_USERNAME.match(parts[0].lstrip("@")) is not None
+        )
+        if not keyword and not bare:
             return False
         if self.commands is None:
             return True
-        username = parts[1].lstrip("@") if len(parts) > 1 else ""
+        username = (parts[1] if keyword and len(parts) > 1 else parts[0] if bare else "").lstrip("@")
         if not self._TV_USERNAME.match(username):
             await self.commands.send(
                 message.chat_id,
-                "أرسل الكلمة «مؤشر» ثم اسم المستخدم الخاص بك في TradingView "
-                "بالحروف الإنجليزية — مثال:\n\nمؤشر Ahmed_Trader",
+                "أرسل اسم المستخدم الخاص بك في TradingView بالحروف الإنجليزية "
+                "كما يظهر في ملفك، مثال:\n\nAhmed_Trader",
             )
             return True
+        from qqq_alpha.live.telegram import tv_username_booked_note
+
         self.memory.set_tv_username(message.chat_id, username)
-        await self.commands.send(
-            message.chat_id,
-            f"✅ تم تسجيل اسمك في TradingView‏: {username}\n"
-            "ستصلك دعوة الوصول داخل TradingView من حسابنا الرسمي MirsadTech "
-            "خلال ساعات — التفعيل يدوي من إدارة المنصة.",
-        )
         expires_on = str(row.get("expires_at") or "")[:10]
+        await self.commands.send(message.chat_id, tv_username_booked_note(username, expires_on))
+        await self.commands.send(message.chat_id, self._guide())
         name = message.username or message.first_name or message.chat_id
         await self.notifier.note(
-            f"🖥️ امنح صلاحية المؤشر في TradingView إلى: {username}\n"
+            f"🖥️ امنح صلاحية مِرصاد ٩ في TradingView إلى: {username}\n"
             f"(المشترك {name} — نافذته حتى {expires_on})\n"
             "أرسل «المؤشرات» لقائمة المنح والإزالة كاملة."
         )
@@ -1727,7 +1747,7 @@ class LiveEngine:
         first = text.strip().split()[0].lower() if text.strip() else ""
         return first in cls._PAY_WORDS
 
-    def _pay_link(self, chat_id: str, plan: str = "vip") -> str:
+    def _pay_link(self, chat_id: str, plan: str = "indicator") -> str:
         """The subscriber's personal payment URL, or "" while payments are
         dark — messages simply omit the line instead of pointing at a 404."""
         from qqq_alpha.payments import pay_link
@@ -1735,17 +1755,15 @@ class LiveEngine:
         return pay_link(self.settings, str(chat_id), plan) or ""
 
     def _plan_buttons(self, chat_id: str) -> list[tuple[str, str]]:
-        """One inline button per plan, each carrying its own signed pay URL.
-        Empty while payments are dark."""
-        from qqq_alpha.payments import PLAN_LABELS, plan_price_sar
+        """The pay button: one product, the indicator, with its signed
+        personal URL. Empty while payments are dark."""
+        from qqq_alpha.payments import plan_price_sar
 
-        buttons: list[tuple[str, str]] = []
-        for code in ("indicator", "channel", "vip"):
-            link = self._pay_link(chat_id, code)
-            if link:
-                price = plan_price_sar(self.settings, code)
-                buttons.append((f"{PLAN_LABELS[code]} — {price} ريال", link))
-        return buttons
+        link = self._pay_link(chat_id, "indicator")
+        if not link:
+            return []
+        price = plan_price_sar(self.settings, "indicator")
+        return [(f"💳 اشترك — {price} ريال شهرياً", link)]
 
     async def _send_farewell(self, chat_id: str) -> None:
         """The end-of-trial goodbye: the plan menu and the public-channel door."""
@@ -1754,6 +1772,8 @@ class LiveEngine:
         if self.commands is None:
             return
         buttons = self._plan_buttons(chat_id)
+        if self.settings.youtube_url:
+            buttons.append(("▶️ مقاطعنا اليومية", self.settings.youtube_url))
         if self.settings.post_trial_channel_url:
             buttons.append(("📢 القناة العامة المجانية", self.settings.post_trial_channel_url))
         if buttons:
@@ -2134,25 +2154,20 @@ class LiveEngine:
             from qqq_alpha.live.telegram import (
                 PREVIEW_NO,
                 PREVIEW_YES,
-                cards_guide_message,
                 consent_terms_message,
-                welcome_pitch_message,
+                tv_username_prompt,
             )
 
             if self.commands is not None:
                 admin = str(self.settings.telegram_chat_id)
-                await self.commands.send(
-                    admin,
-                    welcome_pitch_message(
-                        self.settings.trial_days, self.settings.price_indicator_sar
-                    ),
-                )
+                await self.commands.send(admin, self._pitch())
                 await self.commands.send_with_buttons(
                     admin,
                     consent_terms_message(),
                     [("✅ أوافق وأقر", PREVIEW_YES), ("❌ لا أوافق", PREVIEW_NO)],
                 )
-                await self.commands.send(admin, cards_guide_message())
+                await self.commands.send(admin, tv_username_prompt())
+                await self.commands.send(admin, self._guide())
                 for caption, png in self._preview_cards():
                     await self.commands.send_photo(admin, png, caption)
             return

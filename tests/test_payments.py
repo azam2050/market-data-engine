@@ -214,9 +214,9 @@ def test_pay_page_renders_the_channel_brand_for_a_signed_link(tmp_path):
     page = client.get(f"/pay?u=555&t={token}")
     assert page.status_code == 200
     assert settings.brand_name in page.text
-    # no plan in the link falls back to the VIP bundle
-    assert "29900" in page.text  # halalas handed to the form
-    assert '"vip"' in page.text  # the plan rides the form metadata
+    # no plan in the link falls back to the indicator, the product
+    assert str(settings.price_indicator_sar * 100) in page.text  # halalas handed to the form
+    assert '"indicator"' in page.text  # the plan rides the form metadata
     assert settings.statement_name in page.text  # the bank-statement warning
 
     indicator = client.get(f"/pay?u=555&t={token}&p=indicator")
@@ -343,19 +343,13 @@ async def test_subscriber_can_ask_for_their_pay_link(tmp_path):
     await engine._handle_subscriber(InboundMessage("555", "اشتراك"))
     assert engine.commands.buttoned, "the offer must carry the plan buttons"
     _, text, buttons = engine.commands.buttoned[-1]
-    # the three prices come from settings, so a repricing does not need a
-    # test edit — what matters is that each plan quotes its own number
-    for price in (
-        engine_settings.price_indicator_sar,
-        engine_settings.price_channel_sar,
-        engine_settings.price_vip_sar,
-    ):
-        assert str(price) in text
+    # the price comes from settings, so a repricing does not need a test edit
+    assert str(engine_settings.price_indicator_sar) in text
     assert "ريال" in text
-    # three plans, three signed personal links, each naming its plan
+    # one product, one signed personal link, naming the indicator plan
     plan_urls = [value for _label, value in buttons if "/pay?u=555&t=" in value]
-    assert len(plan_urls) == 3
-    assert {u.rsplit("&p=", 1)[1] for u in plan_urls} == {"indicator", "channel", "vip"}
+    assert len(plan_urls) == 1
+    assert plan_urls[0].rsplit("&p=", 1)[1] == "indicator"
 
     # a stranger asking gets silence — no probing the bot for links
     engine.commands.buttoned.clear()

@@ -455,8 +455,10 @@ def test_bridge_retires_a_contract_that_expired_without_an_exit() -> None:
 
     async def flow() -> None:
         await bridge.handle(ENTRY_JSON)
-        # the Friday expiry passed at the bell with no exit alert
-        await bridge.tick(_ny(2026, 9, 4, 16, 5))
+        # the contract's own expiry passed at the bell with no exit alert —
+        # read off the booked trade so the test does not age with the calendar
+        exp = next(iter(bridge._open.values())).expiry
+        await bridge.tick(_ny(exp.year, exp.month, exp.day, 16, 5))
 
     _run(flow())
     assert not bridge._open

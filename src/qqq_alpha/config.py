@@ -143,6 +143,9 @@ class Settings(BaseSettings):
     # products at once: the private channel AND the TradingView indicator.
     trial_days: int = 7
     post_trial_channel_url: str = ""
+    # the daily-video channel the bot points people at (welcome, guide,
+    # farewell). Empty ⇒ the line is simply omitted.
+    youtube_url: str = ""
     # the three monthly plans, priced independently so Railway can reprice
     # without a deploy. Codes: indicator | channel | vip (both products).
     price_indicator_sar: int = 199
@@ -164,7 +167,7 @@ class Settings(BaseSettings):
     # what one payment buys, in days
     subscription_days: int = 30
     # the identity on the payment page — the channel's, never the gateway's
-    brand_name: str = "عقود الخيارات — القناة التعليمية"
+    brand_name: str = "مِرصاد ٩"
     brand_logo_url: str = ""
     # what the payer's bank SMS/statement will show (the Moyasar account's
     # registered trade name) — stated on the page so nobody mistakes their

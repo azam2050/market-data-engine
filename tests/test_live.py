@@ -769,7 +769,7 @@ async def test_start_shows_pitch_and_terms_but_registers_nothing(settings, tmp_p
     assert engine.memory.subscriber("555") is None  # no consent, no row
     assert engine.commands.sent and engine.commands.sent[0][0] == "555"
     pitch = engine.commands.sent[0][1]
-    assert "QQQ" in pitch and "30" in pitch  # specialization + trial length
+    assert "مِرصاد" in pitch and "30" in pitch  # the product + trial length
     # the entry-plan price is stated up front, whatever it is repriced to
     assert str(settings.price_indicator_sar) in pitch
     # the terms travel separately, with the consent buttons attached
