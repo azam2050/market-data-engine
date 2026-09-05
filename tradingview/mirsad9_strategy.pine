@@ -47,6 +47,7 @@ boxN    = input.int(30, "صندوق العرضي: آخر N شمعة", minval = 1
 coolN   = input.int(2, "راحة بعد كل إشارة (شموع) — لا انقلاب قبلها", minval = 0, maxval = 30, group = gF, tooltip = "كانت ٨ وحجبت انعكاسات صحيحة بعد وقف. الاختبار مع المنطقة والتأكيد: الراحة الطويلة لا ترفع النسبة، فصارت شمعتين فقط")
 htfOn   = input.bool(false, "حجب الإشارة ضد الفريم الأكبر (متوسط ٩ و٢١ على ٣× الفريم)", group = gF, tooltip = "مطفأ: اتجاه الفريم الأكبر يدخل في درجة الجودة فقط ولا يحجب. مشتغل: يحجب كل إشارة ضده — يقطع نصف الإشارات ويتأخر عن الانعكاسات، ورفع النسبة قليلاً في الاختبار")
 skipOpen = input.int(1, "تجاهل أول N شمعة في الجلسة", minval = 0, maxval = 6, group = gF)
+lateN    = input.int(15, "لا إشارة في آخر N دقيقة من الجلسة (٠ = حتى الإغلاق)", minval = 0, maxval = 120, step = 5, group = gF, tooltip = "٠ يترك الإشارات حتى الجرس، ٦٠ يوقف الساعة الأخيرة كاملة. الافتراضي ١٥ دقيقة. على الفريم اليومي والأسبوعي لا أثر له")
 
 gS = "الوقف والأهداف والتأمين"
 stopX  = input.float(1.5, "الوقف = × ATR من الدخول", minval = 0.5, maxval = 3.0, step = 0.25, group = gS)
@@ -97,9 +98,10 @@ f_core() =>
     boxL = ta.lowest(low, boxN)[1]
     rng = high - low
     body = close - open
-    // موضع الشمعة في الجلسة
-    barDay = (hour(time, "America/New_York") * 60 + minute(time, "America/New_York") - 570) / math.max(timeframe.in_seconds() / 60, 1)
-    barsToday = int(math.max(barDay, 0))
+    // موضع الشمعة في الجلسة — على اليومي والأسبوعي لا جلسة: كل الشموع متاحة للمقارنة
+    intraday = timeframe.isintraday
+    barDay = intraday ? (hour(time, "America/New_York") * 60 + minute(time, "America/New_York") - 570) / math.max(timeframe.in_seconds() / 60, 1) : 1000.0
+    barsToday = intraday ? int(math.max(barDay, 0)) : brkN
     // قمة/قاع الشموع السابقة داخل الجلسة فقط: لا تُقارن شمعة الصباح بشموع الأمس
     hiN = high[1]
     loN = low[1]
@@ -110,7 +112,7 @@ f_core() =>
     // مدى شمعة الافتتاح
     var float orHi = na
     var float orLo = na
-    if session.isfirstbar_regular
+    if intraday and session.isfirstbar_regular
         orHi := high
         orLo := low
     // شمعة الاندفاع
@@ -120,8 +122,8 @@ f_core() =>
     revL = revK > 0 and rng > 0 and body >= revK * a and (close - low) / rng >= closeP and close > high[1]
     revS = revK > 0 and rng > 0 and -body >= revK * a and (high - close) / rng >= closeP and close < low[1]
     // كسر مدى الافتتاح: أول إغلاق قوي فوق قمة شمعة الافتتاح (أو تحت قاعها) في أول N شمعة
-    orbL = orbN > 0 and barsToday >= 1 and barsToday <= orbN and not na(orHi) and rng > 0 and body >= bodyK * a and (close - low) / rng >= closeP and close > orHi and close[1] <= orHi
-    orbS = orbN > 0 and barsToday >= 1 and barsToday <= orbN and not na(orLo) and rng > 0 and -body >= bodyK * a and (high - close) / rng >= closeP and close < orLo and close[1] >= orLo
+    orbL = intraday and orbN > 0 and barsToday >= 1 and barsToday <= orbN and not na(orHi) and rng > 0 and body >= bodyK * a and (close - low) / rng >= closeP and close > orHi and close[1] <= orHi
+    orbS = intraday and orbN > 0 and barsToday >= 1 and barsToday <= orbN and not na(orLo) and rng > 0 and -body >= bodyK * a and (high - close) / rng >= closeP and close < orLo and close[1] >= orLo
     side0 = impL or revL or orbL ? 1 : impS or revS or orbS ? -1 : 0
     // الجودة من ١٠٠
     margin = side0 == 1 ? close - hiN : side0 == -1 ? loN - close : 0.0
@@ -131,8 +133,9 @@ f_core() =>
     boxW = boxH - boxL
     insideBox = close > boxL + 0.25 * boxW and close < boxH - 0.25 * boxW
     sideways = adxOn and adx < adxLvl and insideBox
-    // الجلسة: لا أول شمعة (فجوة لا حركة) ولا آخر ربع ساعة
-    lateBar = hour(time, "America/New_York") == 15 and minute(time, "America/New_York") >= 45
+    // الجلسة: لا أول شمعة (فجوة لا حركة) ولا آخر N دقيقة — العميل يختار N
+    minsNY = hour(time, "America/New_York") * 60 + minute(time, "America/New_York")
+    lateBar = intraday and lateN > 0 and minsNY >= 960 - lateN
     // الراحة: لا إشارة (بأي اتجاه) خلال N شموع بعد إشارة مقبولة
     var int lastBar = -100000
     var int lastSide = 0
@@ -203,13 +206,13 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     var int closedAt = -100000
     closed = false
     secNow = false
-    // منطقة الأمس لا تعيش في جلسة اليوم
-    if session.isfirstbar_regular
+    // منطقة الأمس لا تعيش في جلسة اليوم (على الفريم اليومي والأسبوعي المنطقة تعيش بعدد الشموع)
+    if timeframe.isintraday and session.isfirstbar_regular
         pSide := 0
         zSide := 0
     trailLo = ta.lowest(low, trailN)
     trailHi = ta.highest(high, trailN)
-    lastBar = eodOut and hour(time, "America/New_York") == 15 and minute(time, "America/New_York") >= 55
+    lastBar = eodOut and timeframe.isintraday and hour(time, "America/New_York") == 15 and minute(time, "America/New_York") >= 55
     // الدخول الأول: لمس المنطقة خلال صلاحيتها
     touched = barstate.isconfirmed and pos == 0 and pend == 0 and pSide != 0 and bar_index <= pExp and (pSide == 1 ? low <= pLvl : high >= pLvl)
     // الدخول الثاني: ارتداد إلى المنطقة بعد صفقة أولى لم تُوقف
