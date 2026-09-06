@@ -82,6 +82,7 @@ showWatch = input.bool(true, "إظهار شاشة المراقبة", group = gW)
 watchN = input.int(6, "عدد الرموز المعروضة", minval = 1, maxval = 10, group = gW)
 compactWatch = input.bool(false, "مختصرة (للتابلت): الرمز، الصفقة، الستررايك، الأهداف، ½", group = gW)
 watchPos = input.string("يسار الوسط", "مكانها", options = ["يسار الوسط", "أعلى اليسار", "أسفل اليسار", "أعلى الوسط"], group = gW)
+watchBars = input.int(600, "عمق التاريخ لكل رمز مراقَب (شموع)", minval = 200, maxval = 5000, step = 100, group = gW, tooltip = "كل رمز في الشاشة يُحسب على آخر هذا العدد من الشموع فقط. الرقم الصغير يوفّر الذاكرة ويمنع خطأ Memory limits exceeded، والرمز على الشارت نفسه يُحسب على تاريخه كاملاً")
 w1s = input.symbol("NASDAQ:QQQ", "١", group = gW, inline = "w1")
 w1t = input.timeframe("3", "", group = gW, inline = "w1")
 w2s = input.symbol("AMEX:SPY", "٢", group = gW, inline = "w2")
@@ -536,8 +537,8 @@ f_tf() =>
     pdx = pd != 0 ? pd : ps != 0 ? ps * 2 : (zs != 0 and zu == 1 and not zst) ? zs * 3 : 0
     [p, pdx, sec ? 1 : 0, stt, raw, blk, ft > 0 ? 10.0 * fw / ft : na]
 
-[tp3, td3, tc3, ts3, tr3, tb3, tf3] = request.security(syminfo.tickerid, "3", f_tf(), lookahead = barmerge.lookahead_off)
-[tp5, td5, tc5, ts5, tr5, tb5, tf5] = request.security(syminfo.tickerid, "5", f_tf(), lookahead = barmerge.lookahead_off)
+[tp3, td3, tc3, ts3, tr3, tb3, tf3] = request.security(syminfo.tickerid, "3", f_tf(), lookahead = barmerge.lookahead_off, calc_bars_count = watchBars)
+[tp5, td5, tc5, ts5, tr5, tb5, tf5] = request.security(syminfo.tickerid, "5", f_tf(), lookahead = barmerge.lookahead_off, calc_bars_count = watchBars)
 
 bigCard = cardIn == "البطاقة الكبيرة (ب)"
 ribbon = cardIn == "الشريط العلوي (أ)"
@@ -625,16 +626,18 @@ f_watch() =>
     sd = p != 0 ? p : zs != 0 ? zs : ps != 0 ? ps : 0
     [p, pdx, sec ? 1 : 0, stt, bi, h, s, qt, e, hf ? 1 : 0, q3, ft > 0 ? 10.0 * fw / ft : na, lvl, sd, close, nt, x1p, x1r, x1t, x1b, lr, ex, lsd, bar_index - cat]
 
-[p1, d1, c1, l1, n1, h1, s1, g1, e1, f1, k1, m1, v1, o1, x1c, t1n, a1p, a1r, a1t, a1b, z1r, z1t, z1s, z1g] = request.security(w1s, w1t, f_watch(), lookahead = barmerge.lookahead_off)
-[p2, d2, c2, l2, n2, h2, s2, g2, e2, f2, k2, m2, v2, o2, x2c, t2n, a2p, a2r, a2t, a2b, z2r, z2t, z2s, z2g] = request.security(w2s, w2t, f_watch(), lookahead = barmerge.lookahead_off)
-[p3, d3, c3, l3, n3, h3, s3, g3, e3, f3, k3, m3, v3, o3, x3c, t3n, a3p, a3r, a3t, a3b, z3r, z3t, z3s, z3g] = request.security(w3s, w3t, f_watch(), lookahead = barmerge.lookahead_off)
-[p4, d4, c4, l4, n4, h4, s4, g4, e4, f4, k4, m4, v4, o4, x4c, t4n, a4p, a4r, a4t, a4b, z4r, z4t, z4s, z4g] = request.security(w4s, w4t, f_watch(), lookahead = barmerge.lookahead_off)
-[p5, d5, c5, l5, n5, h5, s5, g5, e5, f5, k5, m5, v5, o5, x5c, t5n, a5p, a5r, a5t, a5b, z5r, z5t, z5s, z5g] = request.security(w5s, w5t, f_watch(), lookahead = barmerge.lookahead_off)
-[p6, d6, c6, l6, n6, h6, s6, g6, e6, f6, k6, m6, v6, o6, x6c, t6n, a6p, a6r, a6t, a6b, z6r, z6t, z6s, z6g] = request.security(w6s, w6t, f_watch(), lookahead = barmerge.lookahead_off)
-[p7, d7, c7, l7, n7, h7, s7, g7, e7, f7, k7, m7, v7, o7, x7c, t7n, a7p, a7r, a7t, a7b, z7r, z7t, z7s, z7g] = request.security(w7s, w7t, f_watch(), lookahead = barmerge.lookahead_off)
-[p8, d8, c8, l8, n8, h8, s8, g8, e8, f8, k8, m8, v8, o8, x8c, t8n, a8p, a8r, a8t, a8b, z8r, z8t, z8s, z8g] = request.security(w8s, w8t, f_watch(), lookahead = barmerge.lookahead_off)
-[p9, d9, c9, l9, n9, h9, s9, g9, e9, f9, k9, m9, v9, o9, x9c, t9n, a9p, a9r, a9t, a9b, z9r, z9t, z9s, z9g] = request.security(w9s, w9t, f_watch(), lookahead = barmerge.lookahead_off)
-[p10, d10, c10, l10, n10, h10, s10, g10, e10, f10, k10, m10, v10, o10, x10c, t10n, a10p, a10r, a10t, a10b, z10r, z10t, z10s, z10g] = request.security(w10s, w10t, f_watch(), lookahead = barmerge.lookahead_off)
+// كل رمز مراقَب يُحسب على آخر watchBars شمعة فقط، والصفوف فوق watchN تُطلب بشمعة واحدة —
+// عشر نسخ من المحرك على التاريخ الكامل هي ما كان يتجاوز حد الذاكرة
+[p1, d1, c1, l1, n1, h1, s1, g1, e1, f1, k1, m1, v1, o1, x1c, t1n, a1p, a1r, a1t, a1b, z1r, z1t, z1s, z1g] = request.security(w1s, w1t, f_watch(), lookahead = barmerge.lookahead_off, calc_bars_count = showWatch and watchN >= 1 ? watchBars : 1)
+[p2, d2, c2, l2, n2, h2, s2, g2, e2, f2, k2, m2, v2, o2, x2c, t2n, a2p, a2r, a2t, a2b, z2r, z2t, z2s, z2g] = request.security(w2s, w2t, f_watch(), lookahead = barmerge.lookahead_off, calc_bars_count = showWatch and watchN >= 2 ? watchBars : 1)
+[p3, d3, c3, l3, n3, h3, s3, g3, e3, f3, k3, m3, v3, o3, x3c, t3n, a3p, a3r, a3t, a3b, z3r, z3t, z3s, z3g] = request.security(w3s, w3t, f_watch(), lookahead = barmerge.lookahead_off, calc_bars_count = showWatch and watchN >= 3 ? watchBars : 1)
+[p4, d4, c4, l4, n4, h4, s4, g4, e4, f4, k4, m4, v4, o4, x4c, t4n, a4p, a4r, a4t, a4b, z4r, z4t, z4s, z4g] = request.security(w4s, w4t, f_watch(), lookahead = barmerge.lookahead_off, calc_bars_count = showWatch and watchN >= 4 ? watchBars : 1)
+[p5, d5, c5, l5, n5, h5, s5, g5, e5, f5, k5, m5, v5, o5, x5c, t5n, a5p, a5r, a5t, a5b, z5r, z5t, z5s, z5g] = request.security(w5s, w5t, f_watch(), lookahead = barmerge.lookahead_off, calc_bars_count = showWatch and watchN >= 5 ? watchBars : 1)
+[p6, d6, c6, l6, n6, h6, s6, g6, e6, f6, k6, m6, v6, o6, x6c, t6n, a6p, a6r, a6t, a6b, z6r, z6t, z6s, z6g] = request.security(w6s, w6t, f_watch(), lookahead = barmerge.lookahead_off, calc_bars_count = showWatch and watchN >= 6 ? watchBars : 1)
+[p7, d7, c7, l7, n7, h7, s7, g7, e7, f7, k7, m7, v7, o7, x7c, t7n, a7p, a7r, a7t, a7b, z7r, z7t, z7s, z7g] = request.security(w7s, w7t, f_watch(), lookahead = barmerge.lookahead_off, calc_bars_count = showWatch and watchN >= 7 ? watchBars : 1)
+[p8, d8, c8, l8, n8, h8, s8, g8, e8, f8, k8, m8, v8, o8, x8c, t8n, a8p, a8r, a8t, a8b, z8r, z8t, z8s, z8g] = request.security(w8s, w8t, f_watch(), lookahead = barmerge.lookahead_off, calc_bars_count = showWatch and watchN >= 8 ? watchBars : 1)
+[p9, d9, c9, l9, n9, h9, s9, g9, e9, f9, k9, m9, v9, o9, x9c, t9n, a9p, a9r, a9t, a9b, z9r, z9t, z9s, z9g] = request.security(w9s, w9t, f_watch(), lookahead = barmerge.lookahead_off, calc_bars_count = showWatch and watchN >= 9 ? watchBars : 1)
+[p10, d10, c10, l10, n10, h10, s10, g10, e10, f10, k10, m10, v10, o10, x10c, t10n, a10p, a10r, a10t, a10b, z10r, z10t, z10s, z10g] = request.security(w10s, w10t, f_watch(), lookahead = barmerge.lookahead_off, calc_bars_count = showWatch and watchN >= 10 ? watchBars : 1)
 
 // ستررايك كل رمز مراقَب: يُبنى من مستواه. سعره الحي يظهر على شارت الرمز نفسه لا هنا
 f_wOpt(string sym, int sd, float lvl, float px) =>
