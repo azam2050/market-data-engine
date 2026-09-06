@@ -1437,9 +1437,86 @@ class LiveEngine:
         # The guide follows once it lands, so the steps arrive in order.
         await self.commands.send(press.user_id, tv_username_prompt())
         active = len(self.memory.active_subscriber_ids(now))
-        await self.notifier.note(
+        await self._tell_team(
             f"👤 مشترك جديد أقرّ بالشروط وانضم: {name} — النشطون الآن: {active}"
         )
+
+    # ------------------------------------------------------------ the assistant
+    def _assistant_username(self) -> str:
+        stored = self.memory.app_setting("assistant_username")
+        return (stored or self.settings.telegram_assistant_username or "").lstrip("@").lower()
+
+    def _assistant_chat_id(self) -> str:
+        return self.memory.app_setting("assistant_chat_id")
+
+    def _is_assistant(self, message) -> bool:
+        """The assistant is known by username; their chat id is remembered
+        the first time they write, because Telegram lets a bot message a
+        person only after that person has messaged the bot."""
+        wanted = self._assistant_username()
+        if not wanted:
+            return False
+        if str(message.chat_id) == self._assistant_chat_id():
+            return True
+        if (message.username or "").lstrip("@").lower() == wanted:
+            self.memory.set_app_setting("assistant_chat_id", str(message.chat_id))
+            return True
+        return False
+
+    async def _tell_team(self, text: str) -> None:
+        """A note for the people who do the manual TradingView work: the
+        operator always, and the assistant once they have written to the bot."""
+        await self.notifier.note(text)
+        assistant = self._assistant_chat_id()
+        if assistant and self.commands is not None:
+            await self.commands.send(assistant, text)
+
+    def _counts_text(self) -> str:
+        counts = self.memory.subscriber_counts()
+        return (
+            f"👥 المشتركون — تجريبي نشط: {counts.get('trial', 0)}"
+            f" | منتهي: {counts.get('expired', 0)}"
+        )
+
+    def _roster_text(self) -> str:
+        """The daily TradingView list: who should hold indicator access
+        right now, and whose access must be clicked away."""
+        roster = self.memory.indicator_roster(datetime.now(UTC))
+        lines = ["🖥️ قائمة صلاحيات المؤشر في TradingView:"]
+        if roster["grant"]:
+            lines.append("\n✅ يجب أن تكون صلاحيتهم مفعّلة:")
+            for row in roster["grant"]:
+                who = row.get("first_name") or row.get("username") or row["chat_id"]
+                plan = row.get("plan") or "تجربة"
+                exp = str(row.get("expires_at") or "")[:10]
+                lines.append(f"  • {row['tv_username']} — {who} ({plan}، حتى {exp})")
+        if roster["revoke"]:
+            lines.append("\n⛔ أزل صلاحيتهم:")
+            for row in roster["revoke"]:
+                who = row.get("first_name") or row.get("username") or row["chat_id"]
+                lines.append(f"  • {row['tv_username']} — {who}")
+        if not roster["grant"] and not roster["revoke"]:
+            lines.append("لا أسماء مسجلة بعد.")
+        return "\n".join(lines)
+
+    async def _handle_assistant(self, message) -> None:
+        """The assistant's own commands: the grant list and the count. Their
+        messages never enter the subscriber funnel."""
+        if self.commands is None:
+            return
+        word = message.text.strip().split()[0].lower() if message.text.strip() else ""
+        if word in {"المؤشرات", "المواشرات", "مؤشرات", "tvusers"}:
+            await self.commands.send(message.chat_id, self._roster_text())
+        elif word in {"مشتركين", "المشتركين", "subscribers"}:
+            await self.commands.send(message.chat_id, self._counts_text())
+        else:
+            await self.commands.send(
+                message.chat_id,
+                "أهلاً بك مساعداً في مِرصاد ٩ 🤝\n"
+                "تصلك هنا تلقائياً كل طلبات منح صلاحية المؤشر وإزالتها في TradingView "
+                "وإشعارات المشتركين.\n"
+                "الأوامر: «المؤشرات» للقائمة الكاملة (من يُمنح ومن يُزال)، و«مشتركين» للعدد.",
+            )
 
     async def _handle_subscriber(self, message) -> None:
         """The trial funnel: /start shows the pitch and the terms — nothing
@@ -1451,7 +1528,12 @@ class LiveEngine:
             trial_status_message,
         )
 
-        if self.settings.trial_days <= 0 or self.commands is None:
+        if self.commands is None:
+            return
+        if self._is_assistant(message):
+            await self._handle_assistant(message)
+            return
+        if self.settings.trial_days <= 0:
             return  # operator-only bot; strangers are ignored entirely
 
         now = datetime.now(UTC)
@@ -1541,7 +1623,7 @@ class LiveEngine:
         await self.commands.send(message.chat_id, tv_username_booked_note(username, expires_on))
         await self.commands.send(message.chat_id, self._guide())
         name = message.username or message.first_name or message.chat_id
-        await self.notifier.note(
+        await self._tell_team(
             f"🖥️ امنح صلاحية مِرصاد ٩ في TradingView إلى: {username}\n"
             f"(المشترك {name} — نافذته حتى {expires_on})\n"
             "أرسل «المؤشرات» لقائمة المنح والإزالة كاملة."
@@ -1636,12 +1718,12 @@ class LiveEngine:
             if row.get("tv_username"):
                 # channel removal is automatic; TradingView access is a manual
                 # click, so the operator gets an explicit revoke order
-                await self.notifier.note(
+                await self._tell_team(
                     "🖥️ أزل صلاحية المؤشر في TradingView من: "
                     f"{row['tv_username']} (انتهت فترته)"
                 )
         if due:
-            await self.notifier.note(f"⏳ انتهت الفترة التجريبية لـ {len(due)} مشترك")
+            await self._tell_team(f"⏳ انتهت الفترة التجريبية لـ {len(due)} مشترك")
 
         for row in self.memory.trials_needing_reminder(now):
             expires_on = str(row.get("expires_at") or "")[:10]
@@ -1925,32 +2007,25 @@ class LiveEngine:
                 )
             return
         if parts and parts[0].strip().lower() in {"مشتركين", "subscribers"}:
-            counts = self.memory.subscriber_counts()
-            await self.notifier.note(
-                f"👥 المشتركون — تجريبي نشط: {counts.get('trial', 0)}"
-                f" | منتهي: {counts.get('expired', 0)}"
-            )
+            await self.notifier.note(self._counts_text())
             return
         if parts and parts[0].strip().lower() in {"المؤشرات", "المواشرات", "مؤشرات", "tvusers"}:
-            # the daily TradingView list: who should hold indicator access
-            # right now, and whose access must be clicked away
-            roster = self.memory.indicator_roster(datetime.now(UTC))
-            lines = ["🖥️ قائمة صلاحيات المؤشر في TradingView:"]
-            if roster["grant"]:
-                lines.append("\n✅ يجب أن تكون صلاحيتهم مفعّلة:")
-                for row in roster["grant"]:
-                    who = row.get("first_name") or row.get("username") or row["chat_id"]
-                    plan = row.get("plan") or "تجربة"
-                    exp = str(row.get("expires_at") or "")[:10]
-                    lines.append(f"  • {row['tv_username']} — {who} ({plan}، حتى {exp})")
-            if roster["revoke"]:
-                lines.append("\n⛔ أزل صلاحيتهم:")
-                for row in roster["revoke"]:
-                    who = row.get("first_name") or row.get("username") or row["chat_id"]
-                    lines.append(f"  • {row['tv_username']} — {who}")
-            if not roster["grant"] and not roster["revoke"]:
-                lines.append("لا أسماء مسجلة بعد.")
-            await self.notifier.note("\n".join(lines))
+            await self.notifier.note(self._roster_text())
+            return
+        if parts and parts[0].strip().lower() in {"مساعد", "assistant"}:
+            # «مساعد @user» names who else receives the TradingView orders;
+            # «مساعد» alone reports who it is and whether they have written yet
+            if len(parts) >= 2:
+                new = parts[1].lstrip("@")
+                if new.lower() != self._assistant_username():
+                    self.memory.set_app_setting("assistant_chat_id", "")
+                self.memory.set_app_setting("assistant_username", new)
+            who = self._assistant_username()
+            linked = bool(self._assistant_chat_id())
+            await self.notifier.note(
+                (f"🤝 المساعد: @{who} — " + ("مرتبط ويصله كل شيء ✅" if linked else "لم يراسل البوت بعد: اطلب منه إرسال أي رسالة للبوت ليُربط"))
+                if who else "➖ لا مساعد. اكتب: مساعد @اسم_المستخدم"
+            )
             return
         if parts and parts[0].strip().lower() in {"معاينة", "معاينه", "preview"}:
             await self._preview_journey()
@@ -2141,7 +2216,7 @@ class LiveEngine:
                 "✅ وصلتني رسالتك — استقبال الرسائل شغال.\n"
                 'الأوامر: "موافق <رقم>" / "رفض <رقم>" لقرارات الدروس، '
                 '"مشتركين" لعدد المشتركين، "المؤشرات" لقائمة صلاحيات TradingView، '
-                '"معاينة" لتجربة رسالة الإقرار بأزرارها، '
+                '"معاينة" لتجربة رسالة الإقرار بأزرارها، "مساعد @اسم" لمن يستلم طلبات TradingView معك، '
                 '"فحص" للتأكد أن البطاقات تصل إلى القناة الخاصة.'
             )
             return
@@ -2398,7 +2473,7 @@ class LiveEngine:
             tv = row.get("tv_username") or ""
             expires = str(row.get("expires_at") or "")[:10]
             await self.commands.send(chat_id, tv_granted_note(tv, expires))
-            await self.notifier.note(f"🖥️ سُجّل تفعيل {tv} ({name}) في TradingView")
+            await self._tell_team(f"🖥️ سُجّل تفعيل {tv} ({name}) في TradingView")
             return
 
         if action == "tv_revoked":
@@ -2406,7 +2481,7 @@ class LiveEngine:
 
             tv = row.get("tv_username") or ""
             await self.commands.send(chat_id, tv_revoked_note(tv))
-            await self.notifier.note(f"⛔ سُجّلت إزالة {tv} ({name}) من TradingView")
+            await self._tell_team(f"⛔ سُجّلت إزالة {tv} ({name}) من TradingView")
             return
 
         if action == "removed":
@@ -2452,12 +2527,12 @@ class LiveEngine:
             f"فعال حتى {expires}"
         )
         if plan_includes_indicator(plan) and row.get("tv_username"):
-            await self.notifier.note(
+            await self._tell_team(
                 "🖥️ تأكد من منح صلاحية المؤشر في TradingView إلى: "
                 f"{row['tv_username']} — أرسل «المؤشرات» للقائمة الكاملة."
             )
         elif not plan_includes_indicator(plan) and row.get("tv_username"):
-            await self.notifier.note(
+            await self._tell_team(
                 "🖥️ باقته الجديدة بلا مؤشر — أزل صلاحية TradingView من: "
                 f"{row['tv_username']}"
             )

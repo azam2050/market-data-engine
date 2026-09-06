@@ -1385,3 +1385,45 @@ async def test_a_restart_remembers_health_and_breaker_announcements_too(settings
     await fresh._restore()
     assert fresh._health_reported == day
     assert fresh._breaker_announced == day
+
+
+# ---------------------------------------------------------------- the assistant
+@pytest.mark.asyncio
+async def test_the_assistant_is_recognised_by_username_and_gets_the_grant_orders(settings, tmp_path):
+    """The person who does the manual TradingView clicks writes to the bot
+    once; from then on every grant order reaches them too, and they can ask
+    for the list and the count. They never enter the subscriber funnel."""
+    from datetime import UTC
+
+    from qqq_alpha.live.telegram import InboundMessage
+
+    engine = _subscriber_engine(settings, tmp_path)
+    assert engine._assistant_username() == "islamghanem502"
+
+    # first contact: recognised, answered, never registered as a trial
+    await engine._handle_subscriber(InboundMessage("900", "/start", username="IslamGhanem502"))
+    assert engine.memory.subscriber("900") is None
+    assert engine._assistant_chat_id() == "900"
+    assert any(chat == "900" and "مساعداً" in text for chat, text in engine.commands.sent)
+
+    # a subscriber sends their TradingView name: the order reaches both
+    now = datetime.now(UTC)
+    engine.memory.add_subscriber("555", "u", "U", now, now + timedelta(days=5))
+    await engine._handle_subscriber(InboundMessage("555", "مؤشر @Ahmed_Trader"))
+    assert any("امنح" in note and "Ahmed_Trader" in note for note in engine.notifier.notes)
+    assert any(chat == "900" and "امنح" in text and "Ahmed_Trader" in text for chat, text in engine.commands.sent)
+
+    # the assistant asks for the list and the count
+    await engine._handle_subscriber(InboundMessage("900", "المؤشرات", username="IslamGhanem502"))
+    roster = [text for chat, text in engine.commands.sent if chat == "900" and "قائمة صلاحيات" in text]
+    assert roster and "Ahmed_Trader" in roster[-1]
+    await engine._handle_subscriber(InboundMessage("900", "مشتركين"))  # known by chat id now
+    assert any(chat == "900" and "تجريبي نشط: 1" in text for chat, text in engine.commands.sent)
+
+    # the operator can name someone else; the old link is dropped until they write
+    await engine._handle_command("مساعد @Other_Helper")
+    assert engine._assistant_username() == "other_helper"
+    assert engine._assistant_chat_id() == ""
+    assert any("لم يراسل البوت بعد" in note for note in engine.notifier.notes)
+    await engine._handle_subscriber(InboundMessage("900", "المؤشرات", username="IslamGhanem502"))
+    assert engine.memory.subscriber("900") is None  # a stranger without /start: ignored

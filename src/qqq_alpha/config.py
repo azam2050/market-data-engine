@@ -126,6 +126,11 @@ class Settings(BaseSettings):
     # delivery — personal chat during the shadow period, subscriber bots later
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    # the assistant who does the manual TradingView clicks: recognised by
+    # Telegram username the first time they message the bot, then every
+    # grant/revoke order and subscriber note reaches them too. Overridable
+    # from the bot with «مساعد @username».
+    telegram_assistant_username: str = "IslamGhanem502"
     # the public channel (e.g. "@OqoodOptions"). Empty disables channel
     # publishing entirely; the bot must be a channel admin with post rights.
     telegram_channel_id: str = ""
