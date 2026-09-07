@@ -167,7 +167,7 @@ def _panel(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], outline: s
 
 def _header(draw: ImageDraw.ImageDraw, subtitle: str) -> int:
     _panel(draw, (MARGIN, 56, W - MARGIN, 196))
-    _rtl(draw, (W / 2, 112), "بوت عقود الخيارات", _font(54, bold=True), GOLD, "mm")
+    _rtl(draw, (W / 2, 112), "مِرصاد ٩", _font(54, bold=True), GOLD, "mm")
     _rtl(draw, (W / 2, 164), subtitle, _font(28), MUTED, "mm")
     return 226
 

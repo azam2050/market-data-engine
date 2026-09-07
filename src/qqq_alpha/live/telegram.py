@@ -1058,7 +1058,7 @@ async def verify_telegram(token: str, chat_id: str) -> tuple[bool, str]:
             name = me.json().get("result", {}).get("username", "unknown")
 
             notifier = TelegramNotifier(token, chat_id, client=client)
-            sent = await notifier._send("✅ بوت عقود الخيارات متصل بنجاح — هذه رسالة اختبار")
+            sent = await notifier._send("✅ مِرصاد ٩ متصل بنجاح — هذه رسالة اختبار")
             if not sent:
                 return False, f"bot @{name} works, but cannot post to chat {chat_id}"
 
