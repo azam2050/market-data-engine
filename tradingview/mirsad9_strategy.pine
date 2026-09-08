@@ -60,6 +60,8 @@ usd2 = input.float(2.5, "هدف ٢ بالدولار", minval = 0.1, step = 0.5, 
 usd3 = input.float(4.0, "هدف ٣ بالدولار", minval = 0.1, step = 0.5, group = gS)
 secPct = input.float(35, "تنبيه التأمين «بع النصف» عند ٪ من الطريق إلى هدف ٣", minval = 10, maxval = 90, step = 5, group = gS, tooltip = "حين يقطع السعر هذه النسبة من المسافة بين الدخول والهدف الثالث: تنبيه على الشارت والجوال ببيع نصف الكمية، ويُنقل الوقف إلى سعر الدخول فتصير الصفقة مؤمَّنة")
 trailN = input.int(3, "بعد هدف ٢: الوقف يتبع قاع/قمة آخر N شمعة", minval = 2, maxval = 15, group = gS)
+t3Mode = input.string("أقفل الصفقة", "بعد هدف ٣", options = ["أقفل الصفقة", "اتبع الحركة"], group = gS, tooltip = "أقفل الصفقة: الهدف الثالث يخرج كاملاً (+2R). اتبع الحركة: عند الهدف الثالث يُباع الجزء الثاني ويبقى الربع الأخير بوقف يتبع قاع/قمة آخر N شمعة (نفس رقم إعداد هدف ٢) ولا ينزل تحت الهدف الثاني، حتى ينكسر أو تُغلق الجلسة. تأخذ الحركات الممتدة بلا مخاطرة على رأس المال")
+t3Follow = t3Mode == "اتبع الحركة"
 eodOut = input.bool(true, "إغلاق الصفقة آخر الجلسة (لا مبيت)", group = gS)
 
 gV = "العرض"
@@ -284,7 +286,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
         if hitStop
             // الوقف يُحترم: الصفقة تموت هنا ولا ● بعدها
             lastR := (sP - eP) / unit * pos
-            exitTxt := (sP - eP) * pos > 0 ? "خروج بربح" : (sP - eP) * pos == 0 ? "خروج على التعادل" : "وقف"
+            exitTxt := hit >= 3 ? "خروج بعد هدف ٣" : (sP - eP) * pos > 0 ? "خروج بربح" : (sP - eP) * pos == 0 ? "خروج على التعادل" : "وقف"
             if (sP - eP) * pos < 0
                 zStopped := true
             lastSide := pos
@@ -299,7 +301,8 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
             if not half and (pos == 1 ? high >= halfLvl : low <= halfLvl)
                 half := true
                 secNow := true
-            if hit >= 3
+            // هدف ٣: إما إقفال كامل، أو (اتبع الحركة) يبقى الربع الأخير بوقف متحرك لا ينزل تحت هدف ٢
+            if hit >= 3 and not t3Follow
                 lastR := (t3 - eP) / unit * pos
                 exitTxt := "هدف ٣"
                 lastSide := pos
@@ -316,6 +319,8 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
                     sP := pos == 1 ? math.max(sP, eP) : math.min(sP, eP)
                 if hit >= 2
                     sP := pos == 1 ? math.max(sP, t1, trailLo) : math.min(sP, t1, trailHi)
+                if hit >= 3
+                    sP := pos == 1 ? math.max(sP, t2, trailLo) : math.min(sP, t2, trailHi)
                 secured := pos == 1 ? sP >= eP : sP <= eP
     if closed
         closedAt := bar_index
@@ -393,7 +398,7 @@ if missed or zoneGone
     strategy.cancel("كول")
     strategy.cancel("بوت")
 if pos != 0 and strategy.position_size != 0
-    strategy.exit("خروج", from_entry = pos == 1 ? "كول" : "بوت", stop = sP, limit = t3)
+    strategy.exit("خروج", from_entry = pos == 1 ? "كول" : "بوت", stop = sP, limit = t3Follow ? na : t3)
 if pos == 0 and strategy.position_size != 0 and closed
     strategy.close_all()
 
@@ -466,6 +471,9 @@ if inTr and hit >= 1 and hit[1] < 1
     label.new(bar_index, t1, "● هدف ١", style = label.style_label_left, color = color.new(cUp, 30), textcolor = color.white, size = size.tiny)
 if inTr and hit >= 2 and hit[1] < 2
     label.new(bar_index, t2, "● هدف ٢", style = label.style_label_left, color = color.new(cUp, 20), textcolor = color.white, size = size.tiny)
+// في وضع «اتبع الحركة» الصفقة لا تُقفل عند هدف ٣: يُباع الجزء الثاني ويبقى الربع الأخير بوقف متحرك
+if inTr and hit >= 3 and hit[1] < 3
+    label.new(bar_index, t3, "● هدف ٣ · بع الجزء الثاني، الباقي يتبع الحركة", style = label.style_label_left, color = color.new(cUp, 10), textcolor = color.white, size = size.tiny)
 // التأمين: علامة قصيرة على يمين الشمعة لا فوقها
 if secNow
     label.new(bar_index, halfLvl, "½ بع النصف", style = label.style_label_left, color = color.new(cZone, 0), textcolor = color.black, size = size.small, tooltip = "أمّن الصفقة: بع نصف الكمية، والوقف الآن عند سعر الدخول")
