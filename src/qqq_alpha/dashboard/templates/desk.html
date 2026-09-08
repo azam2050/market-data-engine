@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مكتب مِرصاد ٩</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  :root {
+    --bg:#0A0F17; --panel:#121A26; --panel2:#182233; --line:#25324A;
+    --ink:#E8EEF6; --dim:#93A3B8; --gold:#E0B23E; --gold-soft:rgba(224,178,62,.16);
+    --green:#31C48D; --green-soft:rgba(49,196,141,.16);
+    --red:#F05252; --red-soft:rgba(240,82,82,.16);
+    --blue:#4F8CFF; --mono:"IBM Plex Mono",ui-monospace,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif; line-height:1.6; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:14px 20px; border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:5; }
+  header h1 { margin:0; font-size:18px; color:var(--gold); letter-spacing:.02em; }
+  header .who { color:var(--dim); font-size:13px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:999px; border:1px solid var(--line); background:var(--panel2); font-size:13px; }
+  .chip.open { border-color:var(--green); color:var(--green); }
+  .chip.closed { border-color:var(--line); color:var(--dim); }
+  .dot { width:8px; height:8px; border-radius:50%; background:currentColor; }
+  main { max-width:1180px; margin:0 auto; padding:18px 16px 60px; }
+  .strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-bottom:14px; }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .tile .l { font-size:12px; color:var(--dim); }
+  .tile .v { font-size:18px; font-weight:700; margin-top:2px; }
+  .tile .v.up { color:var(--green); } .tile .v.down { color:var(--red); } .tile .v.flat { color:var(--gold); }
+  .notes { background:var(--gold-soft); border:1px solid rgba(224,178,62,.35); border-radius:12px; padding:10px 14px; margin-bottom:14px; font-size:14px; }
+  .notes p { margin:2px 0; }
+  .wrap { overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:14px; }
+  table { border-collapse:collapse; width:100%; min-width:980px; font-size:14px; }
+  th { text-align:right; padding:10px 10px; color:var(--dim); font-weight:600; font-size:12px; border-bottom:1px solid var(--line); white-space:nowrap; background:var(--panel2); }
+  td { padding:10px 10px; border-bottom:1px solid var(--line); vertical-align:middle; white-space:nowrap; }
+  tr:last-child td { border-bottom:0; }
+  .sym { font-family:var(--mono); font-weight:600; font-size:16px; }
+  .sym small { display:block; font-family:inherit; font-weight:400; font-size:11px; color:var(--dim); }
+  .num { font-family:var(--mono); font-variant-numeric:tabular-nums; direction:ltr; text-align:left; }
+  .st { display:inline-block; padding:4px 10px; border-radius:8px; font-weight:600; font-size:13px; }
+  .st.trade, .st.secured { background:var(--green-soft); color:var(--green); }
+  .st.trade.put, .st.secured.put { background:var(--red-soft); color:var(--red); }
+  .st.zone { background:var(--gold-soft); color:var(--gold); }
+  .st.up { color:var(--green); background:rgba(49,196,141,.08); }
+  .st.down { color:var(--red); background:rgba(240,82,82,.08); }
+  .st.sideways, .st.blocked { color:var(--dim); background:var(--panel2); }
+  .ct { font-family:var(--mono); font-weight:600; font-size:15px; }
+  .ct.call { color:var(--green); } .ct.put { color:var(--red); }
+  .ct small { display:block; font-family:inherit; font-weight:400; font-size:11px; color:var(--dim); }
+  .tg { font-family:var(--mono); font-size:13px; }
+  .tg b { display:block; }
+  .tg span { color:var(--dim); font-size:11px; }
+  .tg.hit b { color:var(--green); }
+  .stop { color:var(--red); }
+  .note { white-space:normal; min-width:240px; max-width:340px; color:var(--ink); font-size:13px; line-height:1.5; }
+  .hf { display:flex; gap:6px; align-items:center; font-size:12px; color:var(--dim); }
+  .agree { color:var(--green); } .disagree { color:var(--gold); }
+  .dots { font-family:var(--mono); letter-spacing:2px; }
+  .dots .on { color:var(--green); } .dots .off { color:#3B4A62; }
+  .foot { margin-top:16px; color:var(--dim); font-size:12px; line-height:1.7; }
+  details.settings { margin-top:18px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 14px; }
+  details.settings summary { cursor:pointer; color:var(--gold); font-weight:600; }
+  form.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-top:12px; align-items:end; }
+  label { display:block; font-size:12px; color:var(--dim); margin-bottom:4px; }
+  input, select { width:100%; background:var(--panel2); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:9px 10px; font-family:inherit; font-size:14px; }
+  button { background:var(--gold); color:#1a1408; border:0; border-radius:8px; padding:10px 18px; font-family:inherit; font-weight:700; font-size:14px; cursor:pointer; }
+  .empty { padding:30px; text-align:center; color:var(--dim); }
+  @media (max-width:700px) { header h1 { font-size:16px; } td, th { padding:8px 6px; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>مِرصاد ٩ · مكتبك</h1>
+    <div class="who">{{ name }} · فريم {{ settings.frame_name }} · <span id="clock">—</span></div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <span id="session" class="chip closed"><span class="dot"></span><span>…</span></span>
+    <a class="chip" href="/desk/logout" style="text-decoration:none;color:var(--dim)">خروج</a>
+  </div>
+</header>
+
+<main>
+  <div class="strip" id="strip">
+    <div class="tile"><div class="l">QQQ</div><div class="v" id="lead-QQQ">—</div></div>
+    <div class="tile"><div class="l">SPY</div><div class="v" id="lead-SPY">—</div></div>
+    <div class="tile"><div class="l">السوق ككتلة</div><div class="v" id="block">—</div></div>
+    <div class="tile"><div class="l">رموزك</div><div class="v" id="breadth">—</div></div>
+  </div>
+  <div class="notes" id="notes" hidden></div>
+
+  <div class="wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>الرمز</th><th>الحالة</th><th>العقد</th><th>سعر العقد</th>
+          <th>½ التأمين (٣٥٪)</th><th>هدف ٢</th><th>هدف ٣</th><th>الوقف</th>
+          <th>الأهداف</th><th>الفريم الأعلى</th><th>ملاحظة</th>
+        </tr>
+      </thead>
+      <tbody id="rows"><tr><td colspan="11" class="empty">جاري تحميل الشاشة…</td></tr></tbody>
+    </table>
+  </div>
+
+  <details class="settings">
+    <summary>⚙️ إعدادات مكتبك</summary>
+    <form class="grid" method="post" action="/desk/settings">
+      <div>
+        <label>الرموز (حتى ١٠، مفصولة بفاصلة)</label>
+        <input name="symbols" value="{{ settings.symbols|join(', ') }}" dir="ltr" placeholder="QQQ, SPY, NVDA">
+      </div>
+      <div>
+        <label>الفريم</label>
+        <select name="frame">
+          {% for f, label in frames %}<option value="{{ f }}" {% if f == settings.frame %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>انتهاء العقد</label>
+        <select name="expiry">
+          {% for key, label in expiries %}<option value="{{ key }}" {% if key == settings.expiry %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><button type="submit">حفظ</button></div>
+    </form>
+  </details>
+
+  <p class="foot">
+    أسعار الأهداف على العقد تقدير عبر الدلتا من السعر الحالي، والتنفيذ والسعر الفعلي من منصتك لدى وسيطك.
+    مِرصاد ٩ أداة تحليل تعليمية تعرض وتقترح، ولا تنفّذ أي أمر في حسابك. القرار قرارك وعلى مسؤوليتك.
+  </p>
+</main>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const fmt = (x, d = 2) => (x === null || x === undefined) ? "—" : Number(x).toFixed(d);
+  const pct = (x) => (x === null || x === undefined) ? "" : (x >= 0 ? "+" : "") + Number(x).toFixed(0) + "٪";
+  const dirClass = (d) => d > 0 ? "up" : d < 0 ? "down" : "flat";
+  const dirWord = (d) => d > 0 ? "صاعد" : d < 0 ? "هابط" : "عرضي";
+  const dots = (h) => '<span class="dots">' + [1,2,3].map(i => '<span class="' + (h >= i ? "on" : "off") + '">' + (h >= i ? "●" : "○") + '</span>').join("") + '</span>';
+
+  function target(row, key) {
+    const c = row.contract; const st = row;
+    const stock = st[key === "half" ? "half_level" : key];
+    if (stock === null || stock === undefined) return '<td class="tg">—</td>';
+    const t = c && c.targets && c.targets[key];
+    const hitN = { half: st.half ? 1 : 0, t2: st.hit >= 2 ? 1 : 0, t3: st.hit >= 3 ? 1 : 0 }[key];
+    if (t && t.contract !== null) return '<td class="tg' + (hitN ? " hit" : "") + '"><b>' + fmt(t.contract) + ' <span>' + pct(t.pct) + '</span></b><span>السهم ' + fmt(stock) + (hitN ? " ✓" : "") + '</span></td>';
+    return '<td class="tg"><b>' + fmt(stock) + '</b><span>على السهم</span></td>';
+  }
+
+  function render(b) {
+    $("clock").textContent = new Date(b.now).toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" });
+    const s = $("session"); s.className = "chip " + (b.session.open ? "open" : "closed"); s.lastElementChild.textContent = b.session.text;
+    for (const l of b.market.leaders) { const el = $("lead-" + l.symbol); if (el) { el.textContent = l.state_text + (l.price ? " · " + fmt(l.price) : ""); el.className = "v " + dirClass(l.direction); } }
+    $("block").textContent = b.market.block; $("block").className = "v " + (b.market.block.includes("صاعد") ? "up" : b.market.block.includes("هابط") ? "down" : "flat");
+    $("breadth").innerHTML = '<span style="color:var(--green)">' + b.market.up + ' صاعد</span> · <span style="color:var(--red)">' + b.market.down + ' هابط</span> · <span style="color:var(--dim)">' + b.market.flat + ' عرضي</span>';
+    const notes = (b.market.notes || []).concat(b.errors || []);
+    $("notes").hidden = notes.length === 0; $("notes").innerHTML = notes.map(n => "<p>• " + n + "</p>").join("");
+    const tb = $("rows"); tb.innerHTML = "";
+    if (!b.rows.length) { tb.innerHTML = '<tr><td colspan="11" class="empty">أضف رموزك من الإعدادات</td></tr>'; return; }
+    for (const r of b.rows) {
+      const tr = document.createElement("tr");
+      if (r.unavailable) { tr.innerHTML = '<td class="sym">' + r.symbol + '</td><td colspan="10" style="color:var(--dim)">لا بيانات الآن</td>'; tb.appendChild(tr); continue; }
+      const c = r.contract; const put = r.side < 0;
+      const stateCls = "st " + r.state + (put ? " put" : "");
+      let ct = '<td class="ct">—<small>لا عقد بلا اتجاه</small></td>';
+      if (c && !c.missing) ct = '<td class="ct ' + (c.side > 0 ? "call" : "put") + '">' + c.strike + ' ' + c.side_text + '<small>' + c.expiry_text + (c.underlying !== r.symbol ? " · " + c.underlying : "") + '</small></td>';
+      else if (c && c.missing) ct = '<td class="ct">—<small>لا عقد مناسب ' + (c.expiry || "") + '</small></td>';
+      const price = (c && !c.missing) ? '<td class="num">' + fmt(c.price) + '<br><span style="color:var(--dim);font-size:11px">' + fmt(c.bid) + ' / ' + fmt(c.ask) + '</span></td>' : '<td class="num">—</td>';
+      const stopT = c && c.targets && c.targets.stop;
+      const stop = r.stop !== null ? '<td class="tg stop"><b>' + (stopT && stopT.contract !== null ? fmt(stopT.contract) + ' <span>' + pct(stopT.pct) + '</span>' : fmt(r.stop)) + '</b><span>السهم ' + fmt(r.stop) + (r.secured ? " · مؤمَّن" : "") + '</span></td>' : '<td class="tg">—</td>';
+      const h = r.higher;
+      const hi = h ? '<td><div>' + h.frame_name + ': <span class="' + dirClass(h.direction) + '">' + dirWord(h.direction) + '</span></div><div class="hf ' + (h.agree ? "agree" : "disagree") + '">' + (h.agree ? "✅ توافق" : "⌛ لا توافق") + '</div></td>' : '<td>—</td>';
+      const entry = r.entry !== null ? '<small>دخول ' + fmt(r.entry) + (r.quality ? ' · جودة ' + Math.round(r.quality) : '') + '</small>' : (r.level !== null ? '<small>منطقة ' + fmt(r.level) + '</small>' : '<small>' + fmt(r.price) + '</small>');
+      tr.innerHTML = '<td class="sym">' + r.symbol + '<small>' + r.frame_name + ' · ' + fmt(r.price) + '</small></td>'
+        + '<td><span class="' + stateCls + '">' + r.state_text + '</span><br>' + entry + '</td>'
+        + ct + price + target(r, "half") + target(r, "t2") + target(r, "t3") + stop
+        + '<td>' + dots(r.hit) + (r.half ? ' <span style="color:var(--gold)">½✓</span>' : '') + '</td>'
+        + hi + '<td class="note">' + r.note + '</td>';
+      tb.appendChild(tr);
+    }
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch("/api/desk", { credentials: "same-origin", cache: "no-store" });
+      if (res.status === 401) { location.href = "/desk"; return; }
+      render(await res.json());
+    } catch (e) { console.warn(e); }
+  }
+  {% if initial %}render({{ initial|tojson }});{% endif %}
+  refresh();
+  setInterval(refresh, 30000);
+})();
+</script>
+</body>
+</html>

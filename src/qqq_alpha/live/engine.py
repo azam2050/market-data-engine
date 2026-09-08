@@ -184,6 +184,11 @@ class LiveEngine:
         self._command_task: asyncio.Task | None = None
         self._dashboard_task: asyncio.Task | None = None
         self._watchdog_task: asyncio.Task | None = None
+        # the customer's desk: MIRSAD 9 on their own symbols, served by the
+        # dashboard and signed into by a link the bot hands out
+        from qqq_alpha.live.desk import DeskService
+
+        self.desk = DeskService(self.settings, self.memory)
         # the TradingView bridge is built lazily on the first webhook and
         # kept for the life of the process: its per-symbol open-trade state
         # is what lets a target alert quote the contract its entry picked
@@ -1570,6 +1575,10 @@ class LiveEngine:
             await self._send_pay_offer(message.chat_id)
             return
 
+        if self._wants_desk(message.text):
+            await self._send_desk_link(message.chat_id)
+            return
+
         if await self._maybe_capture_tv_username(message, row):
             return
 
@@ -1629,6 +1638,32 @@ class LiveEngine:
             "أرسل «المؤشرات» لقائمة المنح والإزالة كاملة."
         )
         return True
+
+    _DESK_WORDS = ("شاشتي", "الشاشة", "شاشة", "مكتبي", "المكتب", "مكتب", "/desk", "desk")
+
+    @classmethod
+    def _wants_desk(cls, text: str) -> bool:
+        first = text.strip().split()[0].lower() if text.strip() else ""
+        return first in cls._DESK_WORDS
+
+    async def _send_desk_link(self, chat_id: str) -> None:
+        """«شاشتي»: a fresh personal sign-in link to the desk. An expired
+        subscriber gets the pay offer instead, since the desk is part of
+        the subscription."""
+        from qqq_alpha.live.telegram import desk_link_message
+
+        if self.commands is None:
+            return
+        if not self.desk.has_access(str(chat_id)) and str(chat_id) != str(self.settings.telegram_chat_id):
+            await self._send_pay_offer(chat_id)
+            return
+        link = self.desk.link_for(str(chat_id))
+        if not link:
+            await self.commands.send(chat_id, "الشاشة غير مفعّلة بعد: PUBLIC_BASE_URL غير مضبوط.")
+            return
+        await self.commands.send_with_buttons(
+            chat_id, desk_link_message(), [("🖥️ افتح مكتبي", link)]
+        )
 
     _PAY_WORDS = ("اشتراك", "اشترك", "دفع", "الباقات", "باقات", "/pay", "/subscribe")
 
@@ -2030,6 +2065,9 @@ class LiveEngine:
         if parts and parts[0].strip().lower() in {"معاينة", "معاينه", "preview"}:
             await self._preview_journey()
             return
+        if self._wants_desk(text):
+            await self._send_desk_link(str(self.settings.telegram_chat_id))
+            return
         # the operator types on a tablet, in a hurry, in Arabic: "رابط جديد",
         # "ارسل الرابط الجديد" and "جدد الرابط" all mean the same thing. An
         # exact-match command list makes him hunt for the magic wording, so
@@ -2217,7 +2255,7 @@ class LiveEngine:
                 'الأوامر: "موافق <رقم>" / "رفض <رقم>" لقرارات الدروس، '
                 '"مشتركين" لعدد المشتركين، "المؤشرات" لقائمة صلاحيات TradingView، '
                 '"معاينة" لتجربة رسالة الإقرار بأزرارها، "مساعد @اسم" لمن يستلم طلبات TradingView معك، '
-                '"فحص" للتأكد أن البطاقات تصل إلى القناة الخاصة.'
+                '"فحص" للتأكد أن البطاقات تصل إلى القناة الخاصة، "شاشتي" لرابط مكتب مِرصاد ٩.'
             )
             return
 
@@ -2562,6 +2600,7 @@ class LiveEngine:
             channel_roster=self._channel_roster,
             on_payment=self._on_payment,
             on_tv_signal=self._on_tv_signal,
+            desk=self.desk,
         )
         config = uvicorn.Config(
             app,

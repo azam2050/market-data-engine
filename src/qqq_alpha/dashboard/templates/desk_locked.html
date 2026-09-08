@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مكتب مِرصاد ٩</title>
+<style>
+  body { margin:0; background:#0A0F17; color:#E8EEF6; font-family:"IBM Plex Sans Arabic","Segoe UI",Tahoma,sans-serif; display:flex; min-height:100vh; align-items:center; justify-content:center; padding:20px; }
+  .box { max-width:460px; background:#121A26; border:1px solid #25324A; border-radius:14px; padding:26px 28px; text-align:center; }
+  h1 { color:#E0B23E; font-size:20px; margin:0 0 10px; }
+  p { color:#93A3B8; line-height:1.8; margin:6px 0; }
+  a.btn { display:inline-block; margin-top:14px; background:#E0B23E; color:#1a1408; text-decoration:none; padding:10px 20px; border-radius:8px; font-weight:700; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <h1>مكتب مِرصاد ٩</h1>
+    <p>{{ reason }}</p>
+    <p>افتح بوت مِرصاد ٩ في تيليجرام واكتب «شاشتي» ليرسل لك رابط الدخول الخاص بك.</p>
+    {% if bot_url %}<a class="btn" href="{{ bot_url }}">فتح البوت</a>{% endif %}
+  </div>
+</body>
+</html>

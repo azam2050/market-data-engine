@@ -59,6 +59,7 @@ def create_app(
     channel_roster: Callable[[list[str]], Awaitable[dict]] | None = None,
     on_payment: Callable[[str, str, dict], Awaitable[None]] | None = None,
     on_tv_signal: Callable[[str], Awaitable[None]] | None = None,
+    desk: Any | None = None,
 ) -> FastAPI:
     """Build the dashboard app.
 
@@ -80,6 +81,124 @@ def create_app(
 
     def _ctx(**extra: Any) -> dict[str, Any]:
         return {"status": status, **extra}
+
+    # ------------------------------------------------------------------
+    # The customer's desk. Signed in by a link the bot hands out, kept in a
+    # cookie; no password exists. Everything under /desk is the customer's
+    # own view and never touches the operator's pages above.
+    if desk is None:
+        from qqq_alpha.live.desk import DeskService
+
+        desk = DeskService(settings, Memory(settings.data_dir / "memory.db"))
+
+    from qqq_alpha.live.desk import EXPIRY_CHOICES, FRAMES
+    from qqq_alpha.live.mirsad9 import frame_name
+
+    DESK_COOKIE = "mirsad_desk"
+    frames = [(f, frame_name(f)) for f in FRAMES]
+    expiries = list(EXPIRY_CHOICES.items())
+
+    def _desk_owner(request: Request) -> str | None:
+        token = request.cookies.get(DESK_COOKIE, "")
+        return desk.memory.desk_token_owner(token, datetime.now(UTC)) if token else None
+
+    def _locked(request: Request, reason: str, code: int = 200):
+        return templates.TemplateResponse(
+            request,
+            "desk_locked.html",
+            {"reason": reason, "bot_url": settings.post_trial_channel_url and ""},
+            status_code=code,
+        )
+
+    def _desk_page(request: Request, chat_id: str, name: str):
+        prefs = desk.settings_for(chat_id)
+        prefs["frame_name"] = frame_name(prefs["frame"])
+        return templates.TemplateResponse(
+            request,
+            "desk.html",
+            {"name": name, "settings": prefs, "frames": frames, "expiries": expiries, "initial": None},
+        )
+
+    @app.get("/desk/login")
+    def desk_login(request: Request, k: str = ""):
+        chat_id = desk.memory.desk_token_owner(k, datetime.now(UTC))
+        if chat_id is None:
+            return _locked(request, "رابط الدخول غير صالح أو انتهى.", 403)
+        response = RedirectResponse(url="/desk", status_code=303)
+        response.set_cookie(
+            DESK_COOKIE, k, max_age=90 * 24 * 3600, httponly=True, samesite="lax",
+            secure=settings.public_base_url.startswith("https"),
+        )
+        return response
+
+    @app.get("/desk/logout")
+    def desk_logout():
+        response = RedirectResponse(url="/desk", status_code=303)
+        response.delete_cookie(DESK_COOKIE)
+        return response
+
+    @app.get("/desk")
+    def desk_page(request: Request):
+        chat_id = _desk_owner(request)
+        if chat_id is None:
+            return _locked(request, "هذه شاشة المشتركين في مِرصاد ٩.")
+        if not desk.has_access(chat_id):
+            return _locked(request, "اشتراكك منتهٍ. جدّده من البوت لتعود شاشتك.", 403)
+        row = desk.memory.subscriber(chat_id) or {}
+        name = row.get("first_name") or row.get("username") or "مشترك"
+        return _desk_page(request, chat_id, name)
+
+    @app.get("/desk/preview")
+    def desk_preview(request: Request, _: str = Depends(login)):
+        """The operator's own desk, behind the admin password: the same page
+        a subscriber sees, without needing the bot link."""
+        return _desk_page(request, str(settings.telegram_chat_id or "operator"), "المشغّل")
+
+    @app.get("/api/desk")
+    async def desk_api(request: Request):
+        chat_id = _desk_owner(request)
+        if chat_id is None:
+            # the operator preview reads the same feed with the admin password
+            auth = request.headers.get("authorization", "")
+            if auth.lower().startswith("basic "):
+                import base64
+
+                try:
+                    user, _, pw = base64.b64decode(auth[6:]).decode().partition(":")
+                except Exception:  # noqa: BLE001
+                    user = pw = ""
+                if secrets.compare_digest(user, settings.admin_username) and secrets.compare_digest(
+                    pw, settings.admin_password
+                ):
+                    chat_id = str(settings.telegram_chat_id or "operator")
+            if chat_id is None:
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+        elif not desk.has_access(chat_id):
+            return JSONResponse({"error": "expired"}, status_code=401)
+        try:
+            return JSONResponse(await desk.board(chat_id))
+        except Exception as exc:  # noqa: BLE001 - the screen must say why, not go blank
+            log.exception("desk board failed")
+            return JSONResponse({"error": str(exc)}, status_code=503)
+
+    @app.post("/desk/settings")
+    async def desk_settings(request: Request):
+        chat_id = _desk_owner(request)
+        if chat_id is None:
+            auth_user = request.headers.get("authorization", "")
+            if not auth_user:
+                return _locked(request, "هذه شاشة المشتركين في مِرصاد ٩.", 401)
+            chat_id = str(settings.telegram_chat_id or "operator")
+        form = parse_qs((await request.body()).decode("utf-8"))
+        symbols = (form.get("symbols") or [""])[0]
+        try:
+            frame = int((form.get("frame") or ["3"])[0])
+        except ValueError:
+            frame = 3
+        expiry = (form.get("expiry") or ["auto"])[0]
+        desk.save_settings(chat_id, symbols, frame, expiry)
+        back = "/desk/preview" if request.cookies.get(DESK_COOKIE) is None else "/desk"
+        return RedirectResponse(url=back, status_code=303)
 
     @app.get("/health")
     def health():

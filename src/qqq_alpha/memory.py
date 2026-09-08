@@ -199,7 +199,29 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value       TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
+
+-- the customer's own desk: which symbols they watch, on which frame, and
+-- how far out they like their contracts. One row per subscriber.
+CREATE TABLE IF NOT EXISTS desk_settings (
+    chat_id     TEXT PRIMARY KEY,
+    symbols     TEXT NOT NULL,
+    frame       INTEGER NOT NULL DEFAULT 3,
+    expiry      TEXT NOT NULL DEFAULT 'auto',
+    updated_at  TEXT NOT NULL
+);
+
+-- sign-in links for the desk. The bot hands a subscriber a token, the
+-- browser keeps it in a cookie: no password is ever set or stored.
+CREATE TABLE IF NOT EXISTS desk_tokens (
+    token       TEXT PRIMARY KEY,
+    chat_id     TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS desk_tokens_chat ON desk_tokens (chat_id);
 """
+
+DESK_TOKEN_DAYS = 90
+DESK_TOKENS_PER_CHAT = 3
 
 # how much each dimension counts when judging "did the market look like this?"
 SIMILARITY_WEIGHTS: dict[str, float] = {
@@ -1009,6 +1031,76 @@ class Memory:
             )
             conn.commit()
         return self.subscriber(chat_id)
+
+    # ------------------------------------------------------------- desk
+    def desk_settings(self, chat_id: str) -> dict[str, Any] | None:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT * FROM desk_settings WHERE chat_id = ?", (str(chat_id),)
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "chat_id": row["chat_id"],
+            "symbols": [s for s in str(row["symbols"]).split(",") if s],
+            "frame": int(row["frame"]),
+            "expiry": str(row["expiry"]),
+            "updated_at": row["updated_at"],
+        }
+
+    def set_desk_settings(
+        self, chat_id: str, symbols: list[str], frame: int, expiry: str
+    ) -> None:
+        with closing(self._connect()) as conn:
+            conn.execute(
+                """INSERT INTO desk_settings (chat_id, symbols, frame, expiry, updated_at)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(chat_id) DO UPDATE SET symbols = excluded.symbols,
+                       frame = excluded.frame, expiry = excluded.expiry,
+                       updated_at = excluded.updated_at""",
+                (str(chat_id), ",".join(symbols), int(frame), expiry, _iso(datetime.now(UTC))),
+            )
+            conn.commit()
+
+    def issue_desk_token(self, chat_id: str, now: datetime) -> str:
+        """A fresh sign-in token; only the newest few per chat stay valid, so
+        a link forwarded by mistake is retired by simply asking for a new one."""
+        import secrets
+
+        token = secrets.token_urlsafe(24)
+        with closing(self._connect()) as conn:
+            conn.execute(
+                "INSERT INTO desk_tokens (token, chat_id, created_at) VALUES (?,?,?)",
+                (token, str(chat_id), _iso(now)),
+            )
+            conn.execute(
+                """DELETE FROM desk_tokens WHERE chat_id = ? AND token NOT IN (
+                       SELECT token FROM desk_tokens WHERE chat_id = ?
+                       ORDER BY created_at DESC, rowid DESC LIMIT ?)""",
+                (str(chat_id), str(chat_id), DESK_TOKENS_PER_CHAT),
+            )
+            conn.commit()
+        return token
+
+    def desk_token_owner(self, token: str, now: datetime) -> str | None:
+        """The chat a token signs in, or None when unknown or expired."""
+        if not token:
+            return None
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT chat_id, created_at FROM desk_tokens WHERE token = ?", (token,)
+            ).fetchone()
+        if row is None:
+            return None
+        created = _as_aware(row["created_at"])
+        if created is None or (now - created).days > DESK_TOKEN_DAYS:
+            return None
+        return str(row["chat_id"])
+
+    def revoke_desk_tokens(self, chat_id: str) -> None:
+        with closing(self._connect()) as conn:
+            conn.execute("DELETE FROM desk_tokens WHERE chat_id = ?", (str(chat_id),))
+            conn.commit()
 
     def app_setting(self, key: str) -> str:
         """Read an operator setting. Empty string when never set."""
