@@ -548,7 +548,7 @@ f_nextTf() =>
     sec <= 60 ? "5" : sec <= 300 ? "15" : sec <= 1800 ? "60" : sec <= 3600 ? "240" : sec <= 14400 ? "D" : sec <= 86400 ? "W" : "M"
 
 f_tfName(string tf) =>
-    tf == "1" ? "١ د" : tf == "3" ? "٣ د" : tf == "5" ? "٥ د" : tf == "15" ? "١٥ د" : tf == "30" ? "٣٠ د" : tf == "60" ? "ساعة" : tf == "240" ? "٤ س" : tf == "D" ? "يومي" : tf == "W" ? "أسبوعي" : tf == "M" ? "شهري" : tf
+    tf == "1" ? "١ د" : tf == "2" ? "٢ د" : tf == "3" ? "٣ د" : tf == "5" ? "٥ د" : tf == "10" ? "١٠ د" : tf == "15" ? "١٥ د" : tf == "30" ? "٣٠ د" : tf == "45" ? "٤٥ د" : tf == "60" ? "ساعة" : tf == "120" ? "ساعتان" : tf == "240" ? "٤ س" : tf == "D" ? "يومي" : tf == "W" ? "أسبوعي" : tf == "M" ? "شهري" : tf
 
 htfStr = f_nextTf()
 
@@ -630,10 +630,16 @@ if showPnl and barstate.islast
     // الستررايك بالخط الضخم
     table.cell(pt, 0, 2, "الستررايك", text_color = cKeyTxt, bgcolor = cKey, text_size = kSize)
     table.cell(pt, 1, 2, optOn ? strikeTxt + (expTxt == "" ? "" : "  · " + expTxt) : "—", text_color = f_dirCol(optSide), bgcolor = f_dirBg(optSide, 82), text_size = bigCard ? size.huge : size.normal)
-    f_kv(3, "📍 الدخول", inTrade ? str.tostring(eP, format.mintick) + "  · الآن " + str.tostring(close, format.mintick) + "  · " + f_dur(barsIn, timeframe.period) : "—", cSoft, cVal)
-    f_kv(4, "🛑 الوقف", inTrade ? str.tostring(sP, format.mintick) + (secured ? "  · مؤمَّن فوق الدخول" : "") : "—", color.new(#FCA5A5, 0), inTrade ? color.new(cDn, 85) : cVal)
-    f_kv(5, "🎯 الأهداف", inTrade ? f_hits(hit) + "   " + str.tostring(t1, format.mintick) + " · " + str.tostring(t2, format.mintick) + " · " + str.tostring(t3, format.mintick) : "—", color.new(#86EFAC, 0), inTrade ? color.new(cUp, 85) : cVal)
-    f_kv(6, "½ التأمين", inTrade ? (half ? "بيع النصف ✓ · الوقف عند الدخول" : "عند " + str.tostring(halfLvl, format.mintick) + "  (" + str.tostring(secPct, "#") + "٪ من الطريق)") : "—", half ? color.new(#FCD34D, 0) : cSoft, half ? color.new(cZone, 70) : cVal)
+    // بلا صفقة: الصفوف نفسها تقول ما ستكون عليه الصفقة القادمة بمسافاتها بالدولار
+    nd0 = stopX * atrv
+    n1 = tgtMode == "بالدولار" ? usd1 : x1 * atrv
+    n2 = tgtMode == "بالدولار" ? usd2 : x2 * atrv
+    n3 = tgtMode == "بالدولار" ? usd3 : x3 * atrv
+    idleLvl = pdxMain != 0 ? (pSide != 0 ? pLvl : zLvl) : na
+    f_kv(3, "📍 الدخول", inTrade ? str.tostring(eP, format.mintick) + "  · الآن " + str.tostring(close, format.mintick) + "  · " + f_dur(barsIn, timeframe.period) : not na(idleLvl) ? "المنطقة عند " + str.tostring(idleLvl, format.mintick) + "  · الآن " + str.tostring(close, format.mintick) : "بانتظار إشارة  · ATR " + str.tostring(atrv, format.mintick), inTrade ? cSoft : not na(idleLvl) ? color.new(cZone, 0) : cKeyTxt, inTrade ? cVal : not na(idleLvl) ? color.new(cZone, 82) : cVal)
+    f_kv(4, "🛑 الوقف", inTrade ? str.tostring(sP, format.mintick) + (secured ? "  · مؤمَّن فوق الدخول" : "") : "على بعد " + str.tostring(nd0, format.mintick) + "$ من الدخول", inTrade ? color.new(#FCA5A5, 0) : cKeyTxt, inTrade ? color.new(cDn, 85) : cVal)
+    f_kv(5, "🎯 الأهداف", inTrade ? f_hits(hit) + "   " + str.tostring(t1, format.mintick) + " · " + str.tostring(t2, format.mintick) + " · " + str.tostring(t3, format.mintick) : "+" + str.tostring(n1, format.mintick) + " · +" + str.tostring(n2, format.mintick) + " · +" + str.tostring(n3, format.mintick) + "$", inTrade ? color.new(#86EFAC, 0) : cKeyTxt, inTrade ? color.new(cUp, 85) : cVal)
+    f_kv(6, "½ التأمين", inTrade ? (half ? "بيع النصف ✓ · الوقف عند الدخول" : "عند " + str.tostring(halfLvl, format.mintick) + "  (" + str.tostring(secPct, "#") + "٪ من الطريق)") : "بع النصف عند " + str.tostring(secPct, "#") + "٪ من الطريق إلى هدف ٣", half ? color.new(#FCD34D, 0) : inTrade ? cSoft : cKeyTxt, half ? color.new(cZone, 70) : cVal)
     // الصفقة المقفلة لا تختفي: تبقى بنتيجتها حتى الدخول التالي
     f_kv(7, "🕓 آخر صفقة", lastTxt, lastCol, not hasLast ? cVal : lastR > 0 ? color.new(cUp, 85) : lastR < 0 ? color.new(cDn, 85) : cVal)
     f_kv(8, "📈 أول حركة معك", fmTxt, fmTot > 0 and fmWin * 2 >= fmTot ? color.new(#86EFAC, 0) : color.new(#FCD34D, 0), cVal)
