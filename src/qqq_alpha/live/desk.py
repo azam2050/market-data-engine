@@ -366,6 +366,7 @@ class DeskService:
                 "direction": st.direction if st else 0,
                 "state_text": st.state_text if st else "غير متاح",
                 "price": st.price if st else None,
+                "closes": (st.closes or []) if st else [],
             }
             for sym, st in leaders.items()
         ]

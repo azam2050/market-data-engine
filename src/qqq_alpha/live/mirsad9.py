@@ -113,6 +113,7 @@ class SymbolState:
     last_bar: datetime | None = None
     late_window: bool = False
     bars_today: int = 0
+    closes: list[float] | None = None  # the last closes, for a sparkline
 
     @property
     def side(self) -> int:
@@ -177,6 +178,7 @@ class SymbolState:
             "fm_tot": self.fm_tot,
             "last_bar": self.last_bar.isoformat() if self.last_bar else None,
             "late_window": self.late_window,
+            "closes": self.closes or [],
             "last": None,
         }
         if self.last:
@@ -634,6 +636,7 @@ def evaluate(
         last_bar=bars[-1].ts,
         late_window=k.late,
         bars_today=k.bar_of_day + 1,
+        closes=[round(x, 4) for x in c[-40:]],
     )
     if last is not None and pos == 0:
         st.entry = None
