@@ -47,6 +47,7 @@ coolN   = input.int(2, "راحة بعد كل إشارة (شموع) — لا ان
 htfOn   = input.bool(false, "حجب الإشارة ضد الفريم الأكبر (متوسط ٩ و٢١ على ٣× الفريم)", group = gF, tooltip = "مطفأ: اتجاه الفريم الأكبر يدخل في درجة الجودة فقط ولا يحجب. مشتغل: يحجب كل إشارة ضده — يقطع نصف الإشارات ويتأخر عن الانعكاسات، ورفع النسبة قليلاً في الاختبار")
 skipOpen = input.int(1, "تجاهل أول N شمعة في الجلسة", minval = 0, maxval = 6, group = gF)
 lateN    = input.int(15, "لا إشارة في آخر N دقيقة من الجلسة (٠ = حتى الإغلاق)", minval = 0, maxval = 120, step = 5, group = gF, tooltip = "٠ يترك الإشارات حتى الجرس، ٦٠ يوقف الساعة الأخيرة كاملة. الافتراضي ١٥ دقيقة. على الفريم اليومي والأسبوعي لا أثر له")
+late3N   = input.int(120, "فريم ٣ دقائق وأقل: لا إشارة في آخر N دقيقة (٠ = حسب الإعداد أعلاه)", minval = 0, maxval = 240, step = 15, group = gF, tooltip = "الفريم الصغير يعطي إشارات في هدوء آخر الجلسة لا تكتمل قبل الجرس، وعقود اليوم تفقد قيمتها هناك أسرع من الحركة. الافتراضي: آخر ساعتين بلا إشارات على ٣ دقائق وأقل")
 
 gS = "الوقف والأهداف والتأمين"
 stopX  = input.float(1.5, "الوقف = × ATR من الدخول", minval = 0.5, maxval = 3.0, step = 0.25, group = gS)
@@ -67,7 +68,7 @@ gV = "العرض"
 cardIn = input.string("البطاقة الكبيرة (ب)", "شكل البطاقة", options = ["البطاقة الكبيرة (ب)", "الشريط العلوي (أ)", "ملاصقة للشمعة (د)", "شاشة المراقبة الموسّعة (ج)"], group = gV, tooltip = "ب: بطاقة زاوية كبيرة بالستررايك. أ: شريط عريض أعلى الشارت ولوحة صغيرة في الزاوية. د: بطاقة تتحرك مع آخر شمعة ولوحة صغيرة. ج: شاشة مراقبة بخط كبير ولوحة صغيرة")
 showLv = input.bool(true, "الوقف والأهداف", group = gV)
 showPnl = input.bool(true, "لوحة الزاوية", group = gV)
-showTf = input.bool(true, "صفّا الفريمين ٣ و٥ في اللوحة", group = gV)
+showTf = input.bool(true, "صفّا الفريم الحالي والفريم الأعلى في اللوحة", group = gV, tooltip = "الفريم الذي على الشارت يظهر تلقائياً، ومعه الفريم الذي بعده (٣←١٥، ٥←١٥، ١٥←ساعة، ساعة←٤ ساعات، يومي←أسبوعي) ليقول هل الاثنان متفقان")
 cleanN = input.int(20, "حذف خطوط الصفقة المقفلة بعد N شمعة", minval = 0, maxval = 200, group = gV)
 keepZones = input.int(2, "المناطق المنتهية التي تبقى على الشارت", minval = 0, maxval = 10, group = gV)
 resultN = input.int(30, "نتيجة الصفقة المقفلة تبقى في شاشة المراقبة (شموع)", minval = 0, maxval = 200, group = gV, tooltip = "بعد الخروج يبقى الصف بنتيجته (هدف ٣ +2R، وقف −1R…) هذا العدد من الشموع ثم يعود لحالة الرمز")
@@ -162,7 +163,8 @@ f_core() =>
     sideways = adxOn and adx < adxLvl and insideBox
     // الجلسة: لا أول شمعة (فجوة لا حركة) ولا آخر N دقيقة — العميل يختار N
     minsNY = hour(time, "America/New_York") * 60 + minute(time, "America/New_York")
-    lateBar = intraday and lateN > 0 and minsNY >= 960 - lateN
+    lateEff = timeframe.in_seconds() <= 180 and late3N > 0 ? math.max(lateN, late3N) : lateN
+    lateBar = intraday and lateEff > 0 and minsNY >= 960 - lateEff
     // الراحة: لا إشارة (بأي اتجاه) خلال N شموع بعد إشارة مقبولة
     var int lastBar = -100000
     var int lastSide = 0
@@ -538,15 +540,23 @@ optStrike = f_strike(optRoot, optSide, optLvl, close)
 strikeTxt = optSide == 0 ? "—" : str.tostring(optStrike, "#.##") + (optSide == 1 ? " كول" : " بوت")
 expTxt = optSide == 0 ? "" : expToday ? "ينتهي اليوم" : "ينتهي " + f_two(ed) + "/" + f_two(emo)
 
-// الفريمان ٣ و٥ على الرمز نفسه — المنطق نفسه
+// الفريم الأعلى يتبع فريم الشارت تلقائياً: ٣←١٥، ٥←١٥، ١٥←ساعة، ساعة←٤ س، يومي←أسبوعي
+f_nextTf() =>
+    sec = timeframe.in_seconds()
+    sec <= 60 ? "5" : sec <= 300 ? "15" : sec <= 1800 ? "60" : sec <= 3600 ? "240" : sec <= 14400 ? "D" : sec <= 86400 ? "W" : "M"
+
+f_tfName(string tf) =>
+    tf == "1" ? "١ د" : tf == "3" ? "٣ د" : tf == "5" ? "٥ د" : tf == "15" ? "١٥ د" : tf == "30" ? "٣٠ د" : tf == "60" ? "ساعة" : tf == "240" ? "٤ س" : tf == "D" ? "يومي" : tf == "W" ? "أسبوعي" : tf == "M" ? "شهري" : tf
+
+htfStr = f_nextTf()
+
 f_tf() =>
     [sL, sS, qq, av, e9w, stt, blk, raw] = f_core()
     [p, pd, e, s, q1, q2, q3, h, sec, bi, cl, ex, lr, ps, pl, fw, ft, qt, zs, zlv, zb, zu, zst, hf, hl, sn, nt, em, x1p, x1r, x1t, x1b, lsd, cat] = f_trade(sL, sS, qq, av, e9w)
     pdx = pd != 0 ? pd : ps != 0 ? ps * 2 : (zs != 0 and zu == 1 and not zst) ? zs * 3 : 0
     [p, pdx, sec ? 1 : 0, stt, raw, blk, ft > 0 ? 10.0 * fw / ft : na]
 
-[tp3, td3, tc3, ts3, tr3, tb3, tf3] = request.security(syminfo.tickerid, "3", f_tf(), lookahead = barmerge.lookahead_off, calc_bars_count = watchBars)
-[tp5, td5, tc5, ts5, tr5, tb5, tf5] = request.security(syminfo.tickerid, "5", f_tf(), lookahead = barmerge.lookahead_off, calc_bars_count = watchBars)
+[hp, hd, hc, hs, hr, hb, hfm] = request.security(syminfo.tickerid, htfStr, f_tf(), lookahead = barmerge.lookahead_off, calc_bars_count = watchBars)
 
 bigCard = cardIn == "البطاقة الكبيرة (ب)"
 ribbon = cardIn == "الشريط العلوي (أ)"
@@ -556,7 +566,13 @@ pdxMain = pend != 0 ? pend : pSide != 0 ? pSide * 2 : (zSide != 0 and zUses == 1
 stMain = f_stateTxt(pos, pdxMain, secured, state, rawSide, blockTxt) + (pos != 0 and nth >= 2 ? " · دخول ثاني" : "")
 stCol = pos != 0 or pdxMain != 0 ? color.new(pos == -1 or pdxMain < 0 ? #FCA5A5 : #86EFAC, 0) : color.new(#FCD34D, 0)
 stBg = pos == 1 ? color.new(cUp, 20) : pos == -1 ? color.new(cDn, 20) : pdxMain > 0 ? color.new(cUp, 60) : pdxMain < 0 ? color.new(cDn, 60) : color.new(#1F2937, 10)
-agree = (tp3 == 1 or td3 == 1) and (tp5 == 1 or td5 == 1) ? "كول على الفريمين" : (tp3 == -1 or td3 == -1) and (tp5 == -1 or td5 == -1) ? "بوت على الفريمين" : "لا توافق"
+// اتجاه كل فريم: صفقة قائمة، وإلا منطقة جاهزة، وإلا الميل
+mainDir = pos != 0 ? pos : pdxMain > 0 ? 1 : pdxMain < 0 ? -1 : state == 1 ? 1 : state == -1 ? -1 : 0
+htfDir = na(hp) ? 0 : hp != 0 ? hp : hd > 0 ? 1 : hd < 0 ? -1 : hs == 1 ? 1 : hs == -1 ? -1 : 0
+agree = mainDir == 1 and htfDir == 1 ? "✅ كول على الفريمين" : mainDir == -1 and htfDir == -1 ? "✅ بوت على الفريمين" : "⌛ لا توافق"
+agreeOk = mainDir != 0 and mainDir == htfDir
+mainTxt = f_stateTxt(pos, pdxMain, secured, state, rawSide, blockTxt)
+htfTxt = na(hp) ? "غير متاح" : f_stateTxt(hp, hd, hc == 1, hs, hr, hb) + (na(hfm) ? "" : "  · " + str.tostring(hfm, "#.#") + "/١٠")
 fmTxt = fmTot > 0 ? str.tostring(math.round(10.0 * fmWin / fmTot, 1), "#.#") + " من ١٠  (" + str.tostring(fmWin) + " من " + str.tostring(fmTot) + ")" : "—"
 
 // آخر صفقة مقفلة: الاتجاه والدخول والنتيجة والأهداف التي نوّرت ومدتها
@@ -564,39 +580,52 @@ hasLast = pos == 0 and lastSide != 0 and exitTxt != ""
 lastTxt = hasLast ? (lastSide == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) + " → " + exitTxt + " " + (lastR >= 0 ? "+" : "") + str.tostring(lastR, "#.##") + "R · " + f_hits(hit) + (half ? " · ½ ✓" : "") + " · " + f_dur(barsIn, timeframe.period) + " · قبل " + f_dur(bar_index - closedAt, timeframe.period) : "—"
 lastCol = not hasLast ? color.new(#D1D5DB, 0) : lastR > 0 ? color.new(#86EFAC, 0) : lastR < 0 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0)
 
-// ── لوحة الزاوية: كبيرة في (ب)، صغيرة في الباقي
+// ── لوحة الزاوية: كبيرة في (ب)، صغيرة في الباقي. كل صف بلونه: أخضر للأهداف،
+// أحمر للوقف، ذهبي للتأمين، والحالة والستررايك بلون الاتجاه
 var table pt = na
 kSize = bigCard ? size.small : size.tiny
 vSize = bigCard ? size.normal : size.small
-f_kv(int r, string k, string v, color c) =>
-    table.cell(pt, 0, r, k, text_color = color.new(#9CA3AF, 0), bgcolor = color.new(#1F2937, 10), text_size = kSize)
-    table.cell(pt, 1, r, v, text_color = c, bgcolor = color.new(#1F2937, 10), text_size = vSize)
+cKey = color.new(#0B1220, 0)
+cVal = color.new(#111827, 0)
+cKeyTxt = color.new(#A3ACBA, 0)
+cSoft = color.new(#D1D5DB, 0)
+f_dirCol(int d) =>
+    d == 1 ? color.new(#86EFAC, 0) : d == -1 ? color.new(#FCA5A5, 0) : cSoft
+f_dirBg(int d, int t) =>
+    d == 1 ? color.new(cUp, t) : d == -1 ? color.new(cDn, t) : cVal
+f_kv(int r, string k, string v, color c, color bg) =>
+    table.cell(pt, 0, r, k, text_color = cKeyTxt, bgcolor = cKey, text_size = kSize)
+    table.cell(pt, 1, r, v, text_color = c, bgcolor = bg, text_size = vSize)
 
 if showPnl and barstate.islast
     if na(pt)
-        pt := table.new(position.bottom_right, 2, 14, border_width = 1, border_color = color.new(#000000, 80), frame_width = 1, frame_color = color.new(#000000, 70))
-    table.cell(pt, 0, 0, "مِرصاد ٩", text_color = color.white, bgcolor = color.new(#111827, 0), text_size = vSize)
-    table.cell(pt, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color = color.new(#D1D5DB, 0), bgcolor = color.new(#111827, 0), text_size = vSize)
-    table.cell(pt, 0, 1, "الحالة", text_color = color.new(#9CA3AF, 0), bgcolor = color.new(#1F2937, 10), text_size = kSize)
-    table.cell(pt, 1, 1, stMain + (pos != 0 ? " · جودة " + str.tostring(qT, "#") : ""), text_color = bigCard ? color.white : stCol, bgcolor = bigCard ? stBg : color.new(#1F2937, 10), text_size = bigCard ? size.large : size.small)
-    r = 2
-    if optOn and not ribbon and not floatCard
-        table.cell(pt, 0, r, "الستررايك", text_color = color.new(#9CA3AF, 0), bgcolor = color.new(#1F2937, 10), text_size = kSize)
-        table.cell(pt, 1, r, strikeTxt + (expTxt == "" ? "" : "  · " + expTxt), text_color = optSide == 1 ? color.new(#86EFAC, 0) : optSide == -1 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0), bgcolor = color.new(#1F2937, 10), text_size = bigCard ? size.huge : size.normal)
-        r := r + 1
-    f_kv(r, "دخول السهم", pos != 0 ? str.tostring(eP, format.mintick) + "  · الآن " + str.tostring(close, format.mintick) + "  (" + f_dur(barsIn, timeframe.period) + ")" : "—", color.new(#D1D5DB, 0))
-    f_kv(r + 1, "الوقف", pos != 0 ? str.tostring(sP, format.mintick) + (secured ? "  (مؤمَّن)" : "") : "—", color.new(#FCA5A5, 0))
-    f_kv(r + 2, "الأهداف", pos != 0 ? f_hits(hit) + "   " + str.tostring(t1, format.mintick) + " · " + str.tostring(t2, format.mintick) + " · " + str.tostring(t3, format.mintick) : "—", color.new(#86EFAC, 0))
-    f_kv(r + 3, "التأمين", pos != 0 ? (half ? "½ بيع النصف ✓ · الوقف عند الدخول" : "عند " + str.tostring(halfLvl, format.mintick) + " (" + str.tostring(secPct, "#") + "٪ من الطريق)") : "—", half ? color.new(#FCD34D, 0) : color.new(#D1D5DB, 0))
-    if pos != 0 and nth >= 2 and not na(e1P)
-        f_kv(r + 9 + (showTf ? 1 : 0), "الدخول الأول", str.tostring(e1P, format.mintick) + " · " + e1T + " " + (e1R >= 0 ? "+" : "") + str.tostring(e1R, "#.##") + "R · " + f_dur(e1B, timeframe.period), e1R > 0 ? color.new(#86EFAC, 0) : e1R < 0 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
+        pt := table.new(position.bottom_right, 2, 16, border_width = 1, border_color = color.new(#000000, 80), frame_width = 2, frame_color = color.new(cZone, 40))
+    inTrade = pos != 0
+    // العنوان: الاسم بالذهبي، والرمز والفريم كما هما على الشارت
+    table.cell(pt, 0, 0, "مِرصاد ٩", text_color = color.new(cZone, 0), bgcolor = color.new(#050A14, 0), text_size = vSize)
+    table.cell(pt, 1, 0, syminfo.ticker + "  ·  " + f_tfName(timeframe.period), text_color = color.white, bgcolor = color.new(#050A14, 0), text_size = vSize)
+    // الحالة بلون الاتجاه
+    table.cell(pt, 0, 1, "الحالة", text_color = cKeyTxt, bgcolor = cKey, text_size = kSize)
+    table.cell(pt, 1, 1, stMain + (inTrade ? " · جودة " + str.tostring(qT, "#") : ""), text_color = color.white, bgcolor = stBg, text_size = bigCard ? size.large : size.small)
+    // الستررايك بالخط الضخم
+    table.cell(pt, 0, 2, "الستررايك", text_color = cKeyTxt, bgcolor = cKey, text_size = kSize)
+    table.cell(pt, 1, 2, optOn ? strikeTxt + (expTxt == "" ? "" : "  · " + expTxt) : "—", text_color = f_dirCol(optSide), bgcolor = f_dirBg(optSide, 82), text_size = bigCard ? size.huge : size.normal)
+    f_kv(3, "📍 الدخول", inTrade ? str.tostring(eP, format.mintick) + "  · الآن " + str.tostring(close, format.mintick) + "  · " + f_dur(barsIn, timeframe.period) : "—", cSoft, cVal)
+    f_kv(4, "🛑 الوقف", inTrade ? str.tostring(sP, format.mintick) + (secured ? "  · مؤمَّن فوق الدخول" : "") : "—", color.new(#FCA5A5, 0), inTrade ? color.new(cDn, 85) : cVal)
+    f_kv(5, "🎯 الأهداف", inTrade ? f_hits(hit) + "   " + str.tostring(t1, format.mintick) + " · " + str.tostring(t2, format.mintick) + " · " + str.tostring(t3, format.mintick) : "—", color.new(#86EFAC, 0), inTrade ? color.new(cUp, 85) : cVal)
+    f_kv(6, "½ التأمين", inTrade ? (half ? "بيع النصف ✓ · الوقف عند الدخول" : "عند " + str.tostring(halfLvl, format.mintick) + "  (" + str.tostring(secPct, "#") + "٪ من الطريق)") : "—", half ? color.new(#FCD34D, 0) : cSoft, half ? color.new(cZone, 70) : cVal)
     // الصفقة المقفلة لا تختفي: تبقى بنتيجتها حتى الدخول التالي
-    f_kv(r + 4, "آخر صفقة", lastTxt, lastCol)
-    f_kv(r + 5, "أول حركة معك", fmTxt, fmTot > 0 and fmWin * 2 >= fmTot ? color.new(#86EFAC, 0) : color.new(#FCD34D, 0))
+    f_kv(7, "🕓 آخر صفقة", lastTxt, lastCol, not hasLast ? cVal : lastR > 0 ? color.new(cUp, 85) : lastR < 0 ? color.new(cDn, 85) : cVal)
+    f_kv(8, "📈 أول حركة معك", fmTxt, fmTot > 0 and fmWin * 2 >= fmTot ? color.new(#86EFAC, 0) : color.new(#FCD34D, 0), cVal)
     if showTf
-        f_kv(r + 6, "فريم ٣", na(tp3) ? "غير متاح" : f_stateTxt(tp3, td3, tc3 == 1, ts3, tr3, tb3) + (na(tf3) ? "" : "  · " + str.tostring(tf3, "#.#") + "/١٠"), na(tp3) ? color.new(#9CA3AF, 0) : tp3 == 1 or td3 == 1 ? color.new(#86EFAC, 0) : tp3 == -1 or td3 == -1 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
-        f_kv(r + 7, "فريم ٥", na(tp5) ? "غير متاح" : f_stateTxt(tp5, td5, tc5 == 1, ts5, tr5, tb5) + (na(tf5) ? "" : "  · " + str.tostring(tf5, "#.#") + "/١٠"), na(tp5) ? color.new(#9CA3AF, 0) : tp5 == 1 or td5 == 1 ? color.new(#86EFAC, 0) : tp5 == -1 or td5 == -1 ? color.new(#FCA5A5, 0) : color.new(#D1D5DB, 0))
-        f_kv(r + 8, "التوافق", agree, agree == "لا توافق" ? color.new(#FCD34D, 0) : color.white)
+        // الفريمان: الذي على الشارت، والذي بعده، ثم التوافق بينهما
+        table.cell(pt, 0, 9, "🕒 الفريمات", text_color = color.new(cZone, 0), bgcolor = color.new(#050A14, 0), text_size = kSize)
+        table.cell(pt, 1, 9, "الشارت والفريم الأعلى", text_color = cKeyTxt, bgcolor = color.new(#050A14, 0), text_size = kSize)
+        f_kv(10, f_tfName(timeframe.period) + "  (الشارت)", (mainDir != 0 ? "✅ " : "⌛ ") + mainTxt, f_dirCol(mainDir), f_dirBg(mainDir, 80))
+        f_kv(11, f_tfName(htfStr) + "  (الأعلى)", (htfDir != 0 ? "✅ " : "⌛ ") + htfTxt, f_dirCol(htfDir), f_dirBg(htfDir, 80))
+        f_kv(12, "التوافق", agree, agreeOk ? color.white : color.new(#FCD34D, 0), agreeOk ? f_dirBg(mainDir, 60) : color.new(cZone, 80))
+    if inTrade and nth >= 2 and not na(e1P)
+        f_kv(13, "الدخول الأول", str.tostring(e1P, format.mintick) + " · " + e1T + " " + (e1R >= 0 ? "+" : "") + str.tostring(e1R, "#.##") + "R · " + f_dur(e1B, timeframe.period), e1R > 0 ? color.new(#86EFAC, 0) : e1R < 0 ? color.new(#FCA5A5, 0) : cSoft, cVal)
 
 // ── (أ) الشريط العلوي: صف واحد عريض بخط كبير
 var table rt = na
