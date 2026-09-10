@@ -289,11 +289,20 @@ class DeskService:
             if state.hit >= 2:
                 return "هدف ٢ تحقق. الوقف يتبع قاع الحركة فوق هدف ١، خذ ما يعطيك السوق."
             if state.half:
-                return "✅ بيع النصف تم عند ٣٥٪ من الطريق. الوقف عند الدخول، والباقي إلى هدف ٢ و٣."
+                return "✅ وصل السهم إلى مستوى التأمين (٣٥٪ من الطريق إلى هدف ٣): النصف بيع، الوقف عند الدخول، والباقي إلى هدف ٢ و٣."
+            # the secure level is a STOCK level — 35% of the way from the entry
+            # to target 3 — not 35% profit on the contract. The sentence has to
+            # say so, or it reads as "sell half now" while the trade is young
             half = contract["targets"].get("half") if contract and not contract.get("missing") else None
             if half and half.get("pct") is not None:
-                return f"بع النصف عند {half['contract']:.2f} (+{half['pct']:.0f}٪) وأمّن الصفقة. الوقف {state.stop:.2f} على السهم."
-            return f"بع النصف عند {state.half_level:.2f} على السهم وأمّن الصفقة. الوقف {state.stop:.2f}."
+                return (
+                    f"احتفظ الآن. حين يصل السهم إلى {state.half_level:.2f} (٣٥٪ من الطريق إلى هدف ٣) "
+                    f"بع النصف — العقد حينها ≈ {half['contract']:.2f} أي {half['pct']:+.0f}٪ — وانقل الوقف إلى الدخول. الوقف الآن {state.stop:.2f} على السهم."
+                )
+            return (
+                f"احتفظ الآن. حين يصل السهم إلى {state.half_level:.2f} (٣٥٪ من الطريق إلى هدف ٣) "
+                f"بع النصف وانقل الوقف إلى الدخول. الوقف الآن {state.stop:.2f}."
+            )
         if state.pending:
             if abs(state.pending) == 1:
                 return "دخول على افتتاح الشمعة القادمة."

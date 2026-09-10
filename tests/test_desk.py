@@ -273,9 +273,14 @@ async def test_board_survives_a_symbol_without_data(tmp_path):
 def test_note_for_each_situation():
     base = dict(symbol="QQQ", frame=3, price=100.0, atr=1.0, trend=1, quality_now=50.0)
     in_trade = SymbolState(**base, pos=1, entry=100, stop=98.5, t1=101, t2=102, t3=103, half_level=101.05)
-    assert "بع النصف" in DeskService.note_for(in_trade, None, None)
+    note = DeskService.note_for(in_trade, None, None)
+    # the secure level is a stock level, and the sentence must not read as
+    # "sell half now" while the stock is still short of it
+    assert note.startswith("احتفظ الآن") and "حين يصل السهم إلى 101.05" in note and "٣٥٪ من الطريق إلى هدف ٣" in note
+    priced = {"missing": False, "targets": {"half": {"stock": 101.05, "contract": 2.71, "pct": 18.0}}}
+    assert "≈ 2.71 أي +18٪" in DeskService.note_for(in_trade, priced, None)
     in_trade.half = True
-    assert "بيع النصف تم" in DeskService.note_for(in_trade, None, None)
+    assert "النصف بيع" in DeskService.note_for(in_trade, None, None)
     in_trade.hit = 2
     assert "هدف ٢" in DeskService.note_for(in_trade, None, None)
     zone = SymbolState(**base, pending=2, level=99.5)
