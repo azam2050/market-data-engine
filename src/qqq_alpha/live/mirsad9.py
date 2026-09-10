@@ -295,7 +295,7 @@ def _isnan(x: float) -> bool:
 
 
 @dataclass
-class _Core:
+class CoreBar:
     """Per-bar values of the Pine ``f_core``."""
 
     okL: bool
@@ -305,13 +305,19 @@ class _Core:
     e9: float
     state: int  # 9 sideways, 1 up, -1 down
     block: str
-    raw: int
+    raw: int  # the impulse side before any filter (Pine's side0)
     late: bool
     minute: int
     bar_of_day: int
 
 
-def _core(bars: list[Bar], frame: int, p: Params, confirmed_upto: int) -> list[_Core]:
+def core(bars: list[Bar], frame: int, params: Params | None = None) -> list[CoreBar]:
+    """The per-bar core values for ``bars`` on ``frame`` — what other
+    modules (the leader's basket) read instead of re-deriving the maths."""
+    return _core(bars, frame, params or Params(), len(bars))
+
+
+def _core(bars: list[Bar], frame: int, p: Params, confirmed_upto: int) -> list[CoreBar]:
     n = len(bars)
     o = [b.open for b in bars]
     h = [b.high for b in bars]
@@ -339,7 +345,7 @@ def _core(bars: list[Bar], frame: int, p: Params, confirmed_upto: int) -> list[_
     adx = _rma(dx, 14)
     vavg = [sum(v[max(0, i - 19): i + 1]) / min(i + 1, 20) for i in range(n)]
 
-    out: list[_Core] = []
+    out: list[CoreBar] = []
     last_bar = -100000
     or_hi = or_lo = None
     for i in range(n):
@@ -406,7 +412,7 @@ def _core(bars: list[Bar], frame: int, p: Params, confirmed_upto: int) -> list[_
                 else "جودة منخفضة" if q < p.minQ else ""
             )
         state = 9 if sideways else 1 if eH1[i] > eH2[i] else -1
-        out.append(_Core(okL, okS, q, a, e9[i], state, block, side0, late, minute, bar_day))
+        out.append(CoreBar(okL, okS, q, a, e9[i], state, block, side0, late, minute, bar_day))
     return out
 
 

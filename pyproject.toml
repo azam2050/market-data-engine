@@ -50,6 +50,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501", "B008"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 asyncio_mode = "auto"

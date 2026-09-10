@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>قائد اليوم · مِرصاد ٩</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;800&family=IBM+Plex+Sans+Arabic:wght@400;500;700&display=swap">
+<style>
+:root{
+  --bg:#F5F7FB; --card:#FFFFFF; --ink:#132038; --mute:#5E6B84; --line:#E1E6F0; --soft:#EEF2F9;
+  --up:#0B9A62; --up-soft:#DDF5EA; --dn:#D63A4E; --dn-soft:#FBE3E7; --wait:#D98E0B; --wait-soft:#FFF1D6;
+  --acc:#2457D6; --acc-soft:#E3EAFB; --shadow:0 1px 2px rgba(19,32,56,.06),0 8px 24px rgba(19,32,56,.06);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0E1424; --card:#161E31; --ink:#EAF0FA; --mute:#9AA7C1; --line:#26314A; --soft:#1E2840;
+  --up:#2ED68F; --up-soft:#123A2C; --dn:#FF6B7E; --dn-soft:#43202A; --wait:#F4B33D; --wait-soft:#3E3016;
+  --acc:#6D96FF; --acc-soft:#1E2C50; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+}}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans Arabic",system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;font-size:16px;line-height:1.55;direction:rtl;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:760px;margin:0 auto;padding:18px 16px 48px;display:grid;gap:16px}
+h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
+.num{font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px}
+.mark{width:40px;height:40px;border-radius:12px;background:var(--acc);color:#fff;display:grid;place-items:center;font-family:"Cairo";font-weight:800;font-size:18px;box-shadow:var(--shadow)}
+.brand h1{margin:0;font-size:22px;line-height:1.1}
+.brand small{display:block;color:var(--mute);font-size:13px;font-weight:500}
+.clock{display:flex;gap:10px;align-items:center;color:var(--mute);font-size:14px;flex-wrap:wrap}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--mute);box-shadow:0 0 0 4px var(--soft)}
+.dot.live{background:var(--up);box-shadow:0 0 0 4px var(--up-soft)}
+@media (prefers-reduced-motion:no-preference){.dot.live{animation:pulse 2s infinite}@keyframes pulse{50%{box-shadow:0 0 0 7px transparent}}}
+.linkpill{font-size:13px;color:var(--mute);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:4px 10px;background:var(--card)}
+
+.verdict{border-radius:20px;padding:20px 22px;color:#fff;box-shadow:var(--shadow);display:grid;gap:10px}
+.verdict.up{background:linear-gradient(135deg,#0B9A62,#0D7F58)}
+.verdict.dn{background:linear-gradient(135deg,#D63A4E,#B02A3C)}
+.verdict.wait{background:linear-gradient(135deg,#D98E0B,#B8750A)}
+.verdict.off{background:linear-gradient(135deg,#5E6B84,#46526A)}
+.verdict .eyebrow{font-size:13px;font-weight:700;opacity:.9;letter-spacing:.04em}
+.verdict h2{margin:0;font-size:30px;line-height:1.15;text-wrap:balance}
+.verdict p{margin:0;font-size:16px;opacity:.95;max-width:38em}
+.verdict .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.chip{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);border-radius:999px;padding:5px 12px;font-size:14px;font-weight:700}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+.card>.head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.card>.head h3{margin:0;font-size:17px}
+.card>.body{padding:16px 18px;display:grid;gap:14px}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 12px;font-weight:700;font-size:14px;white-space:nowrap}
+.pill.up{background:var(--up-soft);color:var(--up)}
+.pill.dn{background:var(--dn-soft);color:var(--dn)}
+.pill.wait{background:var(--wait-soft);color:var(--wait)}
+.pill.off{background:var(--soft);color:var(--mute)}
+
+.leader{border-top:5px solid var(--mute)}
+.leader.up{border-top-color:var(--up)} .leader.dn{border-top-color:var(--dn)} .leader.wait{border-top-color:var(--wait)}
+.sym{display:flex;align-items:baseline;gap:10px}
+.sym b{font-family:"Cairo";font-size:26px;font-weight:800}
+.sym span{color:var(--mute);font-size:14px}
+.pxrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.pxrow .mute{color:var(--mute);font-size:14px}
+.price{font-family:"Cairo";font-size:22px;font-weight:800}
+.contract{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;background:var(--acc-soft);border-radius:14px;padding:12px 14px}
+.contract .name{font-weight:700;color:var(--acc);font-size:15px}
+.contract .sub{color:var(--mute);font-size:13px}
+.contract .cost{font-family:"Cairo";font-size:22px;font-weight:800;color:var(--acc)}
+.levels{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.lvl{border-radius:14px;padding:12px 10px;text-align:center;display:grid;gap:2px}
+.lvl .lab{font-size:12px;font-weight:700;letter-spacing:.02em}
+.lvl .px{font-family:"Cairo";font-size:20px;font-weight:800;line-height:1.1}
+.lvl .ct{font-size:13px;font-weight:700}
+.lvl.stop{background:var(--dn-soft);color:var(--dn)}
+.lvl.entry{background:var(--soft);color:var(--ink)} .lvl.entry .ct{color:var(--mute)}
+.lvl.target{background:var(--up-soft);color:var(--up)}
+.rail{position:relative;height:10px;border-radius:999px;margin:6px 8px 22px;background:linear-gradient(270deg,var(--up) 0%,var(--up) 40%,var(--soft) 40%,var(--soft) 60%,var(--dn) 60%,var(--dn) 100%)}
+.rail .now{position:absolute;top:50%;transform:translate(50%,-50%);width:18px;height:18px;border-radius:50%;background:var(--card);border:4px solid var(--acc);box-shadow:var(--shadow)}
+.rail .tag{position:absolute;top:16px;transform:translateX(50%);font-size:12px;color:var(--mute);white-space:nowrap}
+.say{display:flex;gap:10px;align-items:flex-start;border-radius:14px;padding:12px 14px;font-size:15px;font-weight:500}
+.say.up{background:var(--up-soft);color:var(--up)} .say.dn{background:var(--dn-soft);color:var(--dn)}
+.say.wait{background:var(--wait-soft);color:var(--wait)} .say.off,.say.plain{background:var(--soft);color:var(--ink)}
+.say .ico{font-size:18px;line-height:1.3}
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:14px}
+.kv div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px dashed var(--line);padding:6px 0}
+.kv span:first-child{color:var(--mute)} .kv span:last-child{font-weight:700}
+.plans{display:grid;gap:8px}
+.plan{display:grid;gap:3px;padding:10px 12px;border-radius:12px;background:var(--soft);font-size:14px}
+.plan .t{font-weight:700}
+.plan.up .t{color:var(--up)} .plan.dn .t{color:var(--dn)} .plan.wait .t{color:var(--wait)} .plan.off .t{color:var(--mute)}
+.plan .x{color:var(--ink)}
+.grid10{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.tile{border-radius:12px;padding:10px 6px;text-align:center;display:grid;gap:2px;border:1px solid var(--line);background:var(--card);color:var(--mute)}
+.tile b{font-family:"Cairo";font-size:15px}
+.tile small{font-size:12px;font-weight:700}
+.tile.up{background:var(--up-soft);border-color:transparent;color:var(--up)}
+.tile.dn{background:var(--dn-soft);border-color:transparent;color:var(--dn)}
+.meter{display:grid;gap:6px}
+.meter .bar{height:12px;border-radius:999px;background:var(--soft);overflow:hidden;display:flex}
+.meter .bar i{display:block;height:100%}
+.meter .cap{display:flex;justify-content:space-between;font-size:13px;color:var(--mute)}
+.steps{display:grid;gap:10px}
+.step{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:10px 12px;border-radius:14px;background:var(--soft)}
+.step .t{font-family:"Cairo";font-weight:800;font-size:15px;color:var(--mute);min-width:52px}
+.step .w{font-size:15px}
+.step .w small{display:block;color:var(--mute);font-size:13px}
+.step.on{background:var(--up-soft)} .step.on .t{color:var(--up)}
+.step.hold{background:var(--wait-soft)} .step.hold .t{color:var(--wait)}
+.trade{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.trade:last-child{border-bottom:0}
+.trade .n{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-family:"Cairo";font-weight:800;color:#fff;background:var(--mute)}
+.trade .n.up{background:var(--up)} .trade .n.dn{background:var(--dn)} .trade .n.live{background:var(--acc)} .trade .n.wait{background:var(--wait)}
+.trade .d{font-size:15px} .trade .d small{display:block;color:var(--mute);font-size:13px}
+.trade .r{font-family:"Cairo";font-weight:800;font-size:18px;white-space:nowrap}
+.trade .r.up{color:var(--up)} .trade .r.dn{color:var(--dn)} .trade .r.live{color:var(--acc)} .trade .r.off{color:var(--mute);font-size:14px;font-weight:700}
+.days{display:grid;gap:6px}
+.day{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;font-size:14px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.day:last-child{border-bottom:0}
+.day .dots{display:flex;gap:4px}
+.day .dots i{width:12px;height:12px;border-radius:3px;background:var(--soft);display:block}
+.day .dots i.w{background:var(--up)} .day .dots i.l{background:var(--dn)} .day .dots i.e{background:var(--mute)}
+.proof{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.proof div{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 8px;text-align:center}
+.proof b{display:block;font-family:"Cairo";font-size:22px;font-weight:800;color:var(--acc)}
+.proof small{color:var(--mute);font-size:12px;font-weight:700}
+.foot{color:var(--mute);font-size:13px;text-align:center;line-height:1.7}
+.note{background:var(--wait-soft);color:var(--wait);border-radius:12px;padding:9px 14px;font-size:14px;font-weight:500}
+.note.err{background:var(--dn-soft);color:var(--dn)}
+.empty{padding:28px;text-align:center;color:var(--mute)}
+@media (max-width:520px){.verdict h2{font-size:25px}.proof{grid-template-columns:repeat(2,1fr)}.kv{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="mark">م٩</div>
+      <div><h1>قائد اليوم</h1><small>{{ name }} · كيوز وسباي · عقد اليوم</small></div>
+    </div>
+    <div class="clock"><span class="dot" id="dot"></span><span id="session">…</span><span class="num" id="clock"></span><a class="linkpill" href="/desk">مكتبي</a></div>
+  </header>
+  <div id="notes"></div>
+  <section class="verdict off" id="verdict"><div class="eyebrow">قراءة الآن</div><h2 id="v-title">جاري تحميل الشاشة…</h2><p id="v-text"></p><div class="row" id="v-chips"></div></section>
+  <div id="leaders" style="display:grid;gap:16px"></div>
+  <section class="card" id="block-card">
+    <div class="head"><h3>الكتلة · أكبر ١٠ شركات</h3><span class="pill off" id="block-pill">—</span></div>
+    <div class="body"><div class="meter"><div class="bar" id="block-bar"></div><div class="cap" id="block-cap"></div></div><div class="grid10" id="tiles"></div><div class="say plain"><span class="ico">ⓘ</span><span id="block-rule"></span></div></div>
+  </section>
+  <section class="card">
+    <div class="head"><h3>قراءة الصباح</h3><span class="pill off">كيوز · بوحدة مدى اليوم</span></div>
+    <div class="body"><div class="steps" id="steps"></div></div>
+  </section>
+  <section class="card">
+    <div class="head"><h3>فرص اليوم</h3><span class="pill off" id="j-pill">الحد ٢ لكل قائد</span></div>
+    <div class="body" style="gap:0" id="today"></div>
+  </section>
+  <section class="card">
+    <div class="head"><h3>آخر عشر جلسات</h3><span class="pill off" id="live-pill">—</span></div>
+    <div class="body"><div class="days" id="days"></div></div>
+  </section>
+  <section>
+    <div class="proof" id="proof"></div>
+    <p class="foot" id="foot"></p>
+  </section>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const f2 = (x) => (x === null || x === undefined) ? "—" : Number(x).toFixed(2);
+  const n = (x, d = 2) => '<span class="num">' + f2(x) + '</span>';
+  const pct = (x) => (x === null || x === undefined) ? "" : (x >= 0 ? "+" : "−") + Math.abs(Number(x)).toFixed(0) + "٪";
+  const tone = (side) => side > 0 ? "up" : side < 0 ? "dn" : "off";
+
+  function contractBlock(c, ld) {
+    if (!c) return "";
+    if (c.missing) return '<div class="contract"><div><div class="name">لا عقد مناسب الآن</div><div class="sub">' + (c.error ? "تعذر جلب سلسلة العقود" : "لا سترايك بسعر معقول لانتهاء اليوم") + '</div></div></div>';
+    const t = c.targets || {};
+    const est = (k) => (t[k] && t[k].contract !== null) ? '≈ $' + f2(t[k].contract) + ' ' + pct(t[k].pct) : '';
+    return '<div class="contract"><div><div class="name">' + esc(ld.symbol) + ' ' + esc(c.side_text) + ' <span class="num">' + esc(c.strike) + '</span> · ' + esc(c.expiry_text) + '</div><div class="sub">الآن ' + n(c.price) + ' (' + n(c.bid) + ' / ' + n(c.ask) + ')' + (c.delta ? ' · دلتا ' + Math.abs(c.delta).toFixed(2) : '') + '</div></div><div class="cost"><span class="num">$' + f2(c.price) + '</span></div></div>'
+      + '<div class="levels">'
+      + '<div class="lvl target"><div class="lab">الهدف · بع الكل</div><div class="px">' + n(t.target && t.target.stock) + '</div><div class="ct">' + est("target") + '</div></div>'
+      + '<div class="lvl entry"><div class="lab">الدخول</div><div class="px">' + n(t.entry && t.entry.stock) + '</div><div class="ct">' + (ld.active && ld.active.status === "open" ? (ld.active.via_zone ? "من المنطقة" : "بالتأكيد") : "المنطقة") + '</div></div>'
+      + '<div class="lvl stop"><div class="lab">الوقف · اطلع</div><div class="px">' + n(t.stop && t.stop.stock) + '</div><div class="ct">' + est("stop") + '</div></div>'
+      + '</div>';
+  }
+
+  function rail(a, price) {
+    if (!a || a.status !== "open") return "";
+    const lo = a.side > 0 ? a.stop : a.target, hi = a.side > 0 ? a.target : a.stop;
+    let x = (price - lo) / ((hi - lo) || 1); if (a.side < 0) x = 1 - x;
+    x = Math.max(0, Math.min(1, x));
+    const right = (100 - x * 100).toFixed(1) + "%";
+    return '<div class="rail"><span class="now" style="right:' + right + '"></span><span class="tag" style="right:' + right + '">الآن ' + f2(price) + '</span></div>';
+  }
+
+  function leaderCard(ld) {
+    if (ld.unavailable) return '<section class="card leader"><div class="head"><div class="sym"><b>' + esc(ld.symbol) + '</b><span>' + esc(ld.name) + '</span></div><span class="pill off">لا بيانات</span></div><div class="body"><div class="say off"><span class="ico">⚠️</span><span>تعذر جلب البيانات الآن. الشاشة تعيد المحاولة كل نصف دقيقة.</span></div></div></section>';
+    const a = ld.active;
+    const st = ld.state;
+    const cls = a ? (a.status === "open" ? tone(a.side) : "wait") : "off";
+    const pill = a ? (a.status === "open" ? '<span class="pill ' + tone(a.side) + '">● ' + (a.side > 0 ? "شراء" : "بيع") + ' قائمة · درجة ' + esc(a.grade) + '</span>'
+                    : a.status === "chase" ? '<span class="pill wait">◐ تأكيد · دخول الشمعة القادمة</span>'
+                    : '<span class="pill wait">◐ بانتظار المنطقة</span>')
+                 : st === "done" ? '<span class="pill off">انتهت فرص اليوم</span>' : '<span class="pill off">مراقبة</span>';
+    let body = '<div class="pxrow"><span class="mute">السعر الآن · شمعة <span class="num">' + esc(ld.bar_time) + '</span></span><span class="price num">' + f2(ld.price) + '</span></div>';
+    body += contractBlock(ld.contract, ld);
+    body += rail(a, ld.price);
+    body += '<div class="say ' + esc(ld.say.tone) + '"><span class="ico">' + (ld.say.tone === "up" || ld.say.tone === "dn" ? "✔" : ld.say.tone === "wait" ? "⏸" : "ⓘ") + '</span><span>' + esc(ld.say.text) + '</span></div>';
+    body += '<div class="kv">'
+      + '<div><span>ميل ' + esc(ld.symbol) + ' (٢٧/٦٣)</span><span style="color:var(--' + tone(ld.trend) + ')">' + esc(ld.trend_text) + (ld.trend > 0 ? " ↑" : ld.trend < 0 ? " ↓" : "") + '</span></div>'
+      + '<div><span>الكتلة الآن</span><span style="color:var(--' + tone(ld.net_now) + ')">' + (ld.net_now > 0 ? "+" : "") + esc(ld.net_now) + ' اندفاعاً</span></div>'
+      + '<div><span>المنطقة (متوسط ٩)</span><span>' + n(ld.zone) + '</span></div>'
+      + '<div><span>ATR · فرص اليوم</span><span>' + n(ld.atr) + ' · ' + esc(ld.used) + ' من ٢</span></div>'
+      + '</div>';
+    body += '<div class="plans">' + (ld.plan || []).map(p => '<div class="plan ' + esc(p.tone) + '"><span class="t">' + esc(p.title) + '</span><span class="x">' + esc(p.text) + '</span></div>').join("") + '</div>';
+    return '<section class="card leader ' + cls + '"><div class="head"><div class="sym"><b>' + esc(ld.symbol) + '</b><span>' + esc(ld.name) + '</span></div>' + pill + '</div><div class="body">' + body + '</div></section>';
+  }
+
+  function tradeRow(p) {
+    const k = p.status === "closed" ? (p.r > 0 ? "up" : p.r < 0 ? "dn" : "off") : p.status === "open" ? "live" : (p.status === "waiting" || p.status === "chase") ? "wait" : "off";
+    const num = p.status === "rejected" ? "✕" : p.status === "skipped" ? "–" : p.n;
+    let d, r;
+    if (p.status === "closed") {
+      d = esc(p.symbol) + ' ' + esc(p.side_text) + ' · دخول <span class="num">' + esc(p.entry_time) + '</span> خروج <span class="num">' + esc(p.exit_time) + '</span> عند ' + esc(p.how_text) + '<small>من ' + n(p.entry) + ' إلى ' + n(p.exit) + ' · درجة ' + esc(p.grade) + '</small>';
+      r = '<span class="r ' + k + '"><span class="num">' + (p.r >= 0 ? "+" : "") + Number(p.r).toFixed(2) + 'R</span></span>';
+    } else if (p.status === "open") {
+      d = esc(p.symbol) + ' ' + esc(p.side_text) + ' · دخول <span class="num">' + esc(p.entry_time) + '</span><small>مفتوحة الآن · الهدف ' + n(p.target) + ' · الوقف ' + n(p.stop) + '</small>';
+      r = '<span class="r live">قائمة</span>';
+    } else if (p.status === "waiting" || p.status === "chase") {
+      d = esc(p.symbol) + ' ' + esc(p.side_text) + ' · إشارة <span class="num">' + esc(p.signal_time) + '</span><small>' + (p.status === "chase" ? "تأكيد: الدخول على الافتتاح القادم" : "بانتظار الرجوع إلى " + f2(p.level)) + '</small>';
+      r = '<span class="r off">انتظار</span>';
+    } else {
+      d = esc(p.symbol) + ' ' + esc(p.side_text) + ' · إشارة <span class="num">' + esc(p.signal_time) + '</span><small>' + esc(p.reason) + '</small>';
+      r = '<span class="r off">' + (p.status === "rejected" ? "مرفوضة" : p.status === "skipped" ? "لم تُؤخذ" : "أُلغيت") + '</span>';
+    }
+    return '<div class="trade"><span class="n ' + k + '">' + esc(num) + '</span><span class="d">' + d + '</span>' + r + '</div>';
+  }
+
+  function render(b) {
+    const d = new Date(b.now);
+    $("clock").textContent = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/New_York" }) + " NY";
+    $("session").textContent = b.session.text; $("dot").className = "dot" + (b.session.open ? " live" : "");
+    const notes = (b.notes || []).map(t => '<div class="note">📌 ' + esc(t) + '</div>').concat((b.errors || []).map(t => '<div class="note err">⚠️ ' + esc(t) + '</div>'));
+    $("notes").innerHTML = notes.join(""); $("notes").style.display = notes.length ? "grid" : "none"; $("notes").style.gap = "8px";
+    const v = b.verdict; $("verdict").className = "verdict " + v.tone; $("v-title").textContent = v.title; $("v-text").textContent = v.text;
+    $("v-chips").innerHTML = (v.chips || []).map(c => '<span class="chip">' + esc(c) + '</span>').join("");
+    $("leaders").innerHTML = (b.leaders || []).map(leaderCard).join("");
+    const bl = b.block; const tot = bl.tiles.length || 10;
+    $("block-pill").className = "pill " + (bl.net >= 3 ? "up" : bl.net <= -3 ? "dn" : "off");
+    $("block-pill").textContent = bl.up + " اندفاعاً صاعداً · " + bl.down + " هابطاً" + (bl.bar_time ? " · " + bl.bar_time : "");
+    $("block-bar").innerHTML = '<i style="width:' + (bl.up / tot * 100) + '%;background:var(--up)"></i><i style="width:' + (bl.flat / tot * 100) + '%;background:transparent"></i><i style="width:' + (bl.down / tot * 100) + '%;background:var(--dn)"></i>';
+    $("block-cap").innerHTML = '<span>اندفاع صاعد ' + bl.up + '</span><span>' + bl.flat + ' شركات هادئة</span><span>اندفاع هابط ' + bl.down + '</span>';
+    $("tiles").innerHTML = bl.tiles.map(t => '<div class="tile ' + tone(t.side) + '"><b>' + esc(t.symbol) + '</b><small>' + (t.unavailable ? "؟" : t.side > 0 ? "↑".repeat(t.count || 1) : t.side < 0 ? "↓".repeat(t.count || 1) : "—") + '</small></div>').join("");
+    $("block-rule").textContent = bl.rule_text;
+    $("steps").innerHTML = (b.morning.steps || []).map(s => '<div class="step ' + esc(s.tone) + '"><span class="t num">' + esc(s.time) + '</span><span class="w">' + esc(s.title) + '<small>' + esc(s.note) + '</small></span><span class="pill ' + (s.tone === "on" ? "up" : s.tone === "hold" ? "wait" : "off") + '">' + (s.done ? (s.tone === "hold" ? "انتبه" : "✔") : "لاحقاً") + '</span></div>').join("");
+    const today = b.journal.today || [];
+    $("today").innerHTML = today.length ? today.map(tradeRow).join("") : '<div class="empty">لا فرص بعد اليوم. أول إشارة ممكنة عند ٠٩:٤٠.</div>';
+    const live = b.journal.live || {};
+    $("live-pill").textContent = live.trades ? ("مباشر: " + live.win_pct + "٪ رابحة · " + live.trades + " صفقة") : "بلا صفقات مغلقة بعد";
+    $("days").innerHTML = (b.journal.recent || []).slice().reverse().map(dd => {
+      const closed = dd.trades.filter(p => p.status === "closed");
+      const dots = closed.map(p => '<i class="' + (p.r > 0 ? "w" : p.r < 0 ? "l" : "e") + '" title="' + esc(p.symbol + " " + p.r) + '"></i>').join("") || '<i></i>';
+      const rr = closed.length ? '<span class="num" style="font-weight:700;color:var(--' + (dd.r > 0 ? "up" : dd.r < 0 ? "dn" : "mute") + ')">' + (dd.r >= 0 ? "+" : "") + Number(dd.r).toFixed(2) + 'R</span>' : '<span style="color:var(--mute)">بلا صفقة</span>';
+      return '<div class="day"><span class="num">' + esc(dd.day.slice(5)) + '</span><span class="dots">' + dots + '</span>' + rr + '</div>';
+    }).join("") || '<div class="empty">السجل يبدأ مع أول جلسة.</div>';
+    const m = b.measured;
+    $("proof").innerHTML = '<div><b class="num">' + m.win_pct + '٪</b><small>صفقات رابحة</small></div><div><b class="num">' + Number(m.profit_factor).toFixed(2) + '</b><small>الربح ÷ الخسارة</small></div><div><b class="num">+' + m.contract_median_pct + '٪</b><small>وسيط ربح العقد</small></div><div><b class="num">' + Number(m.per_day).toFixed(1) + '</b><small>صفقة في اليوم</small></div>';
+    $("foot").textContent = "قياس " + m.sessions + " جلسة (" + m.from + " → " + m.to + ") على كيوز وسباي، فريم ٥ دقائق، كتلة أكبر ١٠ شركات مع ميل القائد، خروج عند الهدف الأول: " + m.trades + " صفقة، داخل العينة " + m.in_sample_pf + " وخارجها " + m.out_sample_pf + "، أطول سلسلة خسائر " + m.longest_losing_streak + "، " + m.days_without + " يوماً بلا صفقة. الأرقام تُعاد كل شهر وتُعرض هنا كما هي. أسعار العقد تقدير عبر الدلتا؛ التنفيذ من منصة وسيطك. مِرصاد ٩ أداة تحليل تعليمية تعرض وتشرح ولا تنفّذ أي أمر. القرار قرارك وعلى مسؤوليتك.";
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch("/api/leader", { credentials: "same-origin", cache: "no-store" });
+      if (res.status === 401) { location.href = "/leader"; return; }
+      const b = await res.json(); if (b.error) { $("session").textContent = "تعذر التحديث"; return; }
+      render(b);
+    } catch (e) { $("session").textContent = "بلا اتصال"; }
+  }
+  refresh();
+  setInterval(refresh, 30000);
+})();
+</script>
+</body>
+</html>

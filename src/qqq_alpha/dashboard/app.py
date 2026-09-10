@@ -60,6 +60,7 @@ def create_app(
     on_payment: Callable[[str, str, dict], Awaitable[None]] | None = None,
     on_tv_signal: Callable[[str], Awaitable[None]] | None = None,
     desk: Any | None = None,
+    leader: Any | None = None,
 ) -> FastAPI:
     """Build the dashboard app.
 
@@ -120,11 +121,11 @@ def create_app(
         )
 
     @app.get("/desk/login")
-    def desk_login(request: Request, k: str = ""):
+    def desk_login(request: Request, k: str = "", next: str = ""):
         chat_id = desk.memory.desk_token_owner(k, datetime.now(UTC))
         if chat_id is None:
             return _locked(request, "رابط الدخول غير صالح أو انتهى.", 403)
-        response = RedirectResponse(url="/desk", status_code=303)
+        response = RedirectResponse(url="/leader" if next == "leader" else "/desk", status_code=303)
         response.set_cookie(
             DESK_COOKIE, k, max_age=90 * 24 * 3600, httponly=True, samesite="lax",
             secure=settings.public_base_url.startswith("https"),
@@ -137,16 +138,23 @@ def create_app(
         response.delete_cookie(DESK_COOKIE)
         return response
 
-    @app.get("/desk")
-    def desk_page(request: Request):
+    def _gated_viewer(request: Request):
+        """The signed-in subscriber behind a customer page as (chat_id,
+        name), or the locked page to return instead."""
         chat_id = _desk_owner(request)
         if chat_id is None:
             return _locked(request, "هذه شاشة المشتركين في مِرصاد ٩.")
         if not desk.has_access(chat_id):
             return _locked(request, "اشتراكك منتهٍ. جدّده من البوت لتعود شاشتك.", 403)
         row = desk.memory.subscriber(chat_id) or {}
-        name = row.get("first_name") or row.get("username") or "مشترك"
-        return _desk_page(request, chat_id, name)
+        return chat_id, (row.get("first_name") or row.get("username") or "مشترك")
+
+    @app.get("/desk")
+    def desk_page(request: Request):
+        viewer = _gated_viewer(request)
+        if not isinstance(viewer, tuple):
+            return viewer
+        return _desk_page(request, *viewer)
 
     @app.get("/desk/preview")
     def desk_preview(request: Request, _: str = Depends(login)):
@@ -154,11 +162,11 @@ def create_app(
         a subscriber sees, without needing the bot link."""
         return _desk_page(request, str(settings.telegram_chat_id or "operator"), "المشغّل")
 
-    @app.get("/api/desk")
-    async def desk_api(request: Request):
+    def _api_viewer(request: Request) -> str | None:
+        """Who is reading a customer feed: the cookie's subscriber while
+        their window is open, or the operator with the admin password."""
         chat_id = _desk_owner(request)
         if chat_id is None:
-            # the operator preview reads the same feed with the admin password
             auth = request.headers.get("authorization", "")
             if auth.lower().startswith("basic "):
                 import base64
@@ -170,15 +178,50 @@ def create_app(
                 if secrets.compare_digest(user, settings.admin_username) and secrets.compare_digest(
                     pw, settings.admin_password
                 ):
-                    chat_id = str(settings.telegram_chat_id or "operator")
-            if chat_id is None:
-                return JSONResponse({"error": "unauthorized"}, status_code=401)
-        elif not desk.has_access(chat_id):
-            return JSONResponse({"error": "expired"}, status_code=401)
+                    return str(settings.telegram_chat_id or "operator")
+            return None
+        return chat_id if desk.has_access(chat_id) else None
+
+    @app.get("/api/desk")
+    async def desk_api(request: Request):
+        chat_id = _api_viewer(request)
+        if chat_id is None:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
         try:
             return JSONResponse(await desk.board(chat_id))
         except Exception as exc:  # noqa: BLE001 - the screen must say why, not go blank
             log.exception("desk board failed")
+            return JSONResponse({"error": str(exc)}, status_code=503)
+
+    # ------------------------------------------------------------------
+    # قائد اليوم: the same sign-in, one shared board for everyone.
+    if leader is None:
+        from qqq_alpha.live.leader import LeaderService
+
+        leader = LeaderService(desk)
+
+    def _leader_page(request: Request, name: str):
+        return templates.TemplateResponse(request, "leader.html", {"name": name})
+
+    @app.get("/leader")
+    def leader_page(request: Request):
+        viewer = _gated_viewer(request)
+        if not isinstance(viewer, tuple):
+            return viewer
+        return _leader_page(request, viewer[1])
+
+    @app.get("/leader/preview")
+    def leader_preview(request: Request, _: str = Depends(login)):
+        return _leader_page(request, "المشغّل")
+
+    @app.get("/api/leader")
+    async def leader_api(request: Request):
+        if _api_viewer(request) is None:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        try:
+            return JSONResponse(await leader.board())
+        except Exception as exc:  # noqa: BLE001
+            log.exception("leader board failed")
             return JSONResponse({"error": str(exc)}, status_code=503)
 
     @app.post("/desk/settings")

@@ -164,10 +164,13 @@ class DeskService:
             expires = expires.replace(tzinfo=UTC)
         return expires > (now or self._now())
 
-    def link_for(self, chat_id: str) -> str:
+    def link_for(self, chat_id: str, page: str = "desk") -> str:
+        """A fresh sign-in link; ``page`` is where it lands ("desk" or "leader")."""
         base = self.settings.public_base_url.rstrip("/")
         token = self.memory.issue_desk_token(chat_id, self._now())
-        return f"{base}/desk/login?k={token}" if base else ""
+        if not base:
+            return ""
+        return f"{base}/desk/login?k={token}" + ("&next=leader" if page == "leader" else "")
 
     # ------------------------------------------------------------ data
     def _client(self):

@@ -218,6 +218,30 @@ CREATE TABLE IF NOT EXISTS desk_tokens (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS desk_tokens_chat ON desk_tokens (chat_id);
+
+-- every closed "leader of the day" trade the rule produced, one row per
+-- signal: the customer's record and the monthly re-measure both read it,
+-- so a redeploy between two sessions never loses a day
+CREATE TABLE IF NOT EXISTS leader_trades (
+    symbol      TEXT NOT NULL,
+    signal_ts   TEXT NOT NULL,
+    day         TEXT NOT NULL,
+    n           INTEGER NOT NULL,
+    side        INTEGER NOT NULL,
+    net         INTEGER NOT NULL,
+    entry_ts    TEXT,
+    entry       REAL,
+    stop        REAL,
+    target      REAL,
+    exit_ts     TEXT,
+    exit        REAL,
+    how         TEXT,
+    r           REAL,
+    move_pct    REAL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (symbol, signal_ts)
+);
+CREATE INDEX IF NOT EXISTS leader_trades_day ON leader_trades (day);
 """
 
 DESK_TOKEN_DAYS = 90
@@ -1101,6 +1125,36 @@ class Memory:
         with closing(self._connect()) as conn:
             conn.execute("DELETE FROM desk_tokens WHERE chat_id = ?", (str(chat_id),))
             conn.commit()
+
+    # ----------------------------------------------------------- leader
+    def record_leader_trade(self, row: dict[str, Any]) -> bool:
+        """One closed leader trade, keyed by its signal. True when new; a
+        replay that sees the same trade again changes nothing."""
+        with closing(self._connect()) as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO leader_trades (symbol, signal_ts, day, n, side, net,"
+                " entry_ts, entry, stop, target, exit_ts, exit, how, r, move_pct, recorded_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    str(row.get("symbol") or ""), str(row.get("signal_ts") or ""),
+                    str(row.get("day") or str(row.get("signal_ts") or "")[:10]),
+                    int(row.get("n") or 0), int(row.get("side") or 0), int(row.get("net") or 0),
+                    row.get("entry_ts"), row.get("entry"), row.get("stop"), row.get("target"),
+                    row.get("exit_ts"), row.get("exit"), row.get("how") or "", float(row.get("r") or 0.0),
+                    row.get("move_pct"), _iso(datetime.now(UTC)),
+                ),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def leader_trades_between(self, since: date, until: date) -> list[dict[str, Any]]:
+        """Closed leader trades whose day falls in [since, until], oldest first."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT * FROM leader_trades WHERE day >= ? AND day <= ? ORDER BY signal_ts",
+                (since.isoformat(), until.isoformat()),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def app_setting(self, key: str) -> str:
         """Read an operator setting. Empty string when never set."""

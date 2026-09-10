@@ -187,8 +187,12 @@ class LiveEngine:
         # the customer's desk: MIRSAD 9 on their own symbols, served by the
         # dashboard and signed into by a link the bot hands out
         from qqq_alpha.live.desk import DeskService
+        from qqq_alpha.live.leader import LeaderService
 
         self.desk = DeskService(self.settings, self.memory)
+        # قائد اليوم: one shared board (QQQ/SPY, today's contract) over the
+        # desk's own bar and chain caches
+        self.leader = LeaderService(self.desk)
         # the TradingView bridge is built lazily on the first webhook and
         # kept for the life of the process: its per-symbol open-trade state
         # is what lets a target alert quote the contract its entry picked
@@ -1576,7 +1580,9 @@ class LiveEngine:
             return
 
         if self._wants_desk(message.text):
-            await self._send_desk_link(message.chat_id)
+            await self._send_desk_link(
+                message.chat_id, "leader" if self._wants_leader(message.text) else "desk"
+            )
             return
 
         if await self._maybe_capture_tv_username(message, row):
@@ -1640,26 +1646,36 @@ class LiveEngine:
         return True
 
     _DESK_WORDS = ("شاشتي", "الشاشة", "شاشة", "مكتبي", "المكتب", "مكتب", "/desk", "desk")
+    # no bare "leader": a subscriber may be typing their TradingView name
+    _LEADER_WORDS = ("القائد", "قائد", "قائدي", "/leader")
 
     @classmethod
     def _wants_desk(cls, text: str) -> bool:
         first = text.strip().split()[0].lower() if text.strip() else ""
-        return first in cls._DESK_WORDS
+        return first in cls._DESK_WORDS or first in cls._LEADER_WORDS
 
-    async def _send_desk_link(self, chat_id: str) -> None:
-        """«شاشتي»: a fresh personal sign-in link to the desk. An expired
-        subscriber gets the pay offer instead, since the desk is part of
-        the subscription."""
-        from qqq_alpha.live.telegram import desk_link_message
+    @classmethod
+    def _wants_leader(cls, text: str) -> bool:
+        first = text.strip().split()[0].lower() if text.strip() else ""
+        return first in cls._LEADER_WORDS
+
+    async def _send_desk_link(self, chat_id: str, page: str = "desk") -> None:
+        """«شاشتي» / «القائد»: a fresh personal sign-in link to the desk or
+        the leader board. An expired subscriber gets the pay offer instead,
+        since both screens are part of the subscription."""
+        from qqq_alpha.live.telegram import desk_link_message, leader_link_message
 
         if self.commands is None:
             return
         if not self.desk.has_access(str(chat_id)) and str(chat_id) != str(self.settings.telegram_chat_id):
             await self._send_pay_offer(chat_id)
             return
-        link = self.desk.link_for(str(chat_id))
+        link = self.desk.link_for(str(chat_id), page)
         if not link:
             await self.commands.send(chat_id, "الشاشة غير مفعّلة بعد: PUBLIC_BASE_URL غير مضبوط.")
+            return
+        if page == "leader":
+            await self.commands.send_with_buttons(chat_id, leader_link_message(), [("🧭 افتح قائد اليوم", link)])
             return
         await self.commands.send_with_buttons(
             chat_id, desk_link_message(), [("🖥️ افتح مكتبي", link)]
@@ -2066,7 +2082,9 @@ class LiveEngine:
             await self._preview_journey()
             return
         if self._wants_desk(text):
-            await self._send_desk_link(str(self.settings.telegram_chat_id))
+            await self._send_desk_link(
+                str(self.settings.telegram_chat_id), "leader" if self._wants_leader(text) else "desk"
+            )
             return
         # the operator types on a tablet, in a hurry, in Arabic: "رابط جديد",
         # "ارسل الرابط الجديد" and "جدد الرابط" all mean the same thing. An
@@ -2601,6 +2619,7 @@ class LiveEngine:
             on_payment=self._on_payment,
             on_tv_signal=self._on_tv_signal,
             desk=self.desk,
+            leader=self.leader,
         )
         config = uvicorn.Config(
             app,
