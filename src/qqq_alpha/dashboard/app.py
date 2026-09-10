@@ -243,6 +243,31 @@ def create_app(
         back = "/desk/preview" if request.cookies.get(DESK_COOKIE) is None else "/desk"
         return RedirectResponse(url=back, status_code=303)
 
+    @app.get("/api/data-check")
+    async def data_check_api(_: str = Depends(login)):
+        """The operator's own probe of the provider: today's bars and both
+        sides of the chain, with what is missing named as missing."""
+        from qqq_alpha.live.datacheck import run_data_check
+
+        try:
+            report = await run_data_check(settings)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("data check failed")
+            return JSONResponse({"status": "bad", "error": str(exc)[:300]}, status_code=503)
+        return JSONResponse(report.as_dict())
+
+    @app.get("/data-check")
+    async def data_check_page(_: str = Depends(login)):
+        from qqq_alpha.live.datacheck import run_data_check
+
+        try:
+            report = await run_data_check(settings)
+            body = report.as_text()
+        except Exception as exc:  # noqa: BLE001
+            log.exception("data check failed")
+            body = f"❌ تعذر فحص البيانات: {exc}"[:600]
+        return PlainTextResponse(body, media_type="text/plain; charset=utf-8")
+
     @app.get("/health")
     def health():
         """Unauthenticated liveness probe — deliberately the one open route.

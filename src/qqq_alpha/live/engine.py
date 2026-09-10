@@ -1681,6 +1681,32 @@ class LiveEngine:
             chat_id, desk_link_message(), [("🖥️ افتح مكتبي", link)]
         )
 
+    _DATA_WORDS = ("البيانات", "بياناتي", "فحص", "/data", "data")
+
+    @classmethod
+    def _wants_data_check(cls, text: str) -> bool:
+        words = text.strip().lower().split()
+        if not words:
+            return False
+        if words[0] in ("/data", "data", "البيانات"):
+            return True
+        # «فحص البيانات» — the natural way to ask, in either order
+        return words[0] in ("فحص", "افحص") and any(w in ("البيانات", "بيانات") for w in words[1:])
+
+    async def _run_data_check(self) -> None:
+        """Ask the provider for today's bars and both sides of the chain, and
+        report what actually arrived — including what did not."""
+        from qqq_alpha.live.datacheck import run_data_check
+
+        await self.notifier.note("🔎 أفحص البيانات عند المزود…")
+        try:
+            report = await run_data_check(self.settings)
+        except Exception as exc:  # noqa: BLE001 - a failed check is itself the answer
+            log.exception("data check failed")
+            await self.notifier.note(f"❌ تعذر فحص البيانات: {exc}"[:400])
+            return
+        await self.notifier.note(report.as_text()[:3800])
+
     _PAY_WORDS = ("اشتراك", "اشترك", "دفع", "الباقات", "باقات", "/pay", "/subscribe")
 
     @classmethod
@@ -1838,9 +1864,9 @@ class LiveEngine:
         if self._tv_bridge is None:
             from qqq_alpha.live.tvbridge import TvBridge
 
-            async def chain_fetch(symbol, expiry, want):
+            async def chain_fetch(symbol, expiry, want, around=None):
                 async with MassiveClient(self.settings) as client:
-                    return await client.option_chain(symbol, expiry, want)
+                    return await client.option_chain(symbol, expiry, want, around)
 
             # the brain reads every entry signal and names the contract from
             # the live shortlist; without a configured model the rule pick
@@ -2081,6 +2107,9 @@ class LiveEngine:
         if parts and parts[0].strip().lower() in {"معاينة", "معاينه", "preview"}:
             await self._preview_journey()
             return
+        if self._wants_data_check(text):
+            await self._run_data_check()
+            return
         if self._wants_desk(text):
             await self._send_desk_link(
                 str(self.settings.telegram_chat_id), "leader" if self._wants_leader(text) else "desk"
@@ -2273,7 +2302,9 @@ class LiveEngine:
                 'الأوامر: "موافق <رقم>" / "رفض <رقم>" لقرارات الدروس، '
                 '"مشتركين" لعدد المشتركين، "المؤشرات" لقائمة صلاحيات TradingView، '
                 '"معاينة" لتجربة رسالة الإقرار بأزرارها، "مساعد @اسم" لمن يستلم طلبات TradingView معك، '
-                '"فحص" للتأكد أن البطاقات تصل إلى القناة الخاصة، "شاشتي" لرابط مكتب مِرصاد ٩.'
+                '"فحص" للتأكد أن البطاقات تصل إلى القناة الخاصة، '
+                '"فحص البيانات" لفحص ما يصل من المزود (الشموع وعقود الكول والبوت)، '
+                '"شاشتي" لرابط مكتب مِرصاد ٩، "القائد" لشاشة قائد اليوم.'
             )
             return
 

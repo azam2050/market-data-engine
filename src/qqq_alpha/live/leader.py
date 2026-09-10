@@ -583,7 +583,7 @@ class LeaderService:
         contract is today's whenever today trades, even in the last hour."""
         today = now.astimezone(NY).date()
         expiry = today if is_trading_day(today) else expiry_for(sym, FRAME, "nearest", now)
-        chain = await self.desk._chain(client, sym, expiry, side)
+        chain = await self.desk._chain(client, sym, expiry, side, spot)
         contract = pick_contract(chain, side, spot)
         if contract is None:
             return {"expiry": expiry.isoformat(), "missing": True}

@@ -191,13 +191,21 @@ class DeskService:
         self._bars[key] = (time.monotonic(), bars)
         return bars
 
-    async def _chain(self, client: Any, underlying: str, expiry: date, side: int) -> list[OptionContract]:
+    async def _chain(
+        self, client: Any, underlying: str, expiry: date, side: int, spot: float | None = None
+    ) -> list[OptionContract]:
+        """One side of one expiry, cached briefly. ``spot`` narrows the
+        request to the strikes around the money — without it a busy 0DTE
+        chain can page out before it reaches them."""
         key = (underlying, expiry.isoformat(), side)
         cached = self._chains.get(key)
         if cached and time.monotonic() - cached[0] < CHAIN_TTL_SEC:
             return cached[1]
         want = OptionType.CALL if side > 0 else OptionType.PUT
-        chain = await client.option_chain(underlying, expiry, want)
+        try:
+            chain = await client.option_chain(underlying, expiry, want, spot)
+        except TypeError:  # a client that predates the strike window
+            chain = await client.option_chain(underlying, expiry, want)
         self._chains[key] = (time.monotonic(), chain)
         return chain
 
@@ -224,7 +232,7 @@ class DeskService:
         underlying, spot = resolve_underlying(state.symbol, state.price)
         spot = spot or state.price
         expiry = expiry_for(underlying, frame, pref, now)
-        chain = await self._chain(client, underlying, expiry, side)
+        chain = await self._chain(client, underlying, expiry, side, spot)
         contract = pick_contract(chain, side, spot)
         if contract is None:
             return {"expiry": expiry.isoformat(), "missing": True}

@@ -66,6 +66,18 @@ class TradingSession:
 MAX_RETRIES = 4
 BACKOFF_BASE_SEC = 1.5
 
+# The provider caps one chain page at 250 contracts and offers ``next_url``
+# for the rest. A 0DTE QQQ or SPY chain has more strikes than that on a
+# single side, and the page comes back in ascending strike order — so an
+# unpaged request returns the *lowest* strikes and can miss the money
+# entirely. Both guards below exist for that: a strike window around the
+# spot when the caller knows it, and following the pages when it does not.
+CHAIN_PAGE_LIMIT = 250
+CHAIN_MAX_PAGES = 8
+# ±12% of spot covers every strike a day trade can want, and on a 0DTE
+# chain it is a few dozen contracts instead of several hundred
+CHAIN_STRIKE_WINDOW = 0.12
+
 
 class MassiveError(RuntimeError):
     pass
@@ -243,66 +255,78 @@ class MassiveClient:
     # Options
     # ------------------------------------------------------------------
     async def option_chain(
-        self, underlying: str, expiry: date, option_type: OptionType | None = None
+        self,
+        underlying: str,
+        expiry: date,
+        option_type: OptionType | None = None,
+        around: float | None = None,
+        window: float = CHAIN_STRIKE_WINDOW,
     ) -> list[OptionContract]:
         """Fetch the chain for one expiry, optionally scoped to one side.
 
-        Each request is capped at 250 contracts by the API. A 0DTE index chain
-        routinely has more than 250 strikes across both sides combined, so an
-        unfiltered request silently truncates — in production this showed up
-        as the brain repeatedly reporting "no PUT available" while calls were
-        plentiful. Fetching each side with its own budget guarantees neither
-        one is starved by the other filling the shared cap.
+        Each page is capped at 250 contracts by the API, and pages arrive in
+        ascending strike order. A 0DTE QQQ or SPY chain has more strikes than
+        that on a *single* side, so one unpaged request returns the cheapest
+        deep out-of-the-money strikes and stops short of the money — the
+        contract every caller actually wants. Splitting the two sides (an
+        earlier fix, kept) stops calls from starving puts, but it does not
+        stop that.
+
+        Two guards do. ``around`` — the spot, when the caller knows it —
+        asks the provider for a strike band around the money, which is both
+        complete and small. And whether or not a window was used, the pages
+        are followed to the end instead of being silently dropped.
+
+        Neither guard changes what a complete chain contains: they only stop
+        an incomplete one from looking complete.
         """
         if option_type is None:
             calls, puts = await asyncio.gather(
-                self.option_chain(underlying, expiry, OptionType.CALL),
-                self.option_chain(underlying, expiry, OptionType.PUT),
+                self.option_chain(underlying, expiry, OptionType.CALL, around, window),
+                self.option_chain(underlying, expiry, OptionType.PUT, around, window),
             )
             return calls + puts
 
         params: dict[str, Any] = {
             "expiration_date": expiry.isoformat(),
-            "limit": 250,
+            "limit": CHAIN_PAGE_LIMIT,
             "contract_type": option_type.value.lower(),
         }
+        windowed = bool(around and around > 0 and window > 0)
+        if windowed:
+            params["strike_price.gte"] = round(around * (1 - window), 2)
+            params["strike_price.lte"] = round(around * (1 + window), 2)
 
-        payload = await self._get(f"/v3/snapshot/options/{underlying}", params)
+        path = f"/v3/snapshot/options/{underlying}"
+        try:
+            payload = await self._get(path, params)
+        except MassiveError:
+            if not windowed:
+                raise
+            # a provider that does not honour the strike-range filter must not
+            # cost us the chain: ask again for everything and page through it
+            log.warning("strike window rejected for %s %s; falling back to full pages", underlying, expiry)
+            params.pop("strike_price.gte", None)
+            params.pop("strike_price.lte", None)
+            windowed = False
+            payload = await self._get(path, params)
+
         contracts: list[OptionContract] = []
-
-        for item in payload.get("results") or []:
-            details = item.get("details") or {}
-            quote = item.get("last_quote") or {}
-            trade = item.get("last_trade") or {}
-            greeks = item.get("greeks") or {}
-            day = item.get("day") or {}
-
-            ticker = details.get("ticker")
-            if not ticker:
-                continue
-
-            contracts.append(
-                OptionContract(
-                    occ_symbol=ticker,
-                    underlying=underlying,
-                    option_type=(
-                        OptionType.CALL
-                        if str(details.get("contract_type", "")).lower() == "call"
-                        else OptionType.PUT
-                    ),
-                    strike=float(details.get("strike_price") or 0.0),
-                    expiry=date.fromisoformat(details["expiration_date"]),
-                    bid=_safe_float(quote.get("bid")),
-                    ask=_safe_float(quote.get("ask")),
-                    last=_safe_float(trade.get("price")),
-                    volume=int(day.get("volume") or 0),
-                    open_interest=int(item.get("open_interest") or 0),
-                    implied_volatility=_safe_float(item.get("implied_volatility")),
-                    delta=_safe_float(greeks.get("delta")),
-                    gamma=_safe_float(greeks.get("gamma")),
-                    theta=_safe_float(greeks.get("theta")),
+        pages = 0
+        while True:
+            contracts.extend(_contracts_from(payload, underlying))
+            pages += 1
+            next_url = payload.get("next_url")
+            if not next_url:
+                break
+            if pages >= CHAIN_MAX_PAGES:
+                log.warning(
+                    "chain for %s %s %s stopped at %d pages (%d contracts) with more to come",
+                    underlying, expiry, option_type.value, pages, len(contracts),
                 )
-            )
+                break
+            next_path, next_params = _split_url(next_url)
+            payload = await self._get(next_path, next_params)
         return contracts
 
     async def option_minute_bars(self, occ_symbol: str, day: date) -> list[Bar]:
@@ -392,3 +416,53 @@ def _safe_float(value: Any) -> float | None:
         return None if value is None else float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _split_url(url: str) -> tuple[str, dict[str, Any]]:
+    """A ``next_url`` as (path, params). The key is added back by ``_get``."""
+    from urllib.parse import parse_qsl, urlsplit
+
+    parts = urlsplit(url)
+    params = {k: v for k, v in parse_qsl(parts.query) if k != "apiKey"}
+    return parts.path, params
+
+
+def _contracts_from(payload: dict[str, Any], underlying: str) -> list[OptionContract]:
+    """The contracts in one snapshot page. Rows without a ticker or an
+    expiry are skipped rather than guessed at."""
+    out: list[OptionContract] = []
+    for item in payload.get("results") or []:
+        details = item.get("details") or {}
+        quote = item.get("last_quote") or {}
+        trade = item.get("last_trade") or {}
+        greeks = item.get("greeks") or {}
+        day = item.get("day") or {}
+
+        ticker = details.get("ticker")
+        expiration = details.get("expiration_date")
+        if not ticker or not expiration:
+            continue
+
+        out.append(
+            OptionContract(
+                occ_symbol=ticker,
+                underlying=underlying,
+                option_type=(
+                    OptionType.CALL
+                    if str(details.get("contract_type", "")).lower() == "call"
+                    else OptionType.PUT
+                ),
+                strike=float(details.get("strike_price") or 0.0),
+                expiry=date.fromisoformat(expiration),
+                bid=_safe_float(quote.get("bid")),
+                ask=_safe_float(quote.get("ask")),
+                last=_safe_float(trade.get("price")),
+                volume=int(day.get("volume") or 0),
+                open_interest=int(item.get("open_interest") or 0),
+                implied_volatility=_safe_float(item.get("implied_volatility")),
+                delta=_safe_float(greeks.get("delta")),
+                gamma=_safe_float(greeks.get("gamma")),
+                theta=_safe_float(greeks.get("theta")),
+            )
+        )
+    return out

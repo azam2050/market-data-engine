@@ -494,7 +494,7 @@ class TvBridge:
         self,
         admin_send: Callable[[str], Awaitable[None]],
         channel_send: Callable[[str], Awaitable[bool]] | None,
-        chain_fetch: Callable[[str, date, OptionType], Awaitable[list[OptionContract]]],
+        chain_fetch: Callable[..., Awaitable[list[OptionContract]]],
         analyst: Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]] | None = None,
         store: Callable[[dict[str, Any]], None] | None = None,
     ):
@@ -507,6 +507,17 @@ class TvBridge:
         self._closed: list[ClosedTrade] = []
         self._notes: list[_DayNote] = []
         self._recent: dict[str, datetime] = {}
+
+    async def _chain_near(
+        self, underlying: str, expiry: date, want: OptionType, around: float | None
+    ) -> list[OptionContract]:
+        """The chain around a price. Telling the provider which strikes we
+        care about is what keeps a busy 0DTE chain from paging out before it
+        reaches the money; a fetcher that does not take the hint still works."""
+        try:
+            return await self._chain(underlying, expiry, want, around)
+        except TypeError:
+            return await self._chain(underlying, expiry, want)
 
     def _is_duplicate(self, raw: str) -> bool:
         now = datetime.now(UTC)
@@ -582,7 +593,7 @@ class TvBridge:
         if spot:
             for exp in (expiry, later_expiry(underlying, expiry)):
                 try:
-                    chain = await self._chain(underlying, exp, want)
+                    chain = await self._chain_near(underlying, exp, want, spot)
                 except Exception as exc:  # noqa: BLE001 - a data hiccup must not kill the card
                     err = err or str(exc)
                     continue
@@ -752,7 +763,9 @@ class TvBridge:
         """Quote the contract now. Entry side pays the ask, exit side gets the bid."""
         try:
             want = OptionType.CALL if trade.side > 0 else OptionType.PUT
-            chain = await self._chain(trade.underlying, trade.expiry, want)
+            # centred on the strike we hold, so the contract being marked is
+            # inside the window however far the underlying has travelled
+            chain = await self._chain_near(trade.underlying, trade.expiry, want, trade.strike)
             now_c = next((c for c in chain if c.occ_symbol == trade.occ), None)
             if now_c is None:
                 return None

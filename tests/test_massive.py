@@ -109,3 +109,133 @@ async def test_a_full_chain_on_each_side_is_never_truncated_by_the_other():
     puts = [c for c in contracts if c.option_type is OptionType.PUT]
     assert len(calls) == 250
     assert len(puts) == 250
+
+
+# ---------------------------------------------------------------- reaching the money
+# One side alone can exceed the 250 cap on a 0DTE index chain, and pages
+# arrive in ascending strike order — so a single request returns the
+# cheapest far-out-of-the-money strikes and stops short of the money.
+def _page(strikes, contract_type: str, next_url: str | None = None) -> dict:
+    body: dict = {
+        "results": [
+            _contract_payload(
+                f"O:QQQ260805{'C' if contract_type == 'call' else 'P'}{int(s * 1000):08d}",
+                contract_type, float(s),
+            )
+            for s in strikes
+        ]
+    }
+    if next_url:
+        body["next_url"] = next_url
+    return body
+
+
+async def test_one_side_longer_than_a_page_is_followed_to_the_end():
+    """400 call strikes over two pages: without following ``next_url`` the
+    money (720) is never seen, because page one stops at 649."""
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        seen.append(params)
+        assert params.get("apiKey") == "k"  # the key is re-attached to page two
+        if params.get("cursor") == "PAGE2":
+            return httpx.Response(200, json=_page(range(650, 800), "call"))
+        return httpx.Response(
+            200,
+            json=_page(
+                range(400, 650), "call",
+                next_url="https://api.polygon.io/v3/snapshot/options/QQQ?cursor=PAGE2",
+            ),
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.polygon.io") as http_client:
+        client = MassiveClient(Settings(massive_api_key="k"), client=http_client)
+        contracts = await client.option_chain("QQQ", EXPIRY, OptionType.CALL)
+
+    assert len(seen) == 2
+    assert len(contracts) == 400
+    assert any(c.strike == 720 for c in contracts)  # the strike at the money survived
+
+
+async def test_a_known_spot_asks_the_provider_for_the_strikes_around_the_money():
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        seen.append(params)
+        lo = float(params["strike_price.gte"])
+        hi = float(params["strike_price.lte"])
+        return httpx.Response(
+            200, json=_page([s for s in range(400, 900) if lo <= s <= hi], "call")
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.polygon.io") as http_client:
+        client = MassiveClient(Settings(massive_api_key="k"), client=http_client)
+        contracts = await client.option_chain("QQQ", EXPIRY, OptionType.CALL, 720.0)
+
+    assert len(seen) == 1
+    assert float(seen[0]["strike_price.gte"]) < 720 < float(seen[0]["strike_price.lte"])
+    assert len(contracts) < 250  # a band, not the whole book
+    assert any(c.strike == 720 for c in contracts)
+
+
+async def test_a_provider_that_rejects_the_strike_window_still_gets_its_chain():
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        seen.append(params)
+        if "strike_price.gte" in params:
+            return httpx.Response(400, json={"error": "unknown parameter strike_price.gte"})
+        return httpx.Response(200, json=_page(range(700, 740), "put"))
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.polygon.io") as http_client:
+        client = MassiveClient(Settings(massive_api_key="k"), client=http_client)
+        contracts = await client.option_chain("QQQ", EXPIRY, OptionType.PUT, 720.0)
+
+    assert len(seen) == 2 and "strike_price.gte" not in seen[1]
+    assert len(contracts) == 40 and all(c.option_type is OptionType.PUT for c in contracts)
+
+
+async def test_paging_stops_at_a_budget_rather_than_looping_for_ever():
+    """A provider whose ``next_url`` never ends must not spin the request."""
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(request.url.params))
+        return httpx.Response(
+            200,
+            json=_page(range(400, 405), "call",
+                       next_url="https://api.polygon.io/v3/snapshot/options/QQQ?cursor=MORE"),
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.polygon.io") as http_client:
+        client = MassiveClient(Settings(massive_api_key="k"), client=http_client)
+        contracts = await client.option_chain("QQQ", EXPIRY, OptionType.CALL)
+
+    from qqq_alpha.data.massive import CHAIN_MAX_PAGES
+
+    assert len(seen) == CHAIN_MAX_PAGES
+    assert len(contracts) == 5 * CHAIN_MAX_PAGES
+
+
+async def test_a_row_without_an_expiry_is_skipped_not_guessed():
+    def handler(request: httpx.Request) -> httpx.Response:
+        good = _contract_payload("O:QQQ260805C00720000", "call", 720)
+        broken = _contract_payload("O:QQQ260805C00721000", "call", 721)
+        broken["details"].pop("expiration_date")
+        nameless = _contract_payload("", "call", 722)
+        nameless["details"]["ticker"] = ""
+        return httpx.Response(200, json={"results": [good, broken, nameless]})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.polygon.io") as http_client:
+        client = MassiveClient(Settings(massive_api_key="k"), client=http_client)
+        contracts = await client.option_chain("QQQ", EXPIRY, OptionType.CALL)
+
+    assert [c.strike for c in contracts] == [720.0]
