@@ -485,10 +485,14 @@ class LeaderService:
             return payload
 
     async def ticks(self) -> dict[str, Any]:
-        """The live price of each leader, and where it sits between the stop
-        and the target of whatever the board last said. Cheap on purpose:
-        the page asks for this every second, and the board every half
-        minute."""
+        """The live price of the leaders *and* of every basket name, plus
+        where the leaders sit between the stop and the target of whatever
+        the board last said.
+
+        The whole list rides in one request, so watching twelve names costs
+        no more than watching two. The impulse marks are a different thing
+        and deliberately stay on closed candles: a candle is not an impulse
+        until it closes, and the measured rule counts closes."""
         async with self._tick_lock:
             cached = self._ticks
             if cached and time.monotonic() - cached[0] < TICK_TTL_SEC:
@@ -497,7 +501,7 @@ class LeaderService:
             prices: dict[str, dict[str, Any]] = {}
             try:
                 async with self.desk._client() as client:
-                    prices = await client.last_prices(list(LEADERS))
+                    prices = await client.last_prices([*LEADERS, *BASKET])
             except Exception as exc:  # noqa: BLE001 - a stale price is not a broken screen
                 log.warning("leader ticks failed: %s", exc)
             payload = {"now": now.isoformat(), "prices": prices}

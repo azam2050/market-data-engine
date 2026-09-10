@@ -330,8 +330,10 @@ async def test_the_price_line_has_its_own_cheap_beat(tmp_path):
     now = datetime(DAY.year, DAY.month, DAY.day, 11, 0, tzinfo=NY).astimezone(UTC)
     svc, _ = _service(tmp_path, client, now)
     first = await svc.ticks()
-    assert set(first["prices"]) == set(LD.LEADERS)
+    # the leaders and every basket name ride in the one request
+    assert set(first["prices"]) == {*LD.LEADERS, *LD.BASKET}
     assert first["prices"]["QQQ"]["price"] == 701.0
+    assert first["prices"]["NVDA"]["price"] == 701.0
     assert await svc.ticks() == first and client.tape == 1  # inside the cache
     svc._ticks = None
     assert (await svc.ticks())["prices"]["QQQ"]["price"] == 702.0

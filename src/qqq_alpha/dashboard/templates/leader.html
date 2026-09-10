@@ -100,6 +100,8 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
 .tile{border-radius:12px;padding:10px 6px;text-align:center;display:grid;gap:2px;border:1px solid var(--line);background:var(--card);color:var(--mute)}
 .tile b{font-family:"Cairo";font-size:15px}
 .tile small{font-size:12px;font-weight:700}
+.tile .chg{font-size:11px;font-weight:700;color:var(--mute);font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate}
+.tile.up .chg,.tile.dn .chg{color:inherit;opacity:.85}
 .tile.up{background:var(--up-soft);border-color:transparent;color:var(--up)}
 .tile.dn{background:var(--dn-soft);border-color:transparent;color:var(--dn)}
 .meter{display:grid;gap:6px}
@@ -151,7 +153,7 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
   <div id="leaders" style="display:grid;gap:16px"></div>
   <section class="card" id="block-card">
     <div class="head"><h3>الكتلة · أكبر ١٠ شركات</h3><span class="pill off" id="block-pill">—</span></div>
-    <div class="body"><div class="meter"><div class="bar" id="block-bar"></div><div class="cap" id="block-cap"></div></div><div class="grid10" id="tiles"></div><div class="say plain"><span class="ico">ⓘ</span><span id="block-rule"></span></div></div>
+    <div class="body"><div class="meter"><div class="bar" id="block-bar"></div><div class="cap" id="block-cap"></div></div><div class="grid10" id="tiles"></div><div class="say plain"><span class="ico">⏱</span><span id="block-when"></span></div><div class="say plain"><span class="ico">ⓘ</span><span id="block-rule"></span></div></div>
   </section>
   <section class="card">
     <div class="head"><h3>قراءة الصباح</h3><span class="pill off">كيوز · بوحدة مدى اليوم</span></div>
@@ -215,6 +217,12 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
   function paintTicks(t) {
     const open = t.open || {};
     for (const [sym, q] of Object.entries(t.prices || {})) {
+      // every basket name shows its live move on the day, so the block is
+      // visibly alive even while its impulse mark waits for a candle close
+      const chg = document.querySelector('[data-chg="' + sym + '"]');
+      if (chg && q && q.change_pct !== null && q.change_pct !== undefined) {
+        chg.textContent = (q.change_pct >= 0 ? "+" : "−") + Math.abs(q.change_pct).toFixed(2) + "%";
+      }
       const el = document.querySelector('[data-px="' + sym + '"]');
       if (el && q && q.price) {
         const was = Number(el.textContent);
@@ -302,8 +310,12 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
     $("block-pill").textContent = bl.up + " اندفاعاً صاعداً · " + bl.down + " هابطاً" + (bl.bar_time ? " · " + bl.bar_time : "");
     $("block-bar").innerHTML = '<i style="width:' + (bl.up / tot * 100) + '%;background:var(--up)"></i><i style="width:' + (bl.flat / tot * 100) + '%;background:transparent"></i><i style="width:' + (bl.down / tot * 100) + '%;background:var(--dn)"></i>';
     $("block-cap").innerHTML = '<span>اندفاع صاعد ' + bl.up + '</span><span>' + bl.flat + ' شركات هادئة</span><span>اندفاع هابط ' + bl.down + '</span>';
-    $("tiles").innerHTML = bl.tiles.map(t => '<div class="tile ' + tone(t.side) + '"><b>' + esc(t.symbol) + '</b><small>' + (t.unavailable ? "؟" : t.side > 0 ? "↑".repeat(t.count || 1) : t.side < 0 ? "↓".repeat(t.count || 1) : "—") + '</small></div>').join("");
+    $("tiles").innerHTML = bl.tiles.map(t => '<div class="tile ' + tone(t.side) + '"><b>' + esc(t.symbol) + '</b><small>'
+      + (t.unavailable ? "؟" : t.side > 0 ? "↑".repeat(t.count || 1) : t.side < 0 ? "↓".repeat(t.count || 1) : "—")
+      + '</small><span class="chg" data-chg="' + esc(t.symbol) + '">—</span></div>').join("");
     $("block-rule").textContent = bl.rule_text;
+    $("block-when").textContent = "النسبة تحت كل شركة لحظية وتتغير كل ثانية. أما السهم ↑↓ فيُختم عند إغلاق الشمعة"
+      + (bl.bar_time ? " — آخر شمعة مغلقة " + bl.bar_time + " ولا تتغير قبل الشمعة القادمة." : ".");
     $("steps").innerHTML = (b.morning.steps || []).map(s => '<div class="step ' + esc(s.tone) + '"><span class="t num">' + esc(s.time) + '</span><span class="w">' + esc(s.title) + '<small>' + esc(s.note) + '</small></span><span class="pill ' + (s.tone === "on" ? "up" : s.tone === "hold" ? "wait" : "off") + '">' + (s.done ? (s.tone === "hold" ? "انتبه" : "✔") : "لاحقاً") + '</span></div>').join("");
     const today = b.journal.today || [];
     $("today").innerHTML = today.length ? today.map(tradeRow).join("") : '<div class="empty">لا فرص بعد اليوم. أول إشارة ممكنة عند ٠٩:٤٠.</div>';
