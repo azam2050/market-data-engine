@@ -309,7 +309,9 @@ async def test_a_basket_name_is_pulled_over_fewer_days_than_a_leader(tmp_path):
     await svc.board()
     assert {client.days[s] for s in LD.LEADERS} == {LD.LOOKBACK_DAYS}
     assert {client.days[s] for s in LD.BASKET} == {LD.BASKET_LOOKBACK_DAYS}
-    assert LD.BASKET_LOOKBACK_DAYS < LD.LOOKBACK_DAYS
+    # the ten-session record needs the basket's block on every one of those
+    # sessions, so the basket reaches back as far as the leaders do
+    assert LD.BASKET_LOOKBACK_DAYS >= 14 and LD.LOOKBACK_DAYS >= 14
 
 
 @pytest.mark.asyncio
@@ -356,10 +358,11 @@ async def test_an_open_trade_is_followed_on_the_contracts_own_quote(tmp_path):
 
         async def option_quote(self, underlying, occ):
             self.quotes += 1
+            # no volatility on the quote: the exits are priced along the delta
             return OptionContract(
                 occ_symbol=occ, underlying=underlying, option_type=OptionType.CALL, strike=100.0,
                 expiry=DAY, bid=self.mid - 0.03, ask=self.mid + 0.03, last=self.mid, volume=700,
-                open_interest=800, implied_volatility=0.2, delta=0.5, gamma=None, theta=None,
+                open_interest=800, implied_volatility=None, delta=0.5, gamma=None, theta=None,
             )
 
     client = Tape()
@@ -369,14 +372,20 @@ async def test_an_open_trade_is_followed_on_the_contracts_own_quote(tmp_path):
     ld = board["leaders"][0]
     ld["active"] = {"status": "open", "entry": 100.0, "stop": 98.5, "target": 101.0,
                     "side": 1, "signal_ts": "2026-09-08T10:00:00-04:00"}
+    # the plan's estimate says the entry costs 2.90; the tape says 2.40 — the
+    # tape wins, because the estimate can sit twenty cents from reality
     ld["contract"] = {"occ": "O:QQQ260908C00100000", "missing": False, "targets": {
-        "entry": {"contract": 2.40}, "target": {"contract": 3.20}, "stop": {"contract": 1.20}}}
+        "entry": {"contract": 2.90}, "target": {"contract": 3.20}, "stop": {"contract": 1.20}}}
     svc._cache = (svc._cache[0], board)
 
     svc._ticks = None
     first = (await svc.ticks())["contracts"][ld["symbol"]]
     assert first["price"] == pytest.approx(2.40) and first["entry"] == pytest.approx(2.40)
-    assert first["pnl_pct"] == 0.0 and first["target"] == 3.20 and first["stop"] == 1.20
+    assert first["pnl_pct"] == 0.0 and first["entry_at"]
+    # the exits are priced from the live quote: delta 0.5 × the stock distance
+    assert first["target"] == pytest.approx(2.90) and first["stop"] == pytest.approx(1.65)
+    assert first["stock_target"] == 101.0 and first["stock_stop"] == 98.5 and first["side"] == 1
+    assert first["action"]["key"] == "hold" and "باقٍ للهدف" in first["action"]["text"]
 
     client.mid = 3.00  # the contract moves; the entry does not
     svc._ticks = None
@@ -384,6 +393,126 @@ async def test_an_open_trade_is_followed_on_the_contracts_own_quote(tmp_path):
     assert later["price"] == pytest.approx(3.00) and later["entry"] == pytest.approx(2.40)
     assert later["pnl_pct"] == pytest.approx(25.0) and later["pnl_usd"] == pytest.approx(60.0)
     assert later["status"] == "open"
+
+
+@pytest.mark.asyncio
+async def test_the_exit_call_is_made_on_the_stock_not_on_an_estimated_contract_price(tmp_path):
+    """In the live session the stock touched its target while the contract's
+    estimated target sat three cents higher, and the screen said 'hold'.
+    The rule's levels are on the stock; the sentence must follow them."""
+
+    class Tape(_FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.stock = 100.0
+
+        async def last_prices(self, symbols):
+            return {s: {"price": self.stock, "ts": None, "size": 1, "change_pct": 0.0} for s in symbols}
+
+        async def option_quote(self, underlying, occ):
+            return OptionContract(
+                occ_symbol=occ, underlying=underlying, option_type=OptionType.PUT, strike=100.0,
+                expiry=DAY, bid=0.60, ask=0.64, last=0.62, volume=700, open_interest=800,
+                implied_volatility=None, delta=-0.45, gamma=None, theta=None,
+            )
+
+    client = Tape()
+    now = datetime(DAY.year, DAY.month, DAY.day, 15, 0, tzinfo=NY).astimezone(UTC)
+    svc, _ = _service(tmp_path, client, now)
+    board = await svc.board()
+    ld = board["leaders"][0]
+    ld["active"] = {"status": "open", "entry": 100.45, "stop": 101.54, "target": 99.72, "side": -1, "signal_ts": "s"}
+    ld["contract"] = {"occ": "O:P", "missing": False, "targets": {}}
+    svc._cache = (svc._cache[0], board)
+
+    async def act():
+        svc._ticks = None
+        return (await svc.ticks())["contracts"][ld["symbol"]]["action"]["key"]
+
+    client.stock = 100.10
+    assert await act() == "hold"
+    client.stock = 99.72  # the stock touches the target: sell, whatever the contract estimate says
+    assert await act() == "take"
+    client.stock = 101.60
+    assert await act() == "stop"
+
+
+@pytest.mark.asyncio
+async def test_the_contract_named_for_a_trade_never_changes_while_it_is_open(tmp_path):
+    """Live, the nearest strike flipped between 709 and 708 as the stock
+    crossed 709, and the screen quoted a contract the customer did not hold.
+    Once named, the contract is fixed for the life of the opportunity."""
+
+    class Tape(_FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.quotes: list[str] = []
+
+        async def option_quote(self, underlying, occ):
+            self.quotes.append(occ)
+            k = float(occ.rsplit("C", 1)[1])
+            return OptionContract(
+                occ_symbol=occ, underlying=underlying, option_type=OptionType.CALL, strike=k,
+                expiry=DAY, bid=1.98, ask=2.02, last=2.0, volume=500, open_interest=500,
+                implied_volatility=0.2, delta=0.5, gamma=None, theta=None,
+            )
+
+    client = Tape()
+    now = datetime(DAY.year, DAY.month, DAY.day, 11, 0, tzinfo=NY).astimezone(UTC)
+    svc, _ = _service(tmp_path, client, now)
+    opp = Opportunity(symbol="QQQ", n=1, side=1, net=3, signal_i=1, signal_ts=_slot(10), atr=1.0,
+                      level=100.0, sig_hi=100.5, sig_lo=99.8, trend=1, grade="أ")
+    opp.fill(2, _slot(11), 100.0, True)
+    async with svc.desk._client() as c:
+        first = await svc._contract(c, "QQQ", 1, 100.2, opp, 1.0, 100.0, now)
+        assert first["locked"] and first["strike"] == 101.0  # nearest at/out-of-the-money call at 100.2
+        assert first["entry_quote"]["price"] == pytest.approx(2.0)
+        # the stock runs two dollars: the nearest strike is now 103, the trade's stays 101
+        again = await svc._contract(c, "QQQ", 1, 102.4, opp, 1.0, 100.0, now)
+        assert again["strike"] == 101.0 and again["locked"]
+        assert client.quotes and all(q.endswith("C101") for q in client.quotes)
+        # and the percentages are measured from the fixed entry quote
+        assert again["targets"]["entry"]["contract"] == pytest.approx(2.0)
+        # a different opportunity is free to pick afresh
+        other = Opportunity(symbol="QQQ", n=2, side=1, net=3, signal_i=50, signal_ts=_slot(40), atr=1.0,
+                            level=102.0, sig_hi=102.5, sig_lo=101.8, trend=1, grade="أ")
+        fresh = await svc._contract(c, "QQQ", 1, 102.4, other, 1.0, 102.0, now)
+        assert fresh["strike"] == 103.0
+
+
+def test_exit_prices_follow_the_curve_when_the_quote_carries_a_volatility():
+    """A same-day put at the money: a straight delta priced the stop at a
+    cent and the target at double in the live session. With the option
+    formula the estimates stay between intrinsic value and the quote."""
+    from qqq_alpha.data.pricing import black_scholes
+
+    now = datetime(DAY.year, DAY.month, DAY.day, 15, 0, tzinfo=NY).astimezone(UTC)
+    yrs = 3600 / (365 * 86400)  # an hour to the bell
+    fair = black_scholes(709.45, 709.0, yrs, 0.18, OptionType.PUT)
+    put = OptionContract(
+        occ_symbol="O:P", underlying="QQQ", option_type=OptionType.PUT, strike=709.0, expiry=DAY,
+        bid=round(fair - 0.02, 2), ask=round(fair + 0.02, 2), last=fair, volume=500, open_interest=500,
+        implied_volatility=0.18, delta=-0.45, gamma=None, theta=None,
+    )
+    at_target = LD._level_price(put, 709.45, 708.72, now)
+    at_stop = LD._level_price(put, 709.45, 710.54, now)
+    at_spot = LD._level_price(put, 709.45, 709.45, now)
+    assert at_spot == pytest.approx(put.mid, abs=0.01)
+    assert at_target > put.mid > at_stop > 0.01
+    assert at_target >= 709.0 - 708.72  # never below intrinsic value at the target
+    assert at_stop < 0.5 * put.mid      # and the stop is a real loss, not a rounding
+
+
+def test_the_ten_session_record_lists_quiet_sessions_too(tmp_path):
+    now = datetime(DAY.year, DAY.month, DAY.day, 11, 0, tzinfo=NY).astimezone(UTC)
+    svc, _ = _service(tmp_path, _FakeClient(), now)
+    p = Opportunity(symbol="QQQ", n=1, side=1, net=3, signal_i=1, signal_ts=_slot(10, DAY - timedelta(days=1)),
+                    atr=1.0, level=100.0, sig_hi=100.5, sig_lo=99.8, trend=1, grade="أ")
+    quiet = DAY - timedelta(days=2)
+    journal = svc._journal([p], DAY, sessions=[quiet, DAY - timedelta(days=1), DAY])
+    days = [d["day"] for d in journal["recent"]]
+    assert days == [quiet.isoformat(), (DAY - timedelta(days=1)).isoformat(), DAY.isoformat()]
+    assert journal["recent"][0]["trades"] == [] and journal["recent"][0]["r"] == 0
 
 
 @pytest.mark.asyncio
@@ -469,7 +598,8 @@ def test_plan_and_say_cover_every_state():
     opened.fill(205, _slot(11), 100.0, True)
     plan = LeaderService._plan("QQQ", 100.4, 1.0, 100.0, opened, 1, 1, 1, now)
     assert plan[0]["key"] == "hold" and "درجة أ" in plan[0]["title"]
-    assert "فوق الدخول" in LeaderService._say("QQQ", 100.4, opened, 1, 1, 3, 1, now, k)["text"]
+    assert "لصالحك" in LeaderService._say("QQQ", 100.4, opened, 1, 1, 3, 1, now, k)["text"]
+    assert "ضدك" in LeaderService._say("QQQ", 99.6, opened, 1, 1, 3, 1, now, k)["text"]
     idle = LeaderService._plan("QQQ", 100.0, 1.0, 99.8, None, 0, 1, 0, now)
     assert [p["key"] for p in idle] == ["if_up", "against", "none"]
     assert "هادئة" in LeaderService._say("QQQ", 100.0, None, 0, 1, 1, 0, now, k)["text"]

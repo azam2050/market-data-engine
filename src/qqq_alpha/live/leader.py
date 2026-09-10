@@ -66,11 +66,12 @@ EOD_MINUTE = 15 * 60 + 55
 # readings of the lab's rule, this was the most even in and out of sample.
 EXCLUSIVE = "any"
 SKIPPED_COUNT = True
-# calendar days of minute bars: a leader needs its ten-session record and
-# the daily range behind the morning read; a basket name needs only the
-# indicator's warm-up and today
-LOOKBACK_DAYS = 16
-BASKET_LOOKBACK_DAYS = 6
+# calendar days of minute bars. The ten-session record needs ten sessions
+# of *signals*, and a signal needs the basket's block on that day — so the
+# basket is pulled as far back as the leaders, plus the indicator's warm-up.
+# The maths runs off the event loop, so the extra bars cost the desk nothing.
+LOOKBACK_DAYS = 18
+BASKET_LOOKBACK_DAYS = 18
 BOARD_TTL_SEC = 20
 # the price line moves with the tape, not with the board: one request for
 # both leaders, shared by everyone watching, so a page polling every second
@@ -200,8 +201,58 @@ def _hhmm(ts: datetime) -> str:
     return ts.astimezone(NY).strftime("%H:%M")
 
 
+def _level_price(contract: Any, spot: float, level: float, now: datetime) -> float | None:
+    """Where the contract should trade when the stock reaches ``level``.
+
+    A straight delta is fine for a few cents; on a same-day contract a move
+    of a dollar bends the curve, and the delta line then prices the stop at
+    a cent and the target at double. When the quote carries a volatility,
+    the option formula is used with the time left to the bell — the same
+    maths the lab priced the measurement with. Stated as an estimate either
+    way."""
+    mid = contract.mid
+    if mid is None or mid <= 0 or spot <= 0:
+        return None
+    iv = contract.implied_volatility
+    if iv and iv > 0:
+        from qqq_alpha.data.pricing import black_scholes
+
+        local = now.astimezone(NY)
+        bell = local.replace(hour=16, minute=0, second=0, microsecond=0)
+        expiry_bell = datetime(contract.expiry.year, contract.expiry.month, contract.expiry.day, 16, 0, tzinfo=NY)
+        left = max((expiry_bell - local).total_seconds(), 600.0) if contract.expiry >= local.date() else 600.0
+        if contract.expiry == local.date():
+            left = max((bell - local).total_seconds(), 600.0)
+        yrs = left / (365.0 * 86400.0)
+        try:
+            now_model = black_scholes(spot, contract.strike, yrs, iv, contract.option_type)
+            at_level = black_scholes(level, contract.strike, yrs, iv, contract.option_type)
+        except Exception:  # noqa: BLE001 - fall back to the line
+            now_model = at_level = None
+        if now_model is not None and at_level is not None:
+            # the market's quote plus the *change* the formula sees between
+            # here and the level: it equals the quote when the level is the
+            # spot, bends with the curve, and cannot run away from the tape
+            return max(0.01, round(mid + (at_level - now_model), 2))
+    return contract_price_at(contract, spot, level)
+
+
 def _r2(x: float | None) -> float | None:
     return None if x is None else round(x, 2)
+
+
+def _action(status: str | None, side: int, price: float | None, target: float | None, stop: float | None) -> dict[str, str]:
+    """The one sentence under the live price, decided on the stock's levels."""
+    if status != "open":
+        return {"key": "wait", "text": "لا تشترِ بعد. انتظر حتى تقول الشاشة إن الصفقة فُتحت."}
+    if price is None or target is None or stop is None or not side:
+        return {"key": "hold", "text": "احتفظ. لا تخرج قبل الهدف أو الوقف."}
+    if (price - target) * side >= 0:
+        return {"key": "take", "text": "🎯 الهدف تحقق — بع الكل الآن."}
+    if (price - stop) * side <= 0:
+        return {"key": "stop", "text": "🛑 الوقف — اخرج الآن ولا تنتظر."}
+    away = abs(target - price)
+    return {"key": "hold", "text": f"احتفظ. لا تخرج قبل الهدف أو الوقف · باقٍ للهدف {away:.2f}$ على السهم."}
 
 
 def confirmed_count(bars: list[Bar], now: datetime | None) -> int:
@@ -475,10 +526,11 @@ class LeaderService:
         self._tick_lock = asyncio.Lock()
         self._recorded: set[tuple[str, str]] = set()
         self._live: tuple[date, dict[str, Any]] | None = None
-        # what the contract cost when the position was first seen open, so the
-        # profit shown is measured from a real price and not re-anchored on
-        # every refresh
-        self._entry_quotes: dict[tuple[str, str], float] = {}
+        # fixed for the life of an opportunity: which contract was named for
+        # it, and what that contract cost when the position was first seen
+        # open — so nothing about a live trade is re-decided on a refresh
+        self._locked: dict[tuple[str, str], dict[str, Any]] = {}
+        self._entry_quotes: dict[tuple[str, str], dict[str, Any]] = {}
 
     async def board(self) -> dict[str, Any]:
         async with self._lock:
@@ -542,6 +594,11 @@ class LeaderService:
             return {}
 
         async def one(symbol: str, occ: str, ctx: dict[str, Any]):
+            active = ctx["active"]
+            key = (symbol, str(active.get("signal_ts")))
+            # the contract named for this opportunity is fixed; a board that
+            # was built a moment before the lock still names the same one
+            occ = (self._locked.get(key) or {}).get("occ") or occ
             try:
                 async with self.desk._client() as client:
                     quote = await client.option_quote(symbol, occ)
@@ -550,18 +607,18 @@ class LeaderService:
                 return symbol, None
             if quote is None or not quote.mid:
                 return symbol, None
-            active = ctx["active"]
-            targets = (ctx["contract"].get("targets") or {})
-            key = (symbol, str(active.get("signal_ts")))
-            entry_px = self._entry_quotes.get(key)
-            if entry_px is None and active.get("status") == "open":
-                # first sight of this position: what the contract costs now is
-                # the honest anchor, and it is remembered for the rest of it
-                planned = (targets.get("entry") or {}).get("contract")
-                entry_px = planned if planned else quote.mid
-                self._entry_quotes[key] = entry_px
+            if key not in self._entry_quotes and active.get("status") == "open":
+                # first sight of this position: what the contract costs *now* is
+                # the honest anchor, remembered for the rest of the trade — never
+                # the plan's estimate, which can sit twenty cents from the tape
+                self._entry_quotes[key] = {"price": quote.mid, "at": now.isoformat()}
+            anchor = self._entry_quotes.get(key) or {}
+            entry_px = anchor.get("price")
+            stock = (prices.get(symbol) or {}).get("price")
+            side = int(active.get("side") or 0)
             row: dict[str, Any] = {
                 "occ": occ,
+                "strike": quote.strike,
                 "price": quote.mid,
                 "bid": quote.bid,
                 "ask": quote.ask,
@@ -570,12 +627,24 @@ class LeaderService:
                 "volume": quote.volume,
                 "status": active.get("status"),
                 "entry": entry_px,
-                "target": (targets.get("target") or {}).get("contract"),
-                "stop": (targets.get("stop") or {}).get("contract"),
+                "entry_at": anchor.get("at"),
+                "stock": stock,
+                "stock_entry": active.get("entry"),
+                "stock_target": active.get("target"),
+                "stock_stop": active.get("stop"),
+                "side": side,
             }
+            # the contract's own expected price at the two exits, measured
+            # from the fixed anchor so the percentages stop wandering
+            if stock and active.get("target") is not None and active.get("stop") is not None:
+                row["target"] = _level_price(quote, float(stock), float(active["target"]), now)
+                row["stop"] = _level_price(quote, float(stock), float(active["stop"]), now)
             if entry_px and entry_px > 0:
                 row["pnl_pct"] = round(100.0 * (quote.mid - entry_px) / entry_px, 1)
                 row["pnl_usd"] = round((quote.mid - entry_px) * 100.0, 2)
+            # what to do now is decided on the STOCK's levels — the rule's
+            # levels — never on an estimated contract price
+            row["action"] = _action(active.get("status"), side, stock, active.get("target"), active.get("stop"))
             return symbol, row
 
         results = await asyncio.gather(*(one(s, o, c) for s, o, c in wanted))
@@ -629,7 +698,10 @@ class LeaderService:
             "leaders": leaders,
             "block": tiles,
             "morning": morning_read(fetched.get("QQQ") or [], now),
-            "journal": self._journal(history, today),
+            "journal": self._journal(
+                history, today,
+                sorted({b.ts.astimezone(NY).date() for b in (fetched.get("QQQ") or [])}),
+            ),
             "notes": _day_notes(now),
             "measured": MEASURED,
             "basket": list(BASKET),
@@ -697,16 +769,46 @@ class LeaderService:
         self, client: Any, sym: str, side: int, spot: float, active: Opportunity | None,
         atr: float, e9: float, now: datetime,
     ) -> dict[str, Any]:
-        """Today's at-the-money contract on ``side`` and where it should
-        trade at the levels — the open trade's, else the ones a signal now
-        would set. The rule lives and dies inside the session, so the
-        contract is today's whenever today trades, even in the last hour."""
+        """Today's contract on ``side`` and where it should trade at the
+        levels — the open trade's, else the ones a signal now would set.
+
+        Two things are fixed for the life of an opportunity and never
+        re-decided on a refresh: *which* contract (the strike nearest the
+        money moves with every tick, and a screen that re-picks it while the
+        customer holds the old one is quoting a contract they do not own),
+        and *what it cost* when the position was first seen open — the real
+        quote at that moment, never an estimate. The rule lives and dies
+        inside the session, so the contract is today's whenever today
+        trades, even in the last hour."""
         today = now.astimezone(NY).date()
         expiry = today if is_trading_day(today) else expiry_for(sym, FRAME, "nearest", now)
-        chain = await self.desk._chain(client, sym, expiry, side, spot)
-        contract = pick_contract(chain, side, spot)
+        key = (sym, active.signal_ts.isoformat()) if active else None
+        locked = self._locked.get(key) if key else None
+        contract = None
+        if locked:
+            try:
+                contract = await client.option_quote(sym, locked["occ"])
+            except Exception as exc:  # noqa: BLE001 - a missed quote keeps the lock, not the screen
+                log.debug("locked contract quote failed for %s: %s", locked["occ"], exc)
+            if contract is None or not contract.mid:
+                # the lock stands; the price is simply not known this second
+                return {**locked, "expiry": expiry.isoformat(), "expiry_text": _expiry_text(expiry, now),
+                        "price": None, "bid": None, "ask": None, "delta": None, "spread_pct": None,
+                        "missing": False, "stale": True, "targets": {}}
         if contract is None:
-            return {"expiry": expiry.isoformat(), "missing": True}
+            chain = await self.desk._chain(client, sym, expiry, side, spot)
+            contract = pick_contract(chain, side, spot)
+            if contract is None:
+                return {"expiry": expiry.isoformat(), "missing": True}
+            if key and active.status in ("waiting", "chase", "open"):
+                self._locked[key] = {
+                    "occ": contract.occ_symbol, "strike": contract.strike, "side": side,
+                    "side_text": "كول" if side > 0 else "بوت", "locked_at": now.isoformat(),
+                }
+        mid = contract.mid
+        if key and active.status == "open" and key not in self._entry_quotes and mid:
+            self._entry_quotes[key] = {"price": mid, "at": now.isoformat()}
+
         if active and active.entry is not None:
             levels = {"entry": active.entry, "stop": active.stop, "target": active.target}
         elif active:
@@ -715,19 +817,24 @@ class LeaderService:
         else:
             entry = min(e9, spot) if side > 0 else max(e9, spot)
             levels = {"entry": entry, "stop": entry - side * STOP_ATR * atr, "target": entry + side * TARGET_ATR * atr}
-        mid = contract.mid
+        anchor = (self._entry_quotes.get(key) or {}).get("price") if key else None
         out: dict[str, Any] = {
             "occ": contract.occ_symbol, "strike": contract.strike, "side": side,
             "side_text": "كول" if side > 0 else "بوت", "expiry": expiry.isoformat(),
             "expiry_text": _expiry_text(expiry, now), "price": mid, "bid": contract.bid, "ask": contract.ask,
-            "delta": contract.delta, "spread_pct": contract.spread_pct, "missing": False, "targets": {},
+            "delta": contract.delta, "spread_pct": contract.spread_pct, "missing": False,
+            "locked": bool(locked or (key and key in self._locked)),
+            "entry_quote": self._entry_quotes.get(key) if key else None,
+            "targets": {},
         }
-        entry_px = contract_price_at(contract, spot, float(levels["entry"]))
+        # the reference every percentage is measured from: what the customer
+        # paid once they are in, else what the contract would cost at the entry
+        base = anchor if anchor else _level_price(contract, spot, float(levels["entry"]), now)
         for name, lvl in levels.items():
             if lvl is None:
                 continue
-            px = contract_price_at(contract, spot, float(lvl))
-            out["targets"][name] = {"stock": round(float(lvl), 2), "contract": px, "pct": _pct(px, entry_px or mid)}
+            px = base if (name == "entry" and anchor) else _level_price(contract, spot, float(lvl), now)
+            out["targets"][name] = {"stock": round(float(lvl), 2), "contract": px, "pct": _pct(px, base or mid)}
         return out
 
     @staticmethod
@@ -794,7 +901,7 @@ class LeaderService:
             return {"tone": "off", "text": "قبل الافتتاح. أول إشارة ممكنة عند ٠٩:٤٠ بعد إغلاق الشمعة الثالثة."}
         if active and active.status == "open":
             up = (price - active.entry) * active.side
-            where = "فوق الدخول" if up > 0 else "تحت الدخول" if up < 0 else "عند الدخول"
+            where = "لصالحك" if up > 0 else "ضدك" if up < 0 else "عند الدخول"
             return {"tone": "up" if active.side > 0 else "dn",
                     "text": f"الدخول تم عند {active.entry:.2f}. السعر {where} بـ {abs(up):.2f}$. ما تسوي شي لين يلمس الهدف أو الوقف."}
         if active and active.status == "chase":
@@ -889,14 +996,17 @@ class LeaderService:
                          f"من أكبر {len(BASKET)} شركات)، والقاعدة تحتاج {BLOCK_MIN} بنفس الاتجاه."), "chips": chips}
 
     # ------------------------------------------------------------ the record
-    def _journal(self, history: list[Opportunity], today: date) -> dict[str, Any]:
+    def _journal(self, history: list[Opportunity], today: date, sessions: list[date] | None = None) -> dict[str, Any]:
+        """Today's opportunities and the last ten sessions. A session with no
+        signal at all is listed as such — a record that skips quiet days
+        would make the machine look busier than it is."""
         by_day: dict[date, list[Opportunity]] = {}
         for p in history:
             by_day.setdefault(p.day, []).append(p)
-        days = sorted(by_day)
+        days = sorted(set(by_day) | set(sessions or []))
         recent = []
         for d in days[-10:]:
-            rows = sorted(by_day[d], key=lambda p: p.signal_ts)
+            rows = sorted(by_day.get(d, []), key=lambda p: p.signal_ts)
             closed = [p for p in rows if p.status == "closed"]
             recent.append({
                 "day": d.isoformat(),

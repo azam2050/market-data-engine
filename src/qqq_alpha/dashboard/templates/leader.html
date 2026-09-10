@@ -234,11 +234,17 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
     return (100 - Math.max(0, Math.min(1, x)) * 100).toFixed(1) + "%";
   }
 
+  // a tick that misses the contract's quote leaves the last known one on
+  // screen: a blank box for a second reads as a broken screen
+  const lastFollow = {};
   function paintFollow(t) {
     const rows = t.contracts || {};
-    for (const [sym, c] of Object.entries(rows)) {
-      const box = document.querySelector('[data-follow="' + sym + '"]');
-      if (!box || !c || !c.price) continue;
+    const boxes = document.querySelectorAll('[data-follow]');
+    for (const box of boxes) {
+      const sym = box.getAttribute("data-follow");
+      const c = rows[sym] || lastFollow[sym];
+      if (!c || !c.price) continue;
+      lastFollow[sym] = c;
       const px = document.querySelector('[data-fpx="' + sym + '"]');
       const pl = document.querySelector('[data-fpl="' + sym + '"]');
       const lbl = document.querySelector('[data-flbl="' + sym + '"]');
@@ -246,11 +252,16 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
       const stopEl = document.querySelector('[data-fstop="' + sym + '"]');
       const tgtEl = document.querySelector('[data-ftgt="' + sym + '"]');
       const track = document.querySelector('[data-ftrack="' + sym + '"] i');
-      if (px) px.textContent = "$" + f2(c.price);
       const inTrade = c.status === "open";
-      if (lbl) lbl.textContent = inTrade ? "سعر العقد الآن" : "سعر العقد لو دخلت الآن";
-      if (stopEl) stopEl.textContent = "الوقف " + (c.stop ? "$" + f2(c.stop) : "—");
-      if (tgtEl) tgtEl.textContent = "الهدف " + (c.target ? "$" + f2(c.target) : "—");
+      if (px) px.textContent = "$" + f2(c.price);
+      if (lbl) {
+        const when = c.entry_at ? new Date(c.entry_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/New_York" }) : "";
+        lbl.textContent = inTrade
+          ? "عقد " + esc(c.strike || "") + " الآن" + (c.entry ? " · دخولك ≈ $" + f2(c.entry) + (when ? " (" + when + ")" : "") : "")
+          : "سعر العقد لو دخلت الآن";
+      }
+      if (stopEl) stopEl.textContent = "الوقف ≈ " + (c.stop ? "$" + f2(c.stop) : "—");
+      if (tgtEl) tgtEl.textContent = "الهدف ≈ " + (c.target ? "$" + f2(c.target) : "—");
       if (pl) {
         if (inTrade && c.pnl_pct !== undefined && c.pnl_pct !== null) {
           const sign = c.pnl_pct >= 0 ? "+" : "−";
@@ -259,24 +270,13 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
           box.className = "follow " + (c.pnl_pct > 0 ? "up" : c.pnl_pct < 0 ? "dn" : "");
         } else { pl.textContent = ""; pl.className = "pl flat"; box.className = "follow"; }
       }
-      if (track && c.stop && c.target) {
-        const lo = Math.min(c.stop, c.target), hi = Math.max(c.stop, c.target);
-        const x = Math.max(0, Math.min(1, (c.price - lo) / ((hi - lo) || 1)));
-        track.style.right = (100 - x * 100).toFixed(1) + "%";
+      // the marker walks the STOCK between its stop and target: those are
+      // the rule's levels, and the contract's estimates only decorate them
+      if (track && c.stock && c.stock_stop !== null && c.stock_target !== null && c.side) {
+        const lv = { side: c.side, stop: c.stock_stop, target: c.stock_target };
+        track.style.right = railPosition(lv, c.stock);
       }
-      if (act) {
-        if (!inTrade) {
-          act.textContent = "لا تشترِ بعد. انتظر حتى تقول الشاشة إن الصفقة فُتحت.";
-        } else if (c.target && c.price >= c.target) {
-          act.textContent = "🎯 الهدف تحقق — بع الكل الآن.";
-        } else if (c.stop && c.price <= c.stop) {
-          act.textContent = "🛑 الوقف — اخرج الآن ولا تنتظر.";
-        } else {
-          const away = c.target ? (c.target - c.price) : null;
-          act.textContent = "احتفظ. لا تخرج قبل الهدف أو الوقف"
-            + (away !== null ? " · باقٍ للهدف $" + away.toFixed(2) : "") + ".";
-        }
-      }
+      if (act && c.action) act.textContent = c.action.text;
     }
   }
 

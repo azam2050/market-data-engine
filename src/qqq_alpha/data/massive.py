@@ -185,11 +185,25 @@ class MassiveClient:
         Includes extended hours — the provider offers no RTH-only switch, so
         callers that need the regular session must filter by timestamp.
         """
-        payload = await self._get(
+        path = (
             f"/v2/aggs/ticker/{symbol}/range/{minutes}/minute/"
-            f"{start.isoformat()}/{end.isoformat()}",
-            {"adjusted": "true", "sort": "asc", "limit": 50_000},
+            f"{start.isoformat()}/{end.isoformat()}"
         )
+        params: dict[str, Any] = {"adjusted": "true", "sort": "asc", "limit": 50_000}
+        rows: list[dict[str, Any]] = []
+        pages = 0
+        # the provider may hand back the span in pages; every page is taken,
+        # because a history that stops early looks exactly like a quiet market
+        while True:
+            payload = await self._get(path, params)
+            rows.extend(payload.get("results") or [])
+            pages += 1
+            next_url = payload.get("next_url")
+            if not next_url or pages >= CHAIN_MAX_PAGES:
+                if next_url:
+                    log.warning("minute bars for %s stopped at %d pages with more to come", symbol, pages)
+                break
+            path, params = _split_url(next_url)
         return [
             Bar(
                 symbol=symbol,
@@ -202,7 +216,7 @@ class MassiveClient:
                 vwap=float(row["vw"]) if row.get("vw") is not None else None,
                 transactions=int(row["n"]) if row.get("n") is not None else None,
             )
-            for row in payload.get("results") or []
+            for row in rows
         ]
 
     async def last_prices(self, symbols: list[str]) -> dict[str, dict[str, Any]]:

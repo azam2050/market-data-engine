@@ -224,6 +224,31 @@ async def test_paging_stops_at_a_budget_rather_than_looping_for_ever():
     assert len(contracts) == 5 * CHAIN_MAX_PAGES
 
 
+async def test_minute_bars_follow_the_pages_so_history_does_not_stop_early():
+    """A span the provider pages must arrive whole: a history that stops
+    early looks exactly like a quiet market, and the record built on it
+    would quietly shrink to three sessions."""
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        seen.append(params)
+        assert params.get("apiKey") == "k"
+        if params.get("cursor") == "P2":
+            rows = [{"t": 1_700_000_000_000 + i * 60_000, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1} for i in range(5000, 6200)]
+            return httpx.Response(200, json={"results": rows})
+        rows = [{"t": 1_700_000_000_000 + i * 60_000, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1} for i in range(5000)]
+        return httpx.Response(200, json={"results": rows, "next_url": "https://api.polygon.io/v2/aggs/ticker/QQQ/range/1/minute/a/b?cursor=P2"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.polygon.io") as http_client:
+        client = MassiveClient(Settings(massive_api_key="k"), client=http_client)
+        bars = await client.range_minute_bars("QQQ", 1, date(2026, 9, 1), date(2026, 9, 10))
+
+    assert len(seen) == 2 and len(bars) == 6200
+    assert bars[0].ts < bars[-1].ts
+
+
 async def test_last_prices_reads_the_tape_for_several_tickers_in_one_request():
     seen: list[dict] = []
 
