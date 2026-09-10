@@ -1667,7 +1667,7 @@ class LiveEngine:
 
         if self.commands is None:
             return
-        if not self.desk.has_access(str(chat_id)) and str(chat_id) != str(self.settings.telegram_chat_id):
+        if not self.desk.has_access(str(chat_id)):
             await self._send_pay_offer(chat_id)
             return
         link = self.desk.link_for(str(chat_id), page)

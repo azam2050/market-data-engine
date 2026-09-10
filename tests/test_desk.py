@@ -289,6 +289,17 @@ def test_note_for_each_situation():
     assert "عرضي" in DeskService.note_for(flat, None, None)
 
 
+def test_the_operator_is_never_asked_to_renew_a_subscription(tmp_path):
+    """The bot hands the operator a link because they own the desk; the
+    screen behind that link must apply the same rule, not lock them out."""
+    svc, mem = _service(tmp_path, _FakeClient())
+    assert svc.settings.telegram_chat_id == "777"
+    assert mem.subscriber("777") is None  # the operator is not a subscriber row
+    assert svc.is_operator("777") and svc.has_access("777") is True
+    assert svc.is_operator(" 777 ") is True  # whitespace in the env var
+    assert svc.is_operator("778") is False and svc.has_access("778") is False
+
+
 def test_access_and_link(tmp_path):
     svc, mem = _service(tmp_path, _FakeClient())
     now = datetime.now(UTC)

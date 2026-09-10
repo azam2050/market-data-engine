@@ -147,7 +147,8 @@ def create_app(
         if not desk.has_access(chat_id):
             return _locked(request, "اشتراكك منتهٍ. جدّده من البوت لتعود شاشتك.", 403)
         row = desk.memory.subscriber(chat_id) or {}
-        return chat_id, (row.get("first_name") or row.get("username") or "مشترك")
+        default = "المشغّل" if getattr(desk, "is_operator", lambda _c: False)(chat_id) else "مشترك"
+        return chat_id, (row.get("first_name") or row.get("username") or default)
 
     @app.get("/desk")
     def desk_page(request: Request):

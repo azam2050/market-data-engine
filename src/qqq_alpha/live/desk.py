@@ -151,8 +151,20 @@ class DeskService:
         self.memory.set_desk_settings(chat_id, symbols, frame, expiry)
         return {"symbols": symbols, "frame": frame, "expiry": expiry}
 
+    def is_operator(self, chat_id: str) -> bool:
+        """The operator's own chat. They own the desk; they are not a row in
+        the subscribers table and must never be asked to renew a
+        subscription they never bought."""
+        owner = str(self.settings.telegram_chat_id or "").strip()
+        return bool(owner) and str(chat_id).strip() == owner
+
     def has_access(self, chat_id: str, now: datetime | None = None) -> bool:
-        """Any subscriber whose window is still open — trial or paid."""
+        """Any subscriber whose window is still open — trial or paid — and
+        the operator always. The bot already hands the operator a link on
+        that basis; a screen that then refuses it is the same rule applied
+        in two places with two different answers."""
+        if self.is_operator(chat_id):
+            return True
         row = self.memory.subscriber(chat_id)
         if row is None:
             return False
