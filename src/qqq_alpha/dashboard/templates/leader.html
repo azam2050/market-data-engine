@@ -73,6 +73,18 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
 .contract .name{font-weight:700;color:var(--acc);font-size:15px}
 .contract .sub{color:var(--mute);font-size:13px}
 .contract .cost{font-family:"Cairo";font-size:22px;font-weight:800;color:var(--acc)}
+/* the live follow: what the contract is worth right now */
+.follow{display:grid;gap:10px;border-radius:14px;padding:12px 14px;background:var(--soft);border:1px solid var(--line)}
+.follow.up{background:var(--up-soft);border-color:transparent} .follow.dn{background:var(--dn-soft);border-color:transparent}
+.follow .now{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.follow .now b{font-family:"Cairo";font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate}
+.follow .now .pl{font-family:"Cairo";font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate}
+.follow .pl.up{color:var(--up)} .follow .pl.dn{color:var(--dn)} .follow .pl.flat{color:var(--mute)}
+.follow .lbl{color:var(--mute);font-size:13px;font-weight:700}
+.follow .track{position:relative;height:8px;border-radius:999px;background:linear-gradient(270deg,var(--up) 0%,var(--up) 35%,var(--soft) 35%,var(--soft) 65%,var(--dn) 65%,var(--dn) 100%)}
+.follow .track i{position:absolute;top:50%;transform:translate(50%,-50%);width:16px;height:16px;border-radius:50%;background:var(--card);border:4px solid var(--acc)}
+.follow .ends{display:flex;justify-content:space-between;font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums}
+.follow .act{font-size:15px;font-weight:700}
 .levels{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .lvl{border-radius:14px;padding:12px 10px;text-align:center;display:grid;gap:2px}
 .lvl .lab{font-size:12px;font-weight:700;letter-spacing:.02em}
@@ -187,7 +199,15 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
     if (c.missing) return '<div class="contract"><div><div class="name">لا عقد مناسب الآن</div><div class="sub">' + (c.error ? "تعذر جلب سلسلة العقود" : "لا سترايك بسعر معقول لانتهاء اليوم") + '</div></div></div>';
     const t = c.targets || {};
     const est = (k) => (t[k] && t[k].contract !== null) ? '≈ $' + f2(t[k].contract) + ' ' + pct(t[k].pct) : '';
+    const follow = (ld.active && (ld.active.status === "open" || ld.active.status === "waiting" || ld.active.status === "chase"))
+      ? '<div class="follow" data-follow="' + esc(ld.symbol) + '">'
+        + '<div class="now"><span class="lbl" data-flbl="' + esc(ld.symbol) + '">سعر العقد الآن</span><b data-fpx="' + esc(ld.symbol) + '">—</b><span class="pl flat" data-fpl="' + esc(ld.symbol) + '"></span></div>'
+        + '<div class="track" data-ftrack="' + esc(ld.symbol) + '"><i style="right:50%"></i></div>'
+        + '<div class="ends"><span data-fstop="' + esc(ld.symbol) + '">الوقف —</span><span data-ftgt="' + esc(ld.symbol) + '">الهدف —</span></div>'
+        + '<div class="act" data-fact="' + esc(ld.symbol) + '">…</div></div>'
+      : '';
     return '<div class="contract"><div><div class="name">' + esc(ld.symbol) + ' ' + esc(c.side_text) + ' <span class="num">' + esc(c.strike) + '</span> · ' + esc(c.expiry_text) + '</div><div class="sub">الآن ' + n(c.price) + ' (' + n(c.bid) + ' / ' + n(c.ask) + ')' + (c.delta ? ' · دلتا ' + Math.abs(c.delta).toFixed(2) : '') + '</div></div><div class="cost"><span class="num">$' + f2(c.price) + '</span></div></div>'
+      + follow
       + '<div class="levels">'
       + '<div class="lvl target"><div class="lab">الهدف · بع الكل</div><div class="px">' + n(t.target && t.target.stock) + '</div><div class="ct">' + est("target") + '</div></div>'
       + '<div class="lvl entry"><div class="lab">الدخول</div><div class="px">' + n(t.entry && t.entry.stock) + '</div><div class="ct">' + (ld.active && ld.active.status === "open" ? (ld.active.via_zone ? "من المنطقة" : "بالتأكيد") : "المنطقة") + '</div></div>'
@@ -214,7 +234,54 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
     return (100 - Math.max(0, Math.min(1, x)) * 100).toFixed(1) + "%";
   }
 
+  function paintFollow(t) {
+    const rows = t.contracts || {};
+    for (const [sym, c] of Object.entries(rows)) {
+      const box = document.querySelector('[data-follow="' + sym + '"]');
+      if (!box || !c || !c.price) continue;
+      const px = document.querySelector('[data-fpx="' + sym + '"]');
+      const pl = document.querySelector('[data-fpl="' + sym + '"]');
+      const lbl = document.querySelector('[data-flbl="' + sym + '"]');
+      const act = document.querySelector('[data-fact="' + sym + '"]');
+      const stopEl = document.querySelector('[data-fstop="' + sym + '"]');
+      const tgtEl = document.querySelector('[data-ftgt="' + sym + '"]');
+      const track = document.querySelector('[data-ftrack="' + sym + '"] i');
+      if (px) px.textContent = "$" + f2(c.price);
+      const inTrade = c.status === "open";
+      if (lbl) lbl.textContent = inTrade ? "سعر العقد الآن" : "سعر العقد لو دخلت الآن";
+      if (stopEl) stopEl.textContent = "الوقف " + (c.stop ? "$" + f2(c.stop) : "—");
+      if (tgtEl) tgtEl.textContent = "الهدف " + (c.target ? "$" + f2(c.target) : "—");
+      if (pl) {
+        if (inTrade && c.pnl_pct !== undefined && c.pnl_pct !== null) {
+          const sign = c.pnl_pct >= 0 ? "+" : "−";
+          pl.textContent = sign + Math.abs(c.pnl_pct).toFixed(0) + "٪ (" + sign + "$" + Math.abs(c.pnl_usd).toFixed(0) + " للعقد)";
+          pl.className = "pl " + (c.pnl_pct > 0 ? "up" : c.pnl_pct < 0 ? "dn" : "flat");
+          box.className = "follow " + (c.pnl_pct > 0 ? "up" : c.pnl_pct < 0 ? "dn" : "");
+        } else { pl.textContent = ""; pl.className = "pl flat"; box.className = "follow"; }
+      }
+      if (track && c.stop && c.target) {
+        const lo = Math.min(c.stop, c.target), hi = Math.max(c.stop, c.target);
+        const x = Math.max(0, Math.min(1, (c.price - lo) / ((hi - lo) || 1)));
+        track.style.right = (100 - x * 100).toFixed(1) + "%";
+      }
+      if (act) {
+        if (!inTrade) {
+          act.textContent = "لا تشترِ بعد. انتظر حتى تقول الشاشة إن الصفقة فُتحت.";
+        } else if (c.target && c.price >= c.target) {
+          act.textContent = "🎯 الهدف تحقق — بع الكل الآن.";
+        } else if (c.stop && c.price <= c.stop) {
+          act.textContent = "🛑 الوقف — اخرج الآن ولا تنتظر.";
+        } else {
+          const away = c.target ? (c.target - c.price) : null;
+          act.textContent = "احتفظ. لا تخرج قبل الهدف أو الوقف"
+            + (away !== null ? " · باقٍ للهدف $" + away.toFixed(2) : "") + ".";
+        }
+      }
+    }
+  }
+
   function paintTicks(t) {
+    paintFollow(t);
     const open = t.open || {};
     for (const [sym, q] of Object.entries(t.prices || {})) {
       // every basket name shows its live move on the day, so the block is

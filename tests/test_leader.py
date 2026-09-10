@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from qqq_alpha.dashboard.app import create_app
-from qqq_alpha.domain import Bar
+from qqq_alpha.domain import Bar, OptionContract, OptionType
 from qqq_alpha.live import leader as LD
 from qqq_alpha.live import mirsad9
 from qqq_alpha.live.desk import DeskService
@@ -337,6 +337,73 @@ async def test_the_price_line_has_its_own_cheap_beat(tmp_path):
     assert await svc.ticks() == first and client.tape == 1  # inside the cache
     svc._ticks = None
     assert (await svc.ticks())["prices"]["QQQ"]["price"] == 702.0
+
+
+@pytest.mark.asyncio
+async def test_an_open_trade_is_followed_on_the_contracts_own_quote(tmp_path):
+    """Once a position is open the screen must show what the contract is
+    worth now, from the contract's own quote — and measure the profit from
+    one fixed entry, not re-anchor it on every refresh."""
+
+    class Tape(_FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.mid = 2.40
+            self.quotes = 0
+
+        async def last_prices(self, symbols):
+            return {s: {"price": 100.0, "ts": None, "size": 1, "change_pct": 0.0} for s in symbols}
+
+        async def option_quote(self, underlying, occ):
+            self.quotes += 1
+            return OptionContract(
+                occ_symbol=occ, underlying=underlying, option_type=OptionType.CALL, strike=100.0,
+                expiry=DAY, bid=self.mid - 0.03, ask=self.mid + 0.03, last=self.mid, volume=700,
+                open_interest=800, implied_volatility=0.2, delta=0.5, gamma=None, theta=None,
+            )
+
+    client = Tape()
+    now = datetime(DAY.year, DAY.month, DAY.day, 11, 0, tzinfo=NY).astimezone(UTC)
+    svc, _ = _service(tmp_path, client, now)
+    board = await svc.board()
+    ld = board["leaders"][0]
+    ld["active"] = {"status": "open", "entry": 100.0, "stop": 98.5, "target": 101.0,
+                    "side": 1, "signal_ts": "2026-09-08T10:00:00-04:00"}
+    ld["contract"] = {"occ": "O:QQQ260908C00100000", "missing": False, "targets": {
+        "entry": {"contract": 2.40}, "target": {"contract": 3.20}, "stop": {"contract": 1.20}}}
+    svc._cache = (svc._cache[0], board)
+
+    svc._ticks = None
+    first = (await svc.ticks())["contracts"][ld["symbol"]]
+    assert first["price"] == pytest.approx(2.40) and first["entry"] == pytest.approx(2.40)
+    assert first["pnl_pct"] == 0.0 and first["target"] == 3.20 and first["stop"] == 1.20
+
+    client.mid = 3.00  # the contract moves; the entry does not
+    svc._ticks = None
+    later = (await svc.ticks())["contracts"][ld["symbol"]]
+    assert later["price"] == pytest.approx(3.00) and later["entry"] == pytest.approx(2.40)
+    assert later["pnl_pct"] == pytest.approx(25.0) and later["pnl_usd"] == pytest.approx(60.0)
+    assert later["status"] == "open"
+
+
+@pytest.mark.asyncio
+async def test_a_contract_quote_that_fails_does_not_take_the_screen_down(tmp_path):
+    class Tape(_FakeClient):
+        async def last_prices(self, symbols):
+            return {s: {"price": 100.0, "ts": None, "size": 1, "change_pct": 0.0} for s in symbols}
+
+        async def option_quote(self, underlying, occ):
+            raise RuntimeError("upstream 500")
+
+    now = datetime(DAY.year, DAY.month, DAY.day, 11, 0, tzinfo=NY).astimezone(UTC)
+    svc, _ = _service(tmp_path, Tape(), now)
+    board = await svc.board()
+    board["leaders"][0]["active"] = {"status": "open", "entry": 100.0, "stop": 98.5, "target": 101.0, "side": 1, "signal_ts": "x"}
+    board["leaders"][0]["contract"] = {"occ": "O:X", "missing": False, "targets": {}}
+    svc._cache = (svc._cache[0], board)
+    svc._ticks = None
+    out = await svc.ticks()
+    assert out["contracts"] == {} and out["prices"]  # the rest of the screen is untouched
 
 
 @pytest.mark.asyncio

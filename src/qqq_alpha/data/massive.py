@@ -370,6 +370,16 @@ class MassiveClient:
             payload = await self._get(next_path, next_params)
         return contracts
 
+    async def option_quote(self, underlying: str, occ_symbol: str) -> OptionContract | None:
+        """One contract, priced now — the quote a screen follows tick by tick
+        while a trade is open. One request, no chain to page through."""
+        payload = await self._get(f"/v3/snapshot/options/{underlying}/{occ_symbol}")
+        result = payload.get("results")
+        if not result:
+            return None
+        rows = _contracts_from({"results": [result]}, underlying)
+        return rows[0] if rows else None
+
     async def option_minute_bars(self, occ_symbol: str, day: date) -> list[Bar]:
         """Historical 1-minute bars for a single contract — the backtest's price source."""
         payload = await self._get(

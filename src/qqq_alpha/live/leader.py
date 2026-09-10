@@ -475,6 +475,10 @@ class LeaderService:
         self._tick_lock = asyncio.Lock()
         self._recorded: set[tuple[str, str]] = set()
         self._live: tuple[date, dict[str, Any]] | None = None
+        # what the contract cost when the position was first seen open, so the
+        # profit shown is measured from a real price and not re-anchored on
+        # every refresh
+        self._entry_quotes: dict[tuple[str, str], float] = {}
 
     async def board(self) -> dict[str, Any]:
         async with self._lock:
@@ -504,10 +508,10 @@ class LeaderService:
                     prices = await client.last_prices([*LEADERS, *BASKET])
             except Exception as exc:  # noqa: BLE001 - a stale price is not a broken screen
                 log.warning("leader ticks failed: %s", exc)
-            payload = {"now": now.isoformat(), "prices": prices}
+            payload: dict[str, Any] = {"now": now.isoformat(), "prices": prices}
             board = self._cache[1] if self._cache else None
             if board:
-                levels = {}
+                levels: dict[str, Any] = {}
                 for ld in board.get("leaders") or []:
                     active = ld.get("active") or {}
                     if active.get("status") == "open":
@@ -516,8 +520,66 @@ class LeaderService:
                             "target": active.get("target"), "side": active.get("side"),
                         }
                 payload["open"] = levels
+                payload["contracts"] = await self._follow(board, prices, now)
             self._ticks = (time.monotonic(), payload)
             return payload
+
+    async def _follow(
+        self, board: dict[str, Any], prices: dict[str, dict[str, Any]], now: datetime
+    ) -> dict[str, Any]:
+        """The live price of the contract the board named, and what the trade
+        is worth right now — the number a trader actually watches once they
+        are in. Quoted from the contract itself, not estimated from the
+        stock; an estimate is fine for a plan and wrong for a position."""
+        wanted: list[tuple[str, str, dict[str, Any]]] = []
+        for ld in board.get("leaders") or []:
+            contract = ld.get("contract") or {}
+            active = ld.get("active") or {}
+            if contract.get("missing") or not contract.get("occ") or not active:
+                continue
+            wanted.append((ld["symbol"], contract["occ"], {"contract": contract, "active": active}))
+        if not wanted:
+            return {}
+
+        async def one(symbol: str, occ: str, ctx: dict[str, Any]):
+            try:
+                async with self.desk._client() as client:
+                    quote = await client.option_quote(symbol, occ)
+            except Exception as exc:  # noqa: BLE001 - a missed quote is not a broken screen
+                log.debug("contract quote failed for %s: %s", occ, exc)
+                return symbol, None
+            if quote is None or not quote.mid:
+                return symbol, None
+            active = ctx["active"]
+            targets = (ctx["contract"].get("targets") or {})
+            key = (symbol, str(active.get("signal_ts")))
+            entry_px = self._entry_quotes.get(key)
+            if entry_px is None and active.get("status") == "open":
+                # first sight of this position: what the contract costs now is
+                # the honest anchor, and it is remembered for the rest of it
+                planned = (targets.get("entry") or {}).get("contract")
+                entry_px = planned if planned else quote.mid
+                self._entry_quotes[key] = entry_px
+            row: dict[str, Any] = {
+                "occ": occ,
+                "price": quote.mid,
+                "bid": quote.bid,
+                "ask": quote.ask,
+                "delta": quote.delta,
+                "spread_pct": quote.spread_pct,
+                "volume": quote.volume,
+                "status": active.get("status"),
+                "entry": entry_px,
+                "target": (targets.get("target") or {}).get("contract"),
+                "stop": (targets.get("stop") or {}).get("contract"),
+            }
+            if entry_px and entry_px > 0:
+                row["pnl_pct"] = round(100.0 * (quote.mid - entry_px) / entry_px, 1)
+                row["pnl_usd"] = round((quote.mid - entry_px) * 100.0, 2)
+            return symbol, row
+
+        results = await asyncio.gather(*(one(s, o, c) for s, o, c in wanted))
+        return {sym: row for sym, row in results if row}
 
     async def _build(self) -> dict[str, Any]:
         now = self._now()
