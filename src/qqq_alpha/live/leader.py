@@ -72,6 +72,10 @@ SKIPPED_COUNT = True
 LOOKBACK_DAYS = 16
 BASKET_LOOKBACK_DAYS = 6
 BOARD_TTL_SEC = 20
+# the price line moves with the tape, not with the board: one request for
+# both leaders, shared by everyone watching, so a page polling every second
+# and a hundred pages polling every second cost the provider the same
+TICK_TTL_SEC = 1.0
 
 # the raw impulse: MIRSAD's candle with every optional filter off
 RAW = Params(adxOn=False, coolN=0, minQ=0.0, htfOn=False, skipOpen=1, lateN=15, late3N=0)
@@ -466,7 +470,9 @@ class LeaderService:
         self.memory = desk.memory
         self._now = getattr(desk, "_now", None) or (lambda: datetime.now(UTC))
         self._cache: tuple[float, dict[str, Any]] | None = None
+        self._ticks: tuple[float, dict[str, Any]] | None = None
         self._lock = asyncio.Lock()
+        self._tick_lock = asyncio.Lock()
         self._recorded: set[tuple[str, str]] = set()
         self._live: tuple[date, dict[str, Any]] | None = None
 
@@ -476,6 +482,37 @@ class LeaderService:
                 return self._cache[1]
             payload = await self._build()
             self._cache = (time.monotonic(), payload)
+            return payload
+
+    async def ticks(self) -> dict[str, Any]:
+        """The live price of each leader, and where it sits between the stop
+        and the target of whatever the board last said. Cheap on purpose:
+        the page asks for this every second, and the board every half
+        minute."""
+        async with self._tick_lock:
+            cached = self._ticks
+            if cached and time.monotonic() - cached[0] < TICK_TTL_SEC:
+                return cached[1]
+            now = self._now()
+            prices: dict[str, dict[str, Any]] = {}
+            try:
+                async with self.desk._client() as client:
+                    prices = await client.last_prices(list(LEADERS))
+            except Exception as exc:  # noqa: BLE001 - a stale price is not a broken screen
+                log.warning("leader ticks failed: %s", exc)
+            payload = {"now": now.isoformat(), "prices": prices}
+            board = self._cache[1] if self._cache else None
+            if board:
+                levels = {}
+                for ld in board.get("leaders") or []:
+                    active = ld.get("active") or {}
+                    if active.get("status") == "open":
+                        levels[ld["symbol"]] = {
+                            "entry": active.get("entry"), "stop": active.get("stop"),
+                            "target": active.get("target"), "side": active.get("side"),
+                        }
+                payload["open"] = levels
+            self._ticks = (time.monotonic(), payload)
             return payload
 
     async def _build(self) -> dict[str, Any]:

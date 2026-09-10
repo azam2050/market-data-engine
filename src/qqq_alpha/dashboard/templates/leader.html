@@ -199,7 +199,49 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
     let x = (price - lo) / ((hi - lo) || 1); if (a.side < 0) x = 1 - x;
     x = Math.max(0, Math.min(1, x));
     const right = (100 - x * 100).toFixed(1) + "%";
-    return '<div class="rail"><span class="now" style="right:' + right + '"></span><span class="tag" style="right:' + right + '">الآن ' + f2(price) + '</span></div>';
+    return '<div class="rail" data-rail="' + esc(a.symbol) + '"><span class="now" style="right:' + right + '"></span>'
+      + '<span class="tag" style="right:' + right + '">الآن ' + f2(price) + '</span></div>';
+  }
+
+  // ---- the price line: its own beat, so it moves with the tape while the
+  // board keeps its half-minute cadence
+  let lastTick = {};
+  function railPosition(lv, price) {
+    const lo = lv.side > 0 ? lv.stop : lv.target, hi = lv.side > 0 ? lv.target : lv.stop;
+    let x = (price - lo) / ((hi - lo) || 1); if (lv.side < 0) x = 1 - x;
+    return (100 - Math.max(0, Math.min(1, x)) * 100).toFixed(1) + "%";
+  }
+
+  function paintTicks(t) {
+    const open = t.open || {};
+    for (const [sym, q] of Object.entries(t.prices || {})) {
+      const el = document.querySelector('[data-px="' + sym + '"]');
+      if (el && q && q.price) {
+        const was = Number(el.textContent);
+        el.textContent = f2(q.price);
+        if (was && Math.abs(q.price - was) > 0.0001) {
+          el.style.color = q.price > was ? "var(--up)" : "var(--dn)";
+          clearTimeout(lastTick[sym]);
+          lastTick[sym] = setTimeout(() => { el.style.color = ""; }, 900);
+        }
+      }
+      const lv = open[sym];
+      const rail = document.querySelector('[data-rail="' + sym + '"]');
+      if (rail && lv && q && q.price && lv.stop !== null && lv.target !== null) {
+        const right = railPosition(lv, q.price);
+        const dot = rail.querySelector(".now"), tag = rail.querySelector(".tag");
+        if (dot) dot.style.right = right;
+        if (tag) { tag.style.right = right; tag.textContent = "الآن " + f2(q.price); }
+      }
+    }
+  }
+
+  async function tick() {
+    try {
+      const res = await fetch("/api/leader/tick", { credentials: "same-origin", cache: "no-store" });
+      if (!res.ok) return;
+      paintTicks(await res.json());
+    } catch (e) { /* a missed tick is not a broken screen */ }
   }
 
   function leaderCard(ld) {
@@ -211,7 +253,8 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
                     : a.status === "chase" ? '<span class="pill wait">◐ تأكيد · دخول الشمعة القادمة</span>'
                     : '<span class="pill wait">◐ بانتظار المنطقة</span>')
                  : st === "done" ? '<span class="pill off">انتهت فرص اليوم</span>' : '<span class="pill off">مراقبة</span>';
-    let body = '<div class="pxrow"><span class="mute">السعر الآن · شمعة <span class="num">' + esc(ld.bar_time) + '</span></span><span class="price num">' + f2(ld.price) + '</span></div>';
+    let body = '<div class="pxrow"><span class="mute">السعر الآن · شمعة <span class="num">' + esc(ld.bar_time) + '</span></span>'
+      + '<span class="price num" data-px="' + esc(ld.symbol) + '">' + f2(ld.price) + '</span></div>';
     body += contractBlock(ld.contract, ld);
     body += rail(a, ld.price);
     body += '<div class="say ' + esc(ld.say.tone) + '"><span class="ico">' + (ld.say.tone === "up" || ld.say.tone === "dn" ? "✔" : ld.say.tone === "wait" ? "⏸" : "ⓘ") + '</span><span>' + esc(ld.say.text) + '</span></div>';
@@ -287,6 +330,8 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
   }
   refresh();
   setInterval(refresh, 30000);
+  tick();
+  setInterval(tick, 1000);
 })();
 </script>
 </body>

@@ -224,6 +224,30 @@ async def test_paging_stops_at_a_budget_rather_than_looping_for_ever():
     assert len(contracts) == 5 * CHAIN_MAX_PAGES
 
 
+async def test_last_prices_reads_the_tape_for_several_tickers_in_one_request():
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json={"tickers": [
+            {"ticker": "QQQ", "lastTrade": {"p": 708.31, "s": 100, "t": 1789012345678900000}, "todaysChangePerc": -0.42},
+            {"ticker": "SPY", "lastTrade": {"p": 0}, "day": {"c": 767.2}, "todaysChangePerc": -0.2},
+            {"ticker": "IWM", "lastTrade": {"p": 0}, "day": {"c": 0}, "prevDay": {"c": 0}},
+            {"ticker": "", "lastTrade": {"p": 5}},
+        ]})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.polygon.io") as http_client:
+        client = MassiveClient(Settings(massive_api_key="k"), client=http_client)
+        out = await client.last_prices(["qqq", "SPY", "QQQ", "IWM"])
+
+    assert len(seen) == 1 and seen[0]["tickers"] == "IWM,QQQ,SPY"
+    assert out["QQQ"]["price"] == 708.31 and out["QQQ"]["ts"].startswith("2026-")
+    assert out["SPY"]["price"] == 767.2  # no print yet: the day's close, not zero
+    assert "IWM" not in out and "" not in out  # nothing priced at zero, nothing nameless
+    assert await client.last_prices([]) == {}
+
+
 async def test_a_row_without_an_expiry_is_skipped_not_guessed():
     def handler(request: httpx.Request) -> httpx.Response:
         good = _contract_payload("O:QQQ260805C00720000", "call", 720)

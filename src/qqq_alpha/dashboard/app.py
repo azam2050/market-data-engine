@@ -225,6 +225,17 @@ def create_app(
             log.exception("leader board failed")
             return JSONResponse({"error": str(exc)}, status_code=503)
 
+    @app.get("/api/leader/tick")
+    async def leader_tick_api(request: Request):
+        """Just the price line. The page asks for this every second."""
+        if _api_viewer(request) is None:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        try:
+            return JSONResponse(await leader.ticks())
+        except Exception as exc:  # noqa: BLE001
+            log.exception("leader ticks failed")
+            return JSONResponse({"error": str(exc)}, status_code=503)
+
     @app.post("/desk/settings")
     async def desk_settings(request: Request):
         chat_id = _desk_owner(request)

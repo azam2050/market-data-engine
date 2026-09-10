@@ -205,6 +205,47 @@ class MassiveClient:
             for row in payload.get("results") or []
         ]
 
+    async def last_prices(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        """The last trade for several tickers in one request.
+
+        This is the number a screen shows as "the price now": it moves with
+        every print, not once a minute like an aggregate bar. One request
+        covers the whole list, so polling it costs the same for two symbols
+        as for one.
+        """
+        if not symbols:
+            return {}
+        payload = await self._get(
+            "/v2/snapshot/locale/us/markets/stocks/tickers",
+            {"tickers": ",".join(sorted({s.upper() for s in symbols}))},
+        )
+        out: dict[str, dict[str, Any]] = {}
+        for row in payload.get("tickers") or []:
+            ticker = str(row.get("ticker") or "").upper()
+            if not ticker:
+                continue
+            trade = row.get("lastTrade") or {}
+            price = _safe_float(trade.get("p"))
+            if price is None or price <= 0:
+                # no print yet today (pre-open): the day's close is honest
+                price = _safe_float((row.get("day") or {}).get("c")) or _safe_float(
+                    (row.get("prevDay") or {}).get("c")
+                )
+            if price is None or price <= 0:
+                continue
+            # the provider stamps trades in nanoseconds
+            stamp = trade.get("t") or trade.get("sip_timestamp")
+            out[ticker] = {
+                "price": round(price, 4),
+                "ts": (
+                    datetime.fromtimestamp(float(stamp) / 1e9, tz=UTC).isoformat()
+                    if stamp else None
+                ),
+                "size": int(trade.get("s") or 0),
+                "change_pct": _safe_float(row.get("todaysChangePerc")),
+            }
+        return out
+
     async def session(self, symbol: str, day: date) -> TradingSession:
         """One trading day, cleaned and ready to use.
 

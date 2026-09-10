@@ -313,6 +313,66 @@ async def test_a_basket_name_is_pulled_over_fewer_days_than_a_leader(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_the_price_line_has_its_own_cheap_beat(tmp_path):
+    """The page asks for the price every second; that must cost one request
+    for both leaders, shared by everyone watching."""
+
+    class Tape(_FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.tape = 0
+
+        async def last_prices(self, symbols):
+            self.tape += 1
+            return {s: {"price": 700.0 + self.tape, "ts": None, "size": 1, "change_pct": 0.1} for s in symbols}
+
+    client = Tape()
+    now = datetime(DAY.year, DAY.month, DAY.day, 11, 0, tzinfo=NY).astimezone(UTC)
+    svc, _ = _service(tmp_path, client, now)
+    first = await svc.ticks()
+    assert set(first["prices"]) == set(LD.LEADERS)
+    assert first["prices"]["QQQ"]["price"] == 701.0
+    assert await svc.ticks() == first and client.tape == 1  # inside the cache
+    svc._ticks = None
+    assert (await svc.ticks())["prices"]["QQQ"]["price"] == 702.0
+
+
+@pytest.mark.asyncio
+async def test_a_dead_tape_leaves_the_screen_standing(tmp_path):
+    class Broken(_FakeClient):
+        async def last_prices(self, symbols):
+            raise RuntimeError("upstream 500")
+
+    now = datetime(DAY.year, DAY.month, DAY.day, 11, 0, tzinfo=NY).astimezone(UTC)
+    svc, _ = _service(tmp_path, Broken(), now)
+    out = await svc.ticks()
+    assert out["prices"] == {} and out["now"]
+
+
+@pytest.mark.asyncio
+async def test_the_ticks_carry_the_levels_of_an_open_trade(tmp_path):
+    """So the marker on the rail can move with the tape without waiting for
+    the board to rebuild."""
+
+    class Tape(_FakeClient):
+        async def last_prices(self, symbols):
+            return {s: {"price": 100.0, "ts": None, "size": 1, "change_pct": 0.0} for s in symbols}
+
+    now = datetime(DAY.year, DAY.month, DAY.day, 11, 0, tzinfo=NY).astimezone(UTC)
+    svc, _ = _service(tmp_path, Tape(), now)
+    board = await svc.board()
+    assert await svc.ticks() is not None
+    svc._ticks = None
+    # plant an open trade in the cached board the way a real session would
+    board["leaders"][0]["active"] = {"status": "open", "entry": 100.0, "stop": 98.5, "target": 101.0, "side": 1}
+    svc._cache = (svc._cache[0], board)
+    out = await svc.ticks()
+    lv = out["open"][board["leaders"][0]["symbol"]]
+    assert lv["stop"] == 98.5 and lv["target"] == 101.0 and lv["side"] == 1
+    assert board["leaders"][1]["symbol"] not in out["open"]  # only what is open
+
+
+@pytest.mark.asyncio
 async def test_board_survives_a_missing_basket_name(tmp_path):
     class Broken(_FakeClient):
         async def range_minute_bars(self, symbol, minutes, start, end):
@@ -479,6 +539,9 @@ def test_leader_link_and_bot_words(tmp_path):
 
 # ---------------------------------------------------------------- the web
 class _FakeLeader:
+    async def ticks(self):
+        return {"now": datetime.now(UTC).isoformat(), "prices": {"QQQ": {"price": 708.31}}, "open": {}}
+
     async def board(self):
         return {"now": datetime.now(UTC).isoformat(), "session": {"open": False, "text": "x", "phase": "closed"},
                 "verdict": {"tone": "off", "title": "t", "text": "", "chips": []}, "leaders": [], "block": {"tiles": [], "up": 0, "down": 0, "flat": 0, "net": 0},
@@ -518,11 +581,16 @@ def test_leader_routes_are_gated_like_the_desk(tmp_path):
     assert page.status_code == 200 and "قائد اليوم" in page.text and "Ahmed" in page.text
     api = client.get("/api/leader")
     assert api.status_code == 200 and api.json()["verdict"]["title"] == "t"
+    # the price line the page polls every second is gated exactly like the board
+    tick = client.get("/api/leader/tick")
+    assert tick.status_code == 200 and tick.json()["prices"]["QQQ"]["price"] == 708.31
     expired = mem.issue_desk_token("2", datetime.now(UTC))
     client.cookies.set("mirsad_desk", expired)
     assert client.get("/leader").status_code == 403
     assert client.get("/api/leader").status_code == 401
+    assert client.get("/api/leader/tick").status_code == 401
     client.cookies.clear()
+    assert client.get("/api/leader/tick").status_code == 401
     assert client.get("/leader/preview").status_code == 401
     assert client.get("/leader/preview", auth=("admin", "secret")).status_code == 200
     assert client.get("/api/leader", auth=("admin", "secret")).status_code == 200
