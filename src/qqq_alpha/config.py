@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from datetime import time
 from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MARKET_TZ = ZoneInfo("America/New_York")
@@ -204,6 +205,18 @@ class Settings(BaseSettings):
     @property
     def tracked_symbols(self) -> list[str]:
         return [self.primary_symbol, *self.leader_symbols]
+
+    @model_validator(mode="after")
+    def _fall_back_to_the_host_domain(self) -> Settings:
+        """A customer link needs an address. When PUBLIC_BASE_URL was never
+        set, the platform's own domain is the right one — a subscriber
+        should not be handed "the screen is not configured yet" because a
+        variable nobody knew about is empty."""
+        if not self.public_base_url:
+            domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
+            if domain:
+                self.public_base_url = f"https://{domain.removeprefix('https://').removeprefix('http://').rstrip('/')}"
+        return self
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

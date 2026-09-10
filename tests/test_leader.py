@@ -290,6 +290,29 @@ async def test_board_shape_and_cache(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_basket_name_is_pulled_over_fewer_days_than_a_leader(tmp_path):
+    """A basket name is only ever asked whether it impulsed; asking each of
+    the ten for a leader's history is bandwidth and CPU spent for nothing."""
+
+    class Counting(_FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.days: dict[str, int] = {}
+
+        async def range_minute_bars(self, symbol, minutes, start, end):
+            self.days[symbol] = (end - start).days
+            return await super().range_minute_bars(symbol, minutes, start, end)
+
+    client = Counting()
+    now = datetime(DAY.year, DAY.month, DAY.day, 11, 0, tzinfo=NY).astimezone(UTC)
+    svc, _ = _service(tmp_path, client, now)
+    await svc.board()
+    assert {client.days[s] for s in LD.LEADERS} == {LD.LOOKBACK_DAYS}
+    assert {client.days[s] for s in LD.BASKET} == {LD.BASKET_LOOKBACK_DAYS}
+    assert LD.BASKET_LOOKBACK_DAYS < LD.LOOKBACK_DAYS
+
+
+@pytest.mark.asyncio
 async def test_board_survives_a_missing_basket_name(tmp_path):
     class Broken(_FakeClient):
         async def range_minute_bars(self, symbol, minutes, start, end):
@@ -424,6 +447,23 @@ def test_leader_trades_are_recorded_once(tmp_path):
     rows = mem.leader_trades_between(DAY, DAY)
     assert len(rows) == 1 and rows[0]["how"] == "target" and rows[0]["r"] == pytest.approx(0.67, abs=0.01)
     assert mem.leader_trades_between(DAY + timedelta(days=1), DAY + timedelta(days=2)) == []
+
+
+def test_the_screens_have_an_address_even_when_nobody_set_one(monkeypatch):
+    """A subscriber asking for their screen must not be told the platform is
+    not configured because a variable nobody knew about is empty."""
+    from qqq_alpha.config import Settings
+
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "example.up.railway.app")
+    assert Settings().public_base_url == "https://example.up.railway.app"
+    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "https://example.up.railway.app/")
+    assert Settings().public_base_url == "https://example.up.railway.app"
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://chosen.example")
+    assert Settings().public_base_url == "https://chosen.example"  # an explicit value wins
+    monkeypatch.delenv("PUBLIC_BASE_URL")
+    monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN")
+    assert Settings().public_base_url == ""
 
 
 def test_leader_link_and_bot_words(tmp_path):

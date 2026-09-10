@@ -66,7 +66,11 @@ EOD_MINUTE = 15 * 60 + 55
 # readings of the lab's rule, this was the most even in and out of sample.
 EXCLUSIVE = "any"
 SKIPPED_COUNT = True
+# calendar days of minute bars: a leader needs its ten-session record and
+# the daily range behind the morning read; a basket name needs only the
+# indicator's warm-up and today
 LOOKBACK_DAYS = 16
+BASKET_LOOKBACK_DAYS = 6
 BOARD_TTL_SEC = 20
 
 # the raw impulse: MIRSAD's candle with every optional filter off
@@ -479,23 +483,36 @@ class LeaderService:
         errors: list[str] = []
         async with self.desk._client() as client:
             async def one(sym: str) -> tuple[str, list[Bar]]:
+                # a leader carries its own ten-session record and morning
+                # read; a basket name is only ever asked "did it impulse?",
+                # which needs the indicator's warm-up and today
+                days = LOOKBACK_DAYS if sym in LEADERS else BASKET_LOOKBACK_DAYS
                 try:
-                    return sym, mirsad9.resample(await self.desk._minute_bars(client, sym, LOOKBACK_DAYS), FRAME)
+                    minute = await self.desk._minute_bars(client, sym, days)
                 except Exception as exc:  # noqa: BLE001 - one name must not blank the board
                     log.warning("leader: %s failed: %s", sym, exc)
                     errors.append(f"{sym}: تعذر جلب البيانات")
                     return sym, []
+                return sym, await asyncio.to_thread(mirsad9.resample, minute, FRAME)
 
             fetched = dict(await asyncio.gather(*(one(s) for s in (*LEADERS, *BASKET))))
-            # the maths once per name; everything below reads it
-            cores = {s: mirsad9.core(b, FRAME, RAW) for s, b in fetched.items() if b}
+            # The indicator maths over a dozen symbols is the heaviest thing
+            # on this path, and this process is also running the live engine:
+            # off the event loop, so a customer opening the board never costs
+            # the desk a bar. Computed once per name; everything below reads it.
+            cores = await asyncio.to_thread(
+                lambda: {s: mirsad9.core(b, FRAME, RAW) for s, b in fetched.items() if b}
+            )
             basket = {s: fetched[s] for s in BASKET if fetched.get(s)}
             block = block_series(basket, now, cores)
             leaders: list[dict[str, Any]] = []
             history: list[Opportunity] = []
             for sym in LEADERS:
                 bars = fetched.get(sym) or []
-                opps = replay(bars, block, now, core=cores.get(sym)) if bars else []
+                opps = (
+                    await asyncio.to_thread(replay, bars, block, now, EXCLUSIVE, SKIPPED_COUNT, cores.get(sym))
+                    if bars else []
+                )
                 history.extend(opps)
                 leaders.append(await self._leader(client, sym, bars, opps, block, now, cores.get(sym)))
         self._record(history, now)
