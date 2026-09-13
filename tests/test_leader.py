@@ -166,6 +166,56 @@ def test_a_signal_against_the_leaders_trend_is_refused_and_spends_no_slot():
     assert opps[0].status == "rejected" and opps[0].n == 0 and opps[0].side == -1 and opps[0].trend == 1
 
 
+def test_a_refused_signal_is_still_followed_as_if_taken():
+    base = _quiet_days("QQQ", 4, drift=0.01)  # trend up
+    px = base[-1].close
+    bars = list(base) + [_bar("QQQ", _slot(k), px, px + 0.03, px - 0.03, px) for k in range(10)]
+    bars.append(_bar("QQQ", _slot(10), px, px + 0.02, px - 0.30, px - 0.25))  # closes down with a down block
+    k = mirsad9.core(bars, 5, LD.RAW)[-1]
+    level = max(k.e9, bars[-1].close)
+    bars.append(_bar("QQQ", _slot(11), level - 0.02, level + 0.01, level - 0.03, level - 0.02))   # touches the zone
+    bars.append(_bar("QQQ", _slot(12), level - 0.02, level, level - 1.2 * k.atr, level - k.atr))  # reaches the target
+    bars += [_bar("QQQ", _slot(j), level - k.atr, level - k.atr + 0.02, level - k.atr - 0.02, level - k.atr) for j in range(13, 20)]
+    p = replay(bars, {_slot(10): -3}, None)[0]
+    # the real record is untouched: refused, no slot, no entry
+    assert p.status == "rejected" and p.n == 0 and p.entry is None
+    # the shadow walked the taken path: filled at the zone, out at the target
+    s = p.shadow
+    assert s is not None and s.status == "closed" and s.via_zone and s.how == "target"
+    assert s.entry == pytest.approx(max(bars[-9].open, level))
+    assert s.r == pytest.approx(1 / 1.5, abs=1e-6)
+    d = p.as_dict()
+    assert d["status"] == "rejected" and d["shadow"]["how_text"] == "الهدف" and d["shadow"]["r"] == pytest.approx(0.67)
+    # a taken signal carries no shadow
+    assert "shadow" in d and Opportunity(symbol="QQQ", n=1, side=1, net=3, signal_i=1, signal_ts=_slot(1), atr=1.0,
+                                         level=1.0, sig_hi=1.0, sig_lo=1.0).as_dict()["shadow"] is None
+
+
+def test_the_declined_record_sums_the_shadows():
+    def opp(status, r=None, how=""):
+        p = Opportunity(symbol="QQQ", n=0, side=1, net=3, signal_i=1, signal_ts=_slot(10), atr=1.0,
+                        level=100.0, sig_hi=100.5, sig_lo=99.8, trend=-1, status=status, reason="x")
+        p.shadow = Opportunity(symbol="QQQ", n=0, side=1, net=3, signal_i=1, signal_ts=_slot(10), atr=1.0,
+                               level=100.0, sig_hi=100.5, sig_lo=99.8)
+        if r is not None:
+            p.shadow.fill(2, _slot(11), 100.0, True)
+            p.shadow.close(3, _slot(12), 100.0 + r * 1.5, how)
+        else:
+            p.shadow.cancel("x")
+        return p
+
+    rec = LD._declined_record([])
+    assert rec["signals"] == 0 and "لم ترفض" in rec["text"]
+    rec = LD._declined_record([opp("rejected"), opp("skipped")])
+    assert rec["signals"] == 2 and rec["filled"] == 0 and "لم تتعبأ" in rec["text"]
+    rec = LD._declined_record([opp("rejected", 0.67, "target"), opp("rejected", -1.0, "stop"), opp("skipped", -1.0, "stop"), opp("rejected")])
+    assert (rec["signals"], rec["rejected"], rec["skipped"], rec["filled"]) == (4, 3, 1, 3)
+    assert rec["wins"] == 1 and rec["losses"] == 2 and rec["r"] == pytest.approx(-1.33) and rec["win_pct"] == 33
+    assert "الرفض كان في محله" in rec["text"] and "٤" not in rec["text"] and "4 إشارة" in rec["text"]
+    rec = LD._declined_record([opp("rejected", 0.67, "target"), opp("rejected", 0.67, "target")])
+    assert rec["r"] > 0 and "أضعف" in rec["text"]
+
+
 def test_two_slots_a_day_and_one_opportunity_at_a_time():
     base = _quiet_days("QQQ", 4, drift=0.01)
 
@@ -182,6 +232,9 @@ def test_two_slots_a_day_and_one_opportunity_at_a_time():
     opps = replay(bars, block, None)
     assert [p.status for p in opps] == ["open", "skipped"]
     assert opps[1].n == 2 and "صفقة قائمة" in opps[1].reason
+    # the skipped one is followed too, and the real opportunity is unaffected
+    assert opps[1].shadow is not None and opps[1].shadow.status in ("open", "waiting", "chase", "closed", "cancelled")
+    assert opps[0].shadow is None
     # the third never appears: the day's two slots are spent
     assert len(opps) == 2
 

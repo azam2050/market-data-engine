@@ -148,6 +148,8 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
 .note{background:var(--wait-soft);color:var(--wait);border-radius:12px;padding:9px 14px;font-size:14px;font-weight:500}
 .note.err{background:var(--dn-soft);color:var(--dn)}
 .empty{padding:28px;text-align:center;color:var(--mute)}
+.declined{margin-top:12px;padding:12px 14px;border-radius:12px;background:var(--soft);color:var(--mute);font-size:14px;line-height:1.7}
+.declined b{color:var(--ink)}
 @media (max-width:520px){.verdict h2{font-size:25px}.proof{grid-template-columns:repeat(2,1fr)}.kv{grid-template-columns:1fr}}
 </style>
 </head>
@@ -177,7 +179,7 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
   </section>
   <section class="card">
     <div class="head"><h3>آخر عشر جلسات</h3><span class="pill off" id="live-pill">—</span></div>
-    <div class="body"><div class="days" id="days"></div></div>
+    <div class="body"><div class="days" id="days"></div><div class="declined" id="declined"></div></div>
   </section>
   <section>
     <div class="proof" id="proof"></div>
@@ -343,6 +345,18 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
     return '<section class="card leader ' + cls + '"><div class="head"><div class="sym"><b>' + esc(ld.symbol) + '</b><span>' + esc(ld.name) + '</span></div>' + pill + '</div><div class="body">' + body + '</div></section>';
   }
 
+  function shadowLine(s) {
+    // what the declined signal would have done, had it been taken
+    if (!s) return "";
+    if (s.status === "closed") {
+      const k = s.r > 0 ? "up" : s.r < 0 ? "dn" : "mute";
+      return '<small>لو أُخذت: ' + esc(s.how_text) + ' عند <span class="num">' + esc(s.exit_time) + '</span> · <span class="num" style="color:var(--' + k + ')">' + (s.r >= 0 ? "+" : "") + Number(s.r).toFixed(2) + 'R</span></small>';
+    }
+    if (s.status === "open") return '<small>لو أُخذت: ما زالت مفتوحة</small>';
+    if (s.status === "waiting" || s.status === "chase") return '<small>لو أُخذت: بانتظار التعبئة</small>';
+    return '<small>لو أُخذت: ما تعبّأت</small>';
+  }
+
   function tradeRow(p) {
     const k = p.status === "closed" ? (p.r > 0 ? "up" : p.r < 0 ? "dn" : "off") : p.status === "open" ? "live" : (p.status === "waiting" || p.status === "chase") ? "wait" : "off";
     const num = p.status === "rejected" ? "✕" : p.status === "skipped" ? "–" : p.n;
@@ -357,7 +371,7 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
       d = esc(p.symbol) + ' ' + esc(p.side_text) + ' · إشارة <span class="num">' + esc(p.signal_time) + '</span><small>' + (p.status === "chase" ? "تأكيد: الدخول على الافتتاح القادم" : "بانتظار الرجوع إلى " + f2(p.level)) + '</small>';
       r = '<span class="r off">انتظار</span>';
     } else {
-      d = esc(p.symbol) + ' ' + esc(p.side_text) + ' · إشارة <span class="num">' + esc(p.signal_time) + '</span><small>' + esc(p.reason) + '</small>';
+      d = esc(p.symbol) + ' ' + esc(p.side_text) + ' · إشارة <span class="num">' + esc(p.signal_time) + '</span><small>' + esc(p.reason) + '</small>' + shadowLine(p.shadow);
       r = '<span class="r off">' + (p.status === "rejected" ? "مرفوضة" : p.status === "skipped" ? "لم تُؤخذ" : "أُلغيت") + '</span>';
     }
     return '<div class="trade"><span class="n ' + k + '">' + esc(num) + '</span><span class="d">' + d + '</span>' + r + '</div>';
@@ -394,6 +408,9 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
       const rr = closed.length ? '<span class="num" style="font-weight:700;color:var(--' + (dd.r > 0 ? "up" : dd.r < 0 ? "dn" : "mute") + ')">' + (dd.r >= 0 ? "+" : "") + Number(dd.r).toFixed(2) + 'R</span>' : '<span style="color:var(--mute)">بلا صفقة</span>';
       return '<div class="day"><span class="num">' + esc(dd.day.slice(5)) + '</span><span class="dots">' + dots + '</span>' + rr + '</div>';
     }).join("") || '<div class="empty">السجل يبدأ مع أول جلسة.</div>';
+    const dc = b.journal.declined;
+    $("declined").innerHTML = dc ? '<b>ما لم نأخذه:</b> ' + esc(dc.text) : "";
+    $("declined").style.display = dc ? "" : "none";
     const m = b.measured;
     $("proof").innerHTML = '<div><b class="num">' + m.win_pct + '٪</b><small>صفقات رابحة</small></div><div><b class="num">' + Number(m.profit_factor).toFixed(2) + '</b><small>الربح ÷ الخسارة</small></div><div><b class="num">+' + m.contract_median_pct + '٪</b><small>وسيط ربح العقد</small></div><div><b class="num">' + Number(m.per_day).toFixed(1) + '</b><small>صفقة في اليوم</small></div>';
     $("foot").textContent = "قياس " + m.sessions + " جلسة (" + m.from + " → " + m.to + ") على كيوز وسباي، فريم ٥ دقائق، كتلة أكبر ١٠ شركات مع ميل القائد، خروج عند الهدف الأول: " + m.trades + " صفقة، داخل العينة " + m.in_sample_pf + " وخارجها " + m.out_sample_pf + "، أطول سلسلة خسائر " + m.longest_losing_streak + "، " + m.days_without + " يوماً بلا صفقة. الأرقام تُعاد كل شهر وتُعرض هنا كما هي. أسعار العقد تقدير عبر الدلتا؛ التنفيذ من منصة وسيطك. مِرصاد ٩ أداة تحليل تعليمية تعرض وتشرح ولا تنفّذ أي أمر. القرار قرارك وعلى مسؤوليتك.";
