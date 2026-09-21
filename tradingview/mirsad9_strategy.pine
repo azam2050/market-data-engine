@@ -582,7 +582,7 @@ f_tf() =>
     pdx = pd != 0 ? pd : ps != 0 ? ps * 2 : (zs != 0 and zu == 1 and not zst) ? zs * 3 : 0
     [p, pdx, sec ? 1 : 0, stt, raw, blk, ft > 0 ? 10.0 * fw / ft : na]
 
-[hp, hd, hc, hs, hr, hb, hfm] = request.security(syminfo.tickerid, htfStr, f_tf(), lookahead = barmerge.lookahead_off, calc_bars_count = watchBars)
+[hp, hd, hc, hs, hr, hb, hfm] = request.security(syminfo.tickerid, htfStr, f_tf(), lookahead = barmerge.lookahead_off)
 
 bigCard = cardIn == "البطاقة الكبيرة (ب)"
 ribbon = cardIn == "الشريط العلوي (أ)"

@@ -384,7 +384,7 @@ if gate and pos == 0 and pend == 0 and barstate.isconfirmed and budgetLeft and (
     whyIn := why
 
 // ── ٥) موت المحور
-if axSide != 0 and pos == 0 and pend == 0 and (bar_index > axBorn + axLife2 or axUses >= maxTries or not budgetLeft)
+if axSide != 0 and pos == 0 and pend == 0 and (bar_index > axBorn + axLife2 or axUses >= 3 or not budgetLeft)
     axSide := 0
 
 // ── خط المحور: يُرسم قبل أن يصله السعر
