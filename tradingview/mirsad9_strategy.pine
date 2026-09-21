@@ -45,6 +45,7 @@ adxOn   = input.bool(true, "حجب الإشارة في العرضي (ADX داخ�
 adxLvl  = input.float(18, "ADX تحته عرضي", minval = 10, maxval = 30, group = gF)
 boxN    = input.int(30, "صندوق العرضي: آخر N شمعة", minval = 10, maxval = 60, group = gF)
 coolN   = input.int(2, "راحة بعد كل إشارة (شموع) — لا انقلاب قبلها", minval = 0, maxval = 30, group = gF, tooltip = "كانت ٨ وحجبت انعكاسات صحيحة بعد وقف. الاختبار مع المنطقة والتأكيد: الراحة الطويلة لا ترفع النسبة، فصارت شمعتين فقط")
+coolMode = input.string("للمعاكس فقط", "الراحة تمنع", options = ["للمعاكس فقط", "كل الإشارات"], group = gF, tooltip = "للمعاكس فقط: بعد الكول يُمنع البوت خلال الراحة، ويُسمح بكول آخر. كل الإشارات: السلوك القديم. القياس على ٧٠ رمزاً و٧٦٤ جلسة: +١٥٪ حصيلة بنفس جودة الإشارة")
 htfOn   = input.bool(false, "حجب الإشارة ضد الفريم الأكبر (متوسط ٩ و٢١ على ٣× الفريم)", group = gF, tooltip = "مطفأ: اتجاه الفريم الأكبر يدخل في درجة الجودة فقط ولا يحجب. مشتغل: يحجب كل إشارة ضده — يقطع نصف الإشارات ويتأخر عن الانعكاسات، ورفع النسبة قليلاً في الاختبار")
 skipOpen = input.int(1, "تجاهل أول N شمعة في الجلسة", minval = 0, maxval = 6, group = gF)
 lateN    = input.int(15, "لا إشارة في آخر N دقيقة من الجلسة (٠ = حتى الإغلاق)", minval = 0, maxval = 120, step = 5, group = gF, tooltip = "٠ يترك الإشارات حتى الجرس، ٦٠ يوقف الساعة الأخيرة كاملة. الافتراضي ١٥ دقيقة. على الفريم اليومي والأسبوعي لا أثر له")
@@ -144,14 +145,18 @@ f_core() =>
     var int lastBar = -100000
     var int lastSide = 0
     ready = bar_index >= 120 and not na(a) and not na(eH2) and not na(adx)
-    inCool = bar_index - lastBar <= coolN
-    okL = ready and allowL and side0 == 1 and not sideways and (not htfOn or htfOk) and q >= minQ and not inCool and barDay >= skipOpen and not lateBar
-    okS = ready and allowS and side0 == -1 and not sideways and (not htfOn or htfOk) and q >= minQ and not inCool and barDay >= skipOpen and not lateBar
+    // الراحة تمنع الانقلاب فقط — انظر شرح الإعداد في المؤشر
+    cooling = bar_index - lastBar <= coolN
+    flipOnly = coolMode == "للمعاكس فقط"
+    inCoolL = cooling and (not flipOnly or lastSide == -1)
+    inCoolS = cooling and (not flipOnly or lastSide == 1)
+    okL = ready and allowL and side0 == 1 and not sideways and (not htfOn or htfOk) and q >= minQ and not inCoolL and barDay >= skipOpen and not lateBar
+    okS = ready and allowS and side0 == -1 and not sideways and (not htfOn or htfOk) and q >= minQ and not inCoolS and barDay >= skipOpen and not lateBar
     if barstate.isconfirmed and (okL or okS)
         lastBar := bar_index
         lastSide := okL ? 1 : -1
     // لماذا حُجبت: للوحة فقط
-    blockTxt = side0 == 0 ? "" : inCool ? "راحة" : sideways ? "عرضي" : (htfOn and not htfOk) ? "ضد الفريم الأكبر" : q < minQ ? "جودة منخفضة" : ""
+    blockTxt = side0 == 0 ? "" : (side0 == 1 ? inCoolL : inCoolS) ? "راحة" : sideways ? "عرضي" : (htfOn and not htfOk) ? "ضد الفريم الأكبر" : q < minQ ? "جودة منخفضة" : ""
     state = sideways ? 9 : eH1 > eH2 ? 1 : -1
     [okL, okS, q, a, e9, state, blockTxt, side0]
 
