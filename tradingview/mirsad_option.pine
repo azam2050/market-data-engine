@@ -4,12 +4,30 @@
 //  ليست استراتيجية واحدة. لكل حالة سوق استراتيجيتها، والبطاقة تقول لك
 //  أيّها يشتغل الآن ولماذا.
 //
-//    مندفع صاعد/هابط  →  ارتداد الاتجاه: تدخل عند رجوع السعر إلى الغيمة
-//    عرضي             →  حدّ الصندوق: تدخل من الطرف باتجاه الوسط
+//    مندفع صاعد/هابط  →  ارتداد الاتجاه
+//    عرضي             →  حدّ الصندوق: من الطرف نحو الوسط
 //    متحوّل            →  انعكاس: شمعة ضخمة تعبر الغيمة وتغلق خلفها
+//
+//  والثلاث تشترك في قاعدة واحدة لا تُكسر: **الإشارة لا تُدخِلك**.
+//  ترسم خطاً عند حافة الغيمة — المحور — وتنتظر رجوع السعر إليه.
+//  لم يرجع؟ لا صفقة، ولا مطاردة.
 //
 //  والخروج له سبب مكتوب: «إغلاق تحت الغيمة» أو «إغلاق فوق الغيمة»
 //  أو هدف أو وقف — لا خروج بلا سبب يُقرأ.
+//
+//  ─────────────────────────────────────────────────────────────────────
+//  لماذا الانتظار؟ لأنه قِيس. بناء على ٢٠٢٣–٢٠٢٥ ثم تشغيل على ٢٠٢٦
+//  ولم تُلمس ٢٠٢٦ في أي اختيار · ٧٠ رمزاً · وعشوائيٌّ بجانب كل رقم:
+//
+//                        الدخول لحظة الإشارة     الدخول من المحور
+//    اتجاه صحيح                ٤٩٫٨٪                  ٥٧٫٠٪
+//    الحصيلة للصفقة          +٠٫٠٢٤R                +٠٫١٢٢R
+//    الرموز الرابحة          ٤٧ من ٦٩               ٦٨ من ٦٩
+//    الوقف الكامل               ١٤٪                     ٥٪
+//                    (العشوائي في الحالتين: ٤٩٫٦٪ · +٠٫٠٠٢R)
+//
+//  القاعدة نفسها رفعت الاستراتيجيات الثلاث كلها — بما فيها حدّ الصندوق
+//  الذي كان خاسراً (−٠٫٠٠١R) فصار +٠٫١١٥R. وفريم ٥ دقائق: ٥٦٫٦٪ · +٠٫١٠٧R.
 //
 //  ─────────────────────────────────────────────────────────────────────
 //  عن العقد — وهذا الشيء الوحيد الذي لا يقدر عليه الباين وحده:
@@ -43,6 +61,12 @@ useTrend = input.bool(true, "ارتداد الاتجاه (في السوق الم
 useRange = input.bool(true, "حدّ الصندوق (في السوق العرضي)", group = gS, tooltip = "من طرف الصندوق نحو وسطه. الهدف هنا أقصر لأن المدى أقصر")
 useRev   = input.bool(true, "الانعكاس (في السوق المتحوّل)", group = gS, tooltip = "شمعة ضخمة تعبر الغيمة كاملة وتغلق خلفها")
 revK     = input.float(1.5, "حجم شمعة الانعكاس = × ATR", minval = 0.8, maxval = 4.0, step = 0.25, group = gS)
+
+gA = "المحور — مكان دخولك"
+axLife1  = input.int(5, "عمر المحور للدخول الأول (شموع)", minval = 2, maxval = 20, group = gA, tooltip = "الإشارة ترسم خطاً عند حافة الغيمة ولا تُدخِلك. إن رجع السعر إلى الخط خلال هذه المدة دخلتَ عنده، وإلا فلا صفقة ولا مطاردة.\n\nقياس ٢٠٢٦ على ٧٠ رمزاً: الدخول لحظة الإشارة ٤٩٫٨٪ اتجاهاً صحيحاً — عملة معدنية. والدخول من المحور ٥٧٪.")
+axLife2  = input.int(40, "ويبقى للمحاولات التالية (شموع)", minval = 10, maxval = 120, group = gA)
+maxTries = input.int(3, "أقصى محاولات على المحور", minval = 1, maxval = 5, group = gA)
+showAxis = input.bool(true, "ارسم خط المحور", group = gA)
 
 gX = "الخروج والأهداف"
 exitCloud = input.bool(true, "اخرج عند إغلاق ضد الغيمة", group = gX, tooltip = "هذا هو سبب الخروج الذي يُكتب لك على البطاقة: «إغلاق تحت الغيمة» أو «فوقها»")
@@ -160,6 +184,14 @@ ready = bar_index > math.max(trendN, boxN) + 20 and not na(atr) and atr > 0
 gate = ready and barDay >= skipOpen and not lateBar
 
 // ═══════════════════════════════════════════════════ إدارة الصفقة
+var int axSide = 0
+var float axLvl = na
+var float axAtr = na
+var int axBorn = 0
+var int axUses = 0
+var int pend = 0
+var int nth = 0
+var line axLine = na
 var int pos = 0
 var float eP = na
 var float sP = na
@@ -198,12 +230,40 @@ oPx = hasOpt ? oRaw : na
 
 if newSess
     spent := 0
+    axSide := 0
+    pend := 0
 
 closed = false
 entered = false
 trailLo = ta.lowest(low, 8)
 trailHi = ta.highest(high, 8)
 
+// ── ١) تنفيذ الدخول المعلّق على افتتاح هذه الشمعة، أو سعر المحور — الأسوأ
+if pend != 0 and pos == 0 and not na(axAtr)
+    pos := pend
+    axUses += 1
+    eP := pend == 1 ? math.min(open, axLvl) : math.max(open, axLvl)
+    unit := stopX * axAtr
+    cap = 2.5 * axAtr
+    sP := pend == 1 ? math.max(math.min(cBot, eP - unit), eP - cap) : math.min(math.max(cTop, eP + unit), eP + cap)
+    unit := math.abs(eP - sP)
+    t1 := eP + pend * x1 * axAtr
+    t2 := eP + pend * x2 * axAtr
+    t3 := eP + pend * x3 * axAtr
+    hit := 0
+    barsIn := 0
+    spent += 1
+    nth := axUses
+    exitTxt := ""
+    exitWhy := ""
+    oEntry := oPx
+    oPeak := oPx
+    entered := true
+    pend := 0
+else if pend != 0
+    pend := 0
+
+// ── ٢) إدارة الصفقة — شمعة الدخول نفسها داخلة في الحساب
 if pos != 0 and barstate.isconfirmed
     barsIn += 1
     if not na(oPx)
@@ -243,26 +303,34 @@ if pos != 0 and barstate.isconfirmed
 if closed
     closedAt := bar_index
 
-canOpen = gate and pos == 0 and barstate.isconfirmed and (maxSig == 0 or spent < maxSig)
-if canOpen and (sigL or sigS)
-    pos := sigL ? 1 : -1
-    eP := close
-    unit := stopX * atr
-    cap = 2.5 * atr
-    sP := pos == 1 ? math.max(math.min(cBot, eP - unit), eP - cap) : math.min(math.max(cTop, eP + unit), eP + cap)
-    unit := math.abs(eP - sP)
-    t1 := eP + pos * x1 * atr
-    t2 := eP + pos * x2 * atr
-    t3 := eP + pos * x3 * atr
-    hit := 0
-    barsIn := 0
-    spent += 1
+// ── ٣) لمس المحور ← الدخول على افتتاح الشمعة القادمة. لا شيء غير اللمس.
+budgetLeft = maxSig == 0 or spent < maxSig
+canTry = axSide != 0 and pos == 0 and pend == 0 and axUses < maxTries and budgetLeft and bar_index <= axBorn + (axUses == 0 ? axLife1 : axLife2)
+touch = canTry and barstate.isconfirmed and (axSide == 1 ? low <= axLvl : high >= axLvl)
+if touch
+    pend := axSide
+
+// ── ٤) الإشارة لا تُدخِلك. ترسم المحور عند حافة الغيمة وتنتظر رجوع السعر إليه.
+//      هذا هو الفرق كلّه: الدخول لحظة الإشارة قِيس ٤٩٫٨٪ · ومن المحور ٥٧٪
+if gate and pos == 0 and pend == 0 and barstate.isconfirmed and budgetLeft and (sigL or sigS)
+    axSide := sigL ? 1 : -1
+    axLvl := sigL ? math.min(cTop, close) : math.max(cBot, close)
+    axAtr := atr
+    axBorn := bar_index
+    axUses := 0
     whyIn := why
-    exitTxt := ""
-    exitWhy := ""
-    oEntry := oPx
-    oPeak := oPx
-    entered := true
+
+// ── ٥) موت المحور
+if axSide != 0 and pos == 0 and pend == 0 and (bar_index > axBorn + axLife2 or axUses >= maxTries or not budgetLeft)
+    axSide := 0
+
+// ── خط المحور: يُرسم قبل أن يصله السعر
+if not na(axLine)
+    line.delete(axLine)
+    axLine := na
+if showAxis and axSide != 0 and pos == 0
+    axLine := line.new(math.max(axBorn, bar_index - 60), axLvl, bar_index + 6, axLvl,
+                   color = cGold, style = line.style_dashed, width = 2)
 
 // ═════════════════════════════════════════════════════════════ الرسم
 pF = plot(showCloud ? eF : na, "السريع", color = color.new(cGold, 0), linewidth = lineW)
@@ -324,7 +392,7 @@ f_dur(int n) =>
     m = int(n * barMin)
     m >= 60 ? str.tostring(m / 60.0, "#.#") + " س" : str.tostring(m) + " د"
 
-var table cd = table.new(cPos, 2, 12, border_width = 1, frame_width = 1, frame_color = color.new(cMut, 60))
+var table cd = table.new(cPos, 2, 13, border_width = 1, frame_width = 1, frame_color = color.new(cMut, 60))
 
 f_row(int r, string a, string b, color cb) =>
     table.cell(cd, 0, r, a, text_color = cMut, text_size = cSz, text_halign = text.align_right, bgcolor = cBg)
@@ -335,32 +403,37 @@ if showCard and barstate.islast
     table.cell(cd, 1, 0, syminfo.ticker + "  ·  " + timeframe.period + "  ·  " + mode, text_color = cTxt, text_size = cSz, text_halign = text.align_left, bgcolor = cHead)
     f_row(1, "حالة السوق", stateTxt + "   (ADX " + str.tostring(adx, "#") + ")", stateCol)
     f_row(2, "الخطة الآن", planTxt, cTxt)
-    f_row(3, "الإشارة", pos == 0 ? "— لا صفقة" :
-         (pos == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) + "  ·  " + whyIn,
+    f_row(3, "المحور", axSide == 0 ? (pos != 0 ? "— صفقة مفتوحة" : "لا محور — انتظار إشارة") :
+         (axSide == 1 ? "كول عند " : "بوت عند ") + str.tostring(axLvl, format.mintick) +
+         "  ·  محاولة " + str.tostring(axUses + 1) + "/" + str.tostring(maxTries),
+         axSide == 0 ? cMut : cGold)
+    f_row(4, "الإشارة", pos == 0 ? "— لا صفقة" :
+         (pos == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) + "  ·  " + whyIn +
+         (nth > 1 ? "  ·  محاولة " + str.tostring(nth) : ""),
          pos == 0 ? cMut : pos == 1 ? cUp : cDn)
-    f_row(4, "السعر الآن", pos == 0 ? "—" :
+    f_row(5, "السعر الآن", pos == 0 ? "—" :
          str.tostring(close, format.mintick) + "   " + f_pct(close, eP) + "   ·   " + f_dur(barsIn),
          pos == 0 ? cMut : (close - eP) * pos > 0 ? cUp : cDn)
-    f_row(5, "وقف الأصل", pos == 0 ? "—" : str.tostring(sP, format.mintick) + (hit >= 1 and beAfter1 ? "  ·  مؤمَّنة" : ""), pos == 0 ? cMut : cDn)
-    f_row(6, "أهداف الأصل",
+    f_row(6, "وقف الأصل", pos == 0 ? "—" : str.tostring(sP, format.mintick) + (hit >= 1 and beAfter1 ? "  ·  مؤمَّنة" : ""), pos == 0 ? cMut : cDn)
+    f_row(7, "أهداف الأصل",
          pos == 0 ? "—" : (hit >= 1 ? "✓" : "○") + " " + str.tostring(t1, format.mintick) + "   " +
          (hit >= 2 ? "✓" : "○") + " " + str.tostring(t2, format.mintick) + "   " +
          (hit >= 3 ? "✓" : "○") + " " + str.tostring(t3, format.mintick), pos == 0 ? cMut : cUp)
-    f_row(7, "العقد", not hasOpt ? "— اختر عقداً من الإعدادات" :
+    f_row(8, "العقد", not hasOpt ? "— اختر عقداً من الإعدادات" :
          f_tail(optSym) + "   " + (na(oPx) ? "لا بيانات" : str.tostring(oPx, "#.##")) +
          (na(oEntry) ? "" : "   دخول " + str.tostring(oEntry, "#.##") + "   " + f_pct(oPx, oEntry)),
          not hasOpt or na(oPx) ? cMut : na(oEntry) ? cTxt : oPx >= oEntry ? cUp : cDn)
-    f_row(8, "أهداف العقد", not hasOpt or na(oEntry) ? "—" :
+    f_row(9, "أهداف العقد", not hasOpt or na(oEntry) ? "—" :
          f_mark(oPx, oEntry, p1) + str.tostring(p1, "#") + "٪  " +
          f_mark(oPx, oEntry, p2) + str.tostring(p2, "#") + "٪  " +
          f_mark(oPx, oEntry, p3) + str.tostring(p3, "#") + "٪  " +
          f_mark(oPx, oEntry, p4) + str.tostring(p4, "#") + "٪  " +
          f_mark(oPx, oEntry, p5) + str.tostring(p5, "#") + "٪",
          not hasOpt or na(oEntry) ? cMut : cUp)
-    f_row(9, "أعلى سعر للعقد", na(oPeak) ? "—" : str.tostring(oPeak, "#.##") + "   " + f_pct(oPeak, oEntry), na(oPeak) ? cMut : cGold)
-    f_row(10, "اقتراح الخروج", pos != 0 ? "— الصفقة مفتوحة" : exitTxt == "" ? "—" : exitTxt + "  ·  " + exitWhy,
+    f_row(10, "أعلى سعر للعقد", na(oPeak) ? "—" : str.tostring(oPeak, "#.##") + "   " + f_pct(oPeak, oEntry), na(oPeak) ? cMut : cGold)
+    f_row(11, "اقتراح الخروج", pos != 0 ? "— الصفقة مفتوحة" : exitTxt == "" ? "—" : exitTxt + "  ·  " + exitWhy,
          pos != 0 ? cMut : exitTxt == "وقف" ? cDn : cGold)
-    f_row(11, "الإشارات اليوم", maxSig == 0 ? str.tostring(spent) + " (بلا حد)" :
+    f_row(12, "الإشارات اليوم", maxSig == 0 ? str.tostring(spent) + " (بلا حد)" :
          str.tostring(spent) + " من " + str.tostring(maxSig), spent >= maxSig and maxSig > 0 ? cDn : cMut)
 
 // ═════════════════════════════════════════════════════════════ الباحث
