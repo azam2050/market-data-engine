@@ -126,6 +126,7 @@ s4 = input.symbol("NASDAQ:NVDA", "شركة ٤", group = gB)
 s5 = input.symbol("NASDAQ:AAPL", "شركة ٥", group = gB)
 
 gL = "الجلسة"
+mktIn = input.string("تلقائي", "السوق", options = ["تلقائي", "جلسة أمريكية", "٢٤ ساعة"], group = gL, tooltip = "تلقائي: الأسهم والصناديق تُعامَل بجلسة ٩:٣٠–١٦:٠٠ نيويورك، وكل ما عداها (ذهب · عملات · كربتو · مؤشرات · عقود) يُعامَل كسوق ٢٤ ساعة.\n\nفي سوق ٢٤ ساعة يُلغى منع آخر N دقيقة ويُلغى إغلاق آخر الجلسة — بدونه كان المؤشر يصمت أغلب اليوم على الذهب والكربتو، لأن أغلب شموعه خارج ٩:٣٠–١٦:٠٠ نيويورك.")
 skipOpen = input.int(1, "تجاهل أول N شمعة", minval = 0, maxval = 10, group = gL)
 lateMin  = input.int(90, "لا إشارة في آخر N دقيقة", minval = 0, maxval = 240, step = 15, group = gL)
 eodOut   = input.bool(true, "أغلق الصفقة آخر الجلسة", group = gL)
@@ -175,10 +176,14 @@ inBox = boxW > 0 and close > boxL + 0.2 * boxW and close < boxH - 0.2 * boxW
 intraday = timeframe.isintraday
 minsNY = hour(time, "America/New_York") * 60 + minute(time, "America/New_York")
 barMin = math.max(timeframe.in_seconds() / 60, 1)
-barDay = intraday ? (minsNY - 570) / barMin : 1000.0
-lateBar = intraday and lateMin > 0 and minsNY >= 960 - lateMin
-lastBarOfDay = eodOut and intraday and minsNY >= 955
+// نوع السوق: الذهب والعملات والكربتو تعمل ٢٤ ساعة، فلا جلسة ٩:٣٠–١٦:٠٠ لها
+usEq = syminfo.type == "stock" or syminfo.type == "fund" or syminfo.type == "dr"
+mkt24 = mktIn == "٢٤ ساعة" or (mktIn == "تلقائي" and not usEq)
 newSess = intraday and session.isfirstbar_regular
+// موضع الشمعة داخل جلسة الرمز نفسه — يعمل على كل سوق لا على الأمريكي وحده
+barDay = intraday ? float(ta.barssince(session.isfirstbar_regular)) : 1000.0
+lateBar = intraday and not mkt24 and lateMin > 0 and minsNY >= 960 - lateMin
+lastBarOfDay = eodOut and intraday and not mkt24 and minsNY >= 955
 
 // ── حالة السوق
 pushUp = adx >= adxTr and close > cTop and eF > eS
@@ -476,7 +481,7 @@ f_row(int r, string a, string b, color cb) =>
 
 if showCard and barstate.islast
     table.cell(cd, 0, 0, "مِرصاد أوبشن", text_color = cGold, text_size = cSz, text_halign = text.align_right, bgcolor = cHead)
-    table.cell(cd, 1, 0, syminfo.ticker + "  ·  " + timeframe.period + "  ·  " + mode, text_color = cTxt, text_size = cSz, text_halign = text.align_left, bgcolor = cHead)
+    table.cell(cd, 1, 0, syminfo.ticker + "  ·  " + timeframe.period + "  ·  " + mode + (mkt24 ? "  ·  ٢٤ ساعة" : ""), text_color = cTxt, text_size = cSz, text_halign = text.align_left, bgcolor = cHead)
     f_row(1, "حالة السوق", stateTxt + "   (ADX " + str.tostring(adx, "#") + ")", stateCol)
     f_row(2, "الخطة الآن", planTxt, cTxt)
     f_row(3, "المحور", axSide == 0 ? (pos != 0 ? "— صفقة مفتوحة" : "لا محور — انتظار إشارة") :
