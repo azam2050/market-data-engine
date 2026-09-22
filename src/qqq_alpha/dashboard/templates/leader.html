@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>قائد اليوم · مِرصاد ٩</title>
+<title>قائد اليوم · مِرصاد أوبشن</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;800&family=IBM+Plex+Sans+Arabic:wght@400;500;700&display=swap">
 <style>
@@ -413,7 +413,7 @@ h1,h2,h3,.num{font-family:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif}
     $("declined").style.display = dc ? "" : "none";
     const m = b.measured;
     $("proof").innerHTML = '<div><b class="num">' + m.win_pct + '٪</b><small>صفقات رابحة</small></div><div><b class="num">' + Number(m.profit_factor).toFixed(2) + '</b><small>الربح ÷ الخسارة</small></div><div><b class="num">+' + m.contract_median_pct + '٪</b><small>وسيط ربح العقد</small></div><div><b class="num">' + Number(m.per_day).toFixed(1) + '</b><small>صفقة في اليوم</small></div>';
-    $("foot").textContent = "قياس " + m.sessions + " جلسة (" + m.from + " → " + m.to + ") على كيوز وسباي، فريم ٥ دقائق، كتلة أكبر ١٠ شركات مع ميل القائد، خروج عند الهدف الأول: " + m.trades + " صفقة، داخل العينة " + m.in_sample_pf + " وخارجها " + m.out_sample_pf + "، أطول سلسلة خسائر " + m.longest_losing_streak + "، " + m.days_without + " يوماً بلا صفقة. الأرقام تُعاد كل شهر وتُعرض هنا كما هي. أسعار العقد تقدير عبر الدلتا؛ التنفيذ من منصة وسيطك. مِرصاد ٩ أداة تحليل تعليمية تعرض وتشرح ولا تنفّذ أي أمر. القرار قرارك وعلى مسؤوليتك.";
+    $("foot").textContent = "قياس " + m.sessions + " جلسة (" + m.from + " → " + m.to + ") على كيوز وسباي، فريم ٥ دقائق، كتلة أكبر ١٠ شركات مع ميل القائد، خروج عند الهدف الأول: " + m.trades + " صفقة، داخل العينة " + m.in_sample_pf + " وخارجها " + m.out_sample_pf + "، أطول سلسلة خسائر " + m.longest_losing_streak + "، " + m.days_without + " يوماً بلا صفقة. الأرقام تُعاد كل شهر وتُعرض هنا كما هي. أسعار العقد تقدير عبر الدلتا؛ التنفيذ من منصة وسيطك. مِرصاد أوبشن أداة تحليل تعليمية تعرض وتشرح ولا تنفّذ أي أمر. القرار قرارك وعلى مسؤوليتك.";
   }
 
   async function refresh() {

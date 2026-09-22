@@ -1,4 +1,4 @@
-"""The customer's desk: the server-side MIRSAD 9 port, the sign-in link,
+"""The customer's desk: the server-side MIRSAD OPTION port, the sign-in link,
 the settings, and the page and API behind the cookie."""
 
 from __future__ import annotations

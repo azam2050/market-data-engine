@@ -41,7 +41,7 @@ APPLE_PAY_ASSOCIATION_FILE = (
     Path(__file__).parent / "well_known" / "apple-developer-merchantid-domain-association"
 )
 
-# The MIRSAD 9 walkthrough customers receive from the bot: a self-contained
+# The MIRSAD OPTION walkthrough customers receive from the bot: a self-contained
 # page (its only outside dependency is the Google Fonts stylesheet) served
 # from the product's own domain so the link outlives any third-party host.
 MIRSAD_PAGE = Path(__file__).parent / "public" / "mirsad.html"
@@ -143,7 +143,7 @@ def create_app(
         name), or the locked page to return instead."""
         chat_id = _desk_owner(request)
         if chat_id is None:
-            return _locked(request, "هذه شاشة المشتركين في مِرصاد ٩.")
+            return _locked(request, "هذه شاشة المشتركين في مِرصاد أوبشن.")
         if not desk.has_access(chat_id):
             return _locked(request, "اشتراكك منتهٍ. جدّده من البوت لتعود شاشتك.", 403)
         row = desk.memory.subscriber(chat_id) or {}
@@ -242,7 +242,7 @@ def create_app(
         if chat_id is None:
             auth_user = request.headers.get("authorization", "")
             if not auth_user:
-                return _locked(request, "هذه شاشة المشتركين في مِرصاد ٩.", 401)
+                return _locked(request, "هذه شاشة المشتركين في مِرصاد أوبشن.", 401)
             chat_id = str(settings.telegram_chat_id or "operator")
         form = parse_qs((await request.body()).decode("utf-8"))
         symbols = (form.get("symbols") or [""])[0]

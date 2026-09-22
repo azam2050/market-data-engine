@@ -251,7 +251,7 @@ async def test_preview_command_replays_the_whole_customer_journey(tmp_path):
     # the order the customer lives it
     assert (
         joined.index("مِرصاد") < joined.index("إقرار وإخلاء مسؤولية")
-        < joined.index("سُجّل اسمك") < joined.index("تم تفعيل مِرصاد ٩ على حسابك")
+        < joined.index("سُجّل اسمك") < joined.index("تم تفعيل مِرصاد أوبشن على حسابك")
         < joined.index("انتهت فترتك المجانية")
     )
     consent = next(p for m, p in calls if m == "sendMessage" and "reply_markup" in p)
@@ -385,7 +385,7 @@ async def test_an_unset_private_channel_is_named_as_the_cause_at_startup(tmp_pat
 
     report = "\n".join(notes.notes)
     assert "TELEGRAM_PRIVATE_CHANNEL_ID فارغ" in report
-    assert "تقارير مِرصاد ٩" in report
+    assert "تقارير مِرصاد أوبشن" in report
     # the public channel being unset is a DIFFERENT fact, said differently
     assert "النشر العام معطّل" in report
 
