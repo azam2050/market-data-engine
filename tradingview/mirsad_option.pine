@@ -87,6 +87,7 @@ useTrend = input.bool(true, "ارتداد الاتجاه (في السوق الم
 useRange = input.bool(true, "حدّ الصندوق (في السوق العرضي)", group = gS, tooltip = "من طرف الصندوق نحو وسطه. الهدف هنا أقصر لأن المدى أقصر")
 useRev   = input.bool(true, "الانعكاس (في السوق المتحوّل)", group = gS, tooltip = "شمعة ضخمة تعبر الغيمة كاملة وتغلق خلفها")
 revK     = input.float(1.5, "حجم شمعة الانعكاس = × ATR", minval = 0.8, maxval = 4.0, step = 0.25, group = gS)
+needTrend = input.bool(false, "ادخل مع ميل متوسط الاتجاه فقط", group = gS, tooltip = "قياس ٢٠٢٦ على ١٢٦٬٧٥٣ صفقة:\n  مع الميل  +٠٫١١٢R · رابحة ٤٨٫١٪ · هدف ١ في ٦٤٪\n  ضد الميل  +٠٫٠٨٥R · رابحة ٤٨٫٠٪ · هدف ١ في ٦٣٪\n\nالفرق في الحصيلة فقط؛ نسبة الرابحة والوصول إلى الهدف متساويتان. وداخل الاتجاه القوي (ADX ≥ ٢٨) الصفقة المعاكسة تساوي الموافقة تماماً.\n\nتشغيله يرفع حصيلة الصفقة ويحذف ثلث الفرص. مطفأ لأن الحذف أغلى من الربح."
 
 gA = "المحور — مكان دخولك"
 axLife1  = input.int(5, "عمر المحور للدخول الأول (شموع)", minval = 2, maxval = 20, group = gA, tooltip = "الإشارة ترسم خطاً عند حافة الغيمة ولا تُدخِلك. إن رجع السعر إلى الخط خلال هذه المدة دخلتَ عنده، وإلا فلا صفقة ولا مطاردة.\n\nقياس ٢٠٢٦ على ٧٠ رمزاً: الدخول لحظة الإشارة ٤٩٫٨٪ اتجاهاً صحيحاً — عملة معدنية. والدخول من المحور ٥٧٪.")
@@ -98,7 +99,7 @@ showAxis = input.bool(true, "ارسم درجات السُلّم", group = gA)
 
 gX = "الخروج والأهداف"
 exitCloud = input.bool(false, "اخرج عند إغلاق ضد الغيمة", group = gX, tooltip = "مطفأ عن قصد، بقياس ٢٠٢٦ على ٩٤٬٦٦٠ صفقة:\n\nمُشغَّلاً كان يُنهي ٧٣٪ من الصفقات، فيهبط الوصول إلى هدف ١ من ٦٣٪ إلى ٢٩٪، وإلى هدف ٣ من ١٦٪ إلى ٦٪.\n\nيبقى تنبيهاً على البطاقة ولا يقفل الصفقة. شغّله إن أردته يقفل.")
-stopX  = input.float(1.5, "وقف الأصل = × ATR", minval = 0.5, maxval = 3.0, step = 0.25, group = gX)
+stopX  = input.float(1.5, "وقف الأصل = × ATR", minval = 0.5, maxval = 3.0, step = 0.25, group = gX, tooltip = "مقايضة صريحة، قياس ٢٠٢٦:\n  ١٫٥ → R +٠٫١٠٤ · رابحة ٤٨٫١٪ · هدف ١ في ٦٤٪\n  ٢٫٠ → R +٠٫٠٧٧ · رابحة ٥٣٫٥٪ · هدف ١ في ٦٨٪\n  ٢٫٥ → R +٠٫٠٦٢ · رابحة ٥٦٫٩٪ · هدف ١ في ٧١٪\n\nكلما اتّسع قلّت الأوقاف وارتفعت نسبة الرابحة وانخفضت الحصيلة. اتّسِع إن كان الوقف المتكرر يزعجك، واعلم أنك تدفع ربع العائد ثمناً له.\n\nوبداية اليوم لا تحتاج وقفاً أوسع: أول ١٠ شموع هي الأفضل أصلاً (+٠٫١٤٤R بوقف ١٫٥ مقابل +٠٫٠٩٠R بوقف ٢٫٥)."
 x1     = input.float(1.0, "هدف ١ = × ATR", minval = 0.25, step = 0.25, group = gX)
 x2     = input.float(2.0, "هدف ٢ = × ATR", minval = 0.5, step = 0.25, group = gX)
 x3     = input.float(3.0, "هدف ٣ = × ATR", minval = 1.0, step = 0.25, group = gX)
@@ -209,8 +210,12 @@ rS = useRange and state == 0 and high >= boxH - edgeP * boxW and close < open an
 vL = useRev and state == 2 and rng > 0 and body >= revK * atr and close > cTop and open < cTop
 vS = useRev and state == 2 and rng > 0 and -body >= revK * atr and close < cBot and open > cBot
 
-sigL = allowL and (tL or rL or vL)
-sigS = allowS and (tS or rS or vS)
+trendUp = eT > eT[10]
+trendDn = eT < eT[10]
+okTrendL = not needTrend or trendUp
+okTrendS = not needTrend or trendDn
+sigL = allowL and okTrendL and (tL or rL or vL)
+sigS = allowS and okTrendS and (tS or rS or vS)
 why = tL or tS ? "ارتداد الاتجاه" : rL or rS ? "حدّ الصندوق" : vL or vS ? "انعكاس" : ""
 
 pivLo = ta.lowest(low, pivN)
