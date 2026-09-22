@@ -98,6 +98,10 @@ judgeOn  = input.bool(true, "اخرج رخيصاً إن كسر السعر الد
 judgeX   = input.float(0.5, "مسافة الحَكَم = × ATR", minval = 0.2, maxval = 1.0, step = 0.1, group = gA, tooltip = "كم يجب أن يتحرّك السعر ضدّك حتى يُعتبر أنه كسر مستوى دخولك.\n\nاخفضه فتخرج أسرع وأرخص وتكثر الخروجات. ارفعه فتعطي الصفقة مساحة أكبر قبل الحكم عليها.")
 showAxis = input.bool(true, "ارسم درجات السُلّم", group = gA, tooltip = "يرسم لك مستويات الدخول الثلاثة على الشارت لحظة الإشارة، قبل أن يصلها السعر.\n\nأطفئه إن أردت شارتاً أنظف — الدخول يعمل كما هو.")
 
+gD = "هدف الحركة"
+dollarTgt = input.float(1.0, "هدف الحركة بالدولار", minval = 0.1, step = 0.25, group = gD, tooltip = "الحركة التي تريدها من السهم في نفس اليوم — بالدولار، لا بالنِّسَب.\n\nالمؤشر يقارنها بمتوسط مدى هذا الرمز اليومي، ويقول لك على البطاقة هل هي واقعية على هذا الرمز أصلاً.\n\nقياس ٢٠٢٦ على ٤٥٨ ألف صفقة: دولار على MU يُصاب ٨٤٪ من المرات، وعلى PFE صفر٪. ليست استراتيجية — بل أن دولاراً على سهم بـ ٢٨ دولاراً حركةٌ لا يصنعها يوم عادي.")
+hideHard = input.bool(false, "اصمت إن كان الهدف غير واقعي على هذا الرمز", group = gD, tooltip = "يوقف الإشارات تماماً حين يكون هدفك بالدولار أكبر من أربعة أخماس مدى الرمز اليومي المعتاد.\n\nقياس ٢٠٢٦: في هذه الحال لا يُصاب الهدف إلا في ٥٪ من المرات.\n\nشغّله إن كنت تتاجر بهدف ثابت بالدولار ولا تريد إشارات على رمز لا يبلغه.")
+
 gX = "الخروج والأهداف"
 exitCloud = input.bool(false, "اخرج عند إغلاق ضد الغيمة", group = gX, tooltip = "يقفل الصفقة إذا أغلقت شمعة في الجهة الأخرى من الغيمة.\n\nمطفأ لأنه كان يقفل أكثر من ثلثي الصفقات قبل أن تصل هدفها الأول. وهو الآن يظهر لك كتنبيه على البطاقة فقط، فترى التحذير وتقرّر بنفسك.\n\nشغّله إن كنت تفضّل خروجاً سريعاً على انتظار الهدف.")
 stopX  = input.float(1.5, "وقف الأصل = × ATR", minval = 0.5, maxval = 3.0, step = 0.25, group = gX, tooltip = "المسافة بين دخولك ووقفك، بوحدة تذبذب الرمز — فتتسع تلقائياً على الرمز العنيف وتضيق على الهادئ.\n\n١٫٥ الافتراضي: أعلى ربح، وأوقاف أكثر.\n٢٫٠ أو ٢٫٥: أوقاف أقل وراحة نفسية أكبر، وربح أقل بنحو الربع.\n\nاختر حسب ما يزعجك أكثر: الوقف المتكرر، أم الربح الأقل.")
@@ -224,10 +228,29 @@ sigL = allowL and okTrendL and (tL or rL or vL)
 sigS = allowS and okTrendS and (tS or rS or vS)
 why = tL or tS ? "ارتداد الاتجاه" : rL or rS ? "حدّ الصندوق" : vL or vS ? "انعكاس" : ""
 
+// ── هل هدفك بالدولار واقعي على هذا الرمز؟ قياس ٤٥٨ ألف صفقة:
+//    الهدف أقل من خُمس مدى اليوم ٦٠٪ · خُمسين ٤٥٪ · أربعة أخماس ١٧٪ · فوقها ٥٪
+dayRng20 = request.security(syminfo.tickerid, "D", ta.sma(high - low, 20)[1],
+               lookahead = barmerge.lookahead_off)
+tgtShare = not na(dayRng20) and dayRng20 > 0 ? dollarTgt / dayRng20 : na
+tgtOdds = na(tgtShare) ? "—" : tgtShare < 0.20 ? "واقعي · يُصاب ٦٠٪" :
+     tgtShare < 0.40 ? "متوسط · يُصاب ٤٥٪" :
+     tgtShare < 0.80 ? "صعب · يُصاب ١٧٪" : "غير واقعي · يُصاب ٥٪"
+tgtCol = na(tgtShare) ? cMut : tgtShare < 0.20 ? cUp : tgtShare < 0.40 ? cTxt :
+     tgtShare < 0.80 ? cGold : cDn
+tgtHard = not na(tgtShare) and tgtShare >= 0.80
+// المدى المتحقّق اليوم حتى الآن، مقارناً بمعتاد الرمز
+dayHi = ta.highest(high, math.max(int(barDay) + 1, 1))
+dayLo = ta.lowest(low, math.max(int(barDay) + 1, 1))
+rngNow = dayHi - dayLo
+rngTxt = na(dayRng20) or dayRng20 <= 0 ? "—" : rngNow < 0.5 * dayRng20 ? "مدى ضيّق" :
+     rngNow < 0.85 * dayRng20 ? "مدى عادي" : "مدى واسع"
+whenTxt = not intraday ? "—" : barDay < 20 ? "أول ساعة" : barDay < 40 ? "الساعة الثانية" :
+     barDay < 80 ? "منتصف الجلسة" : "قبل الأخيرة"
 pivLo = ta.lowest(low, pivN)
 pivHi = ta.highest(high, pivN)
 ready = bar_index > math.max(trendN, boxN) + 20 and not na(atr) and atr > 0
-gate = ready and barDay >= skipOpen and not lateBar
+gate = ready and barDay >= skipOpen and not lateBar and not (hideHard and tgtHard)
 
 // ═══════════════════════════════════════════════════ إدارة الصفقة
 var int axSide = 0
@@ -491,7 +514,7 @@ f_dur(int n) =>
     m = int(n * barMin)
     m >= 60 ? str.tostring(m / 60.0, "#.#") + " س" : str.tostring(m) + " د"
 
-var table cd = table.new(cPos, 2, 14, border_width = 1, frame_width = 1, frame_color = color.new(cMut, 60))
+var table cd = table.new(cPos, 2, 16, border_width = 1, frame_width = 1, frame_color = color.new(cMut, 60))
 
 f_row(int r, string a, string b, color cb) =>
     table.cell(cd, 0, r, a, text_color = cMut, text_size = cSz, text_halign = text.align_right, bgcolor = cBg)
@@ -538,6 +561,11 @@ if showCard and barstate.islast
          pos != 0 ? cMut : exitTxt == "وقف" ? cDn : cGold)
     f_row(13, "الإشارات اليوم", maxSig == 0 ? str.tostring(spent) + " (بلا حد)" :
          str.tostring(spent) + " من " + str.tostring(maxSig), spent >= maxSig and maxSig > 0 ? cDn : cMut)
+    f_row(14, "هدف الدولار", na(tgtShare) ? "— لا بيانات يومية" :
+         "$" + str.tostring(dollarTgt, "#.##") + " = " + str.tostring(tgtShare * 100, "#") +
+         "٪ من مدى يومه ($" + str.tostring(dayRng20, "#.##") + ")  ·  " + tgtOdds, tgtCol)
+    f_row(15, "الظرف الآن", whenTxt + "  ·  " + rngTxt +
+         (na(dayRng20) ? "" : "  ·  تحرّك اليوم $" + str.tostring(rngNow, "#.##")), cTxt)
 
 // ═════════════════════════════════════════════════════════════ الباحث
 f_scan() =>
