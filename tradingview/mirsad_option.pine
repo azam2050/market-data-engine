@@ -88,6 +88,7 @@ useRange = input.bool(true, "حدّ الصندوق (في السوق العرضي
 useRev   = input.bool(true, "الانعكاس (في السوق المتحوّل)", group = gS, tooltip = "تعمل حين لا يكون السوق مندفعاً ولا عرضياً: شمعة ضخمة تعبر الغيمة كاملة وتغلق خلفها.\n\nأقلّها عدداً وأقواها نتيجة. أطفئها إن كنت لا تحب الدخول ضد حركة قائمة.")
 revK     = input.float(1.5, "حجم شمعة الانعكاس = × ATR", minval = 0.8, maxval = 4.0, step = 0.25, group = gS, tooltip = "كم يجب أن تكون شمعة الانعكاس ضخمة حتى تُقبل.\n\nارفعه فتقلّ الإشارات وتكون الشمعة أوضح. اخفضه فتكثر وتضعف.")
 needTrend = input.bool(false, "ادخل مع ميل متوسط الاتجاه فقط", group = gS, tooltip = "يمنع الكول حين يكون الاتجاه العام هابطاً، ويمنع البوت حين يكون صاعداً.\n\nشغّله إن أزعجك أن تظهر إشارة تعاكس ما تراه على الشارت، أو أردت صفقات أقل وأكبر.\nأطفئه إن أردت كل الفرص — تشغيله يحذف نحو ثلث إشاراتك، والمحذوف ليس خاطئاً، هو فقط أصغر ربحاً.")
+stateGuard = input.bool(true, "ألغِ السُلّم إذا تغيّرت حالة السوق", group = gS, tooltip = "الإشارة تولد في حالة سوق معيّنة — عرضي مثلاً — ومعها يُرسم سُلّم الدخول. إذا تغيّرت الحالة قبل أن يدخل السعر، فالاستراتيجية التي ولّدت السُلّم لم تعد هي المناسبة.\n\nمشغّل: يُلغى السُلّم فوراً ويُكتب على البطاقة «أُلغي: تغيّرت الحالة». لا بوت ينتظر في سوق صار مندفعاً صاعداً.\n\nأطفئه إن أردت أن يبقى السُلّم حيّاً مهما تغيّر السوق.")
 
 gA = "المحور — مكان دخولك"
 axLife1  = input.int(5, "عمر المحور للدخول الأول (شموع)", minval = 2, maxval = 20, group = gA, tooltip = "الإشارة لا تُدخِلك فوراً — ترسم خطاً وتنتظر رجوع السعر إليه خلال هذه المدة.\n\nأقصِره (٣–٤) إن أردت صفقات سريعة قريبة من الإشارة.\nأطِله (٨–١٠) إن أردت فرصاً أكثر وسعراً أفضل، وقبلت أن تتأخر الصفقة.\n\nولو لم يرجع السعر: لا صفقة. المطاردة أسوأ شيء تفعله.")
@@ -191,6 +192,11 @@ pushUp = adx >= adxTr and close > cTop and eF > eS
 pushDn = adx >= adxTr and close < cBot and eF < eS
 sidew  = adx < adxRg and inBox
 state  = pushUp ? 1 : pushDn ? -1 : sidew ? 0 : 2
+f_state(int v) =>
+    v == 1 ? "مندفع صاعد" : v == -1 ? "مندفع هابط" : v == 0 ? "عرضي" : v == 2 ? "متحوّل" : "—"
+
+var string killTxt = ""
+var int killAt = -100000
 stateTxt = state == 1 ? "مندفع صاعد" : state == -1 ? "مندفع هابط" : state == 0 ? "عرضي" : "متحوّل"
 stateCol = state == 1 ? cUp : state == -1 ? cDn : state == 0 ? cMut : cGold
 planTxt = state == 1 or state == -1 ? "ارتداد الاتجاه — انتظر رجوع السعر إلى الغيمة" :
@@ -232,6 +238,7 @@ var float lvC = na
 var float jUp = na
 var float jDn = na
 var bool judged = false
+var int axSt = 9
 var string rungTxt = ""
 var string usedTxt = ""
 var line lnB = na
@@ -392,11 +399,17 @@ if gate and pos == 0 and pend == 0 and barstate.isconfirmed and budgetLeft and (
     axAtr := atr
     axBorn := bar_index
     axUses := 0
+    axSt := state
     whyIn := why
 
 // ── ٥) موت المحور
-if axSide != 0 and pos == 0 and pend == 0 and (bar_index > axBorn + axLife2 or axUses >= 3 or not budgetLeft)
+stateFlip = stateGuard and axSide != 0 and axSt != 9 and state != axSt
+if axSide != 0 and pos == 0 and pend == 0 and (bar_index > axBorn + axLife2 or axUses >= 3 or not budgetLeft or stateFlip)
     axSide := 0
+    if stateFlip
+        killTxt := "أُلغي: تغيّرت الحالة من «" + f_state(axSt) + "» إلى «" + stateTxt + "»"
+        killAt := bar_index
+        axSt := 9
 
 // ── خط المحور: يُرسم قبل أن يصله السعر
 if not na(axLine)
@@ -489,10 +502,12 @@ if showCard and barstate.islast
     table.cell(cd, 1, 0, syminfo.ticker + "  ·  " + timeframe.period + "  ·  " + mode + (mkt24 ? "  ·  ٢٤ ساعة" : ""), text_color = cTxt, text_size = cSz, text_halign = text.align_left, bgcolor = cHead)
     f_row(1, "حالة السوق", stateTxt + "   (ADX " + str.tostring(adx, "#") + ")", stateCol)
     f_row(2, "الخطة الآن", planTxt, cTxt)
-    f_row(3, "المحور", axSide == 0 ? (pos != 0 ? "— صفقة مفتوحة" : "لا محور — انتظار إشارة") :
+    justKilled = killTxt != "" and bar_index - killAt <= 20
+    f_row(3, "المحور", axSide == 0 ?
+         (pos != 0 ? "— صفقة مفتوحة" : justKilled ? killTxt : "لا محور — انتظار إشارة") :
          (axSide == 1 ? "كول عند " : "بوت عند ") + str.tostring(axLvl, format.mintick) +
-         "  ·  " + rungTxt,
-         axSide == 0 ? cMut : cGold)
+         "  ·  " + rungTxt + "  ·  وُلد في «" + f_state(axSt) + "»",
+         axSide == 0 ? (justKilled ? cGold : cMut) : cGold)
     f_row(4, "الإشارة", pos == 0 ? "— لا صفقة" :
          (pos == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) + "  ·  " + whyIn + "  ·  " + usedTxt,
          pos == 0 ? cMut : pos == 1 ? cUp : cDn)
