@@ -184,7 +184,7 @@ class LiveEngine:
         self._command_task: asyncio.Task | None = None
         self._dashboard_task: asyncio.Task | None = None
         self._watchdog_task: asyncio.Task | None = None
-        # the customer's desk: MIRSAD 9 on their own symbols, served by the
+        # the customer's desk: MIRSAD OPTION on their own symbols, served by the
         # dashboard and signed into by a link the bot hands out
         from qqq_alpha.live.desk import DeskService
         from qqq_alpha.live.leader import LeaderService
@@ -234,7 +234,7 @@ class LiveEngine:
             if self.settings.shadow_symbols
             else None
         )
-        # the public channel: MIRSAD 9's report cards — best-effort, never
+        # the public channel: MIRSAD OPTION's report cards — best-effort, never
         # blocking
         self.channel = (
             ChannelPublisher(self.settings.telegram_bot_token, self.settings.telegram_channel_id)
@@ -366,11 +366,11 @@ class LiveEngine:
         if self.channel is not None:
             await self.notifier.note(
                 f"📢 القناة العامة مفعّلة: {self.settings.telegram_channel_id} — "
-                "تقارير أداء مِرصاد ٩ اليومية والأسبوعية والشهرية"
+                "تقارير أداء مِرصاد أوبشن اليومية والأسبوعية والشهرية"
             )
         if self.settings.telegram_private_channel_id:
             await self.notifier.note(
-                "📢 قناة تحديثات مِرصاد ٩ مفعّلة — مجانية للجميع، طلبات الانضمام "
+                "📢 قناة تحديثات مِرصاد أوبشن مفعّلة — مجانية للجميع، طلبات الانضمام "
                 "تُقبل آلياً، وتقارير أداء المؤشر اليومية والأسبوعية والشهرية تصل "
                 "إليها وإلى القناة العامة"
             )
@@ -843,7 +843,7 @@ class LiveEngine:
                 "قناة التحديثات",
                 self.settings.telegram_private_channel_id,
                 "غير مُعدّة — المتغير TELEGRAM_PRIVATE_CHANNEL_ID فارغ، فلا تصلها "
-                "تقارير مِرصاد ٩",
+                "تقارير مِرصاد أوبشن",
             ),
             (
                 "القناة العامة",
@@ -1071,7 +1071,7 @@ class LiveEngine:
         return [c for c in (self.channel, self.private_channel) if c is not None]
 
     async def _publish_channel_daily(self, day: date) -> None:
-        """The after-the-bell package: MIRSAD 9's report cards, to both rooms.
+        """The after-the-bell package: MIRSAD OPTION's report cards, to both rooms.
         Guarded so it runs once per session no matter how many post-close
         bars arrive."""
         if not self._report_channels or self._channel_daily_posted == day:
@@ -1104,7 +1104,7 @@ class LiveEngine:
         return True
 
     async def _publish_indicator_reports(self, day: date) -> None:
-        """MIRSAD 9's own scoreboard, drawn from the persisted record.
+        """MIRSAD OPTION's own scoreboard, drawn from the persisted record.
 
         Daily every session, weekly on Friday, monthly on the month's last
         session — each a card to both rooms, with the text ledger as the
@@ -1521,7 +1521,7 @@ class LiveEngine:
         else:
             await self.commands.send(
                 message.chat_id,
-                "أهلاً بك مساعداً في مِرصاد ٩ 🤝\n"
+                "أهلاً بك مساعداً في مِرصاد أوبشن 🤝\n"
                 "تصلك هنا تلقائياً كل طلبات منح صلاحية المؤشر وإزالتها في TradingView "
                 "وإشعارات المشتركين.\n"
                 "الأوامر: «المؤشرات» للقائمة الكاملة (من يُمنح ومن يُزال)، و«مشتركين» للعدد.",
@@ -1639,7 +1639,7 @@ class LiveEngine:
         await self.commands.send(message.chat_id, self._guide())
         name = message.username or message.first_name or message.chat_id
         await self._tell_team(
-            f"🖥️ امنح صلاحية مِرصاد ٩ في TradingView إلى: {username}\n"
+            f"🖥️ امنح صلاحية مِرصاد أوبشن في TradingView إلى: {username}\n"
             f"(المشترك {name} — نافذته حتى {expires_on})\n"
             "أرسل «المؤشرات» لقائمة المنح والإزالة كاملة."
         )
@@ -2304,7 +2304,7 @@ class LiveEngine:
                 '"معاينة" لتجربة رسالة الإقرار بأزرارها، "مساعد @اسم" لمن يستلم طلبات TradingView معك، '
                 '"فحص" للتأكد أن البطاقات تصل إلى القناة الخاصة، '
                 '"فحص البيانات" لفحص ما يصل من المزود (الشموع وعقود الكول والبوت)، '
-                '"شاشتي" لرابط مكتب مِرصاد ٩، "القائد" لشاشة قائد اليوم.'
+                '"شاشتي" لرابط مكتب مِرصاد أوبشن، "القائد" لشاشة قائد اليوم.'
             )
             return
 
@@ -2549,7 +2549,7 @@ class LiveEngine:
                 chat_id,
                 f"🎁 تم تمديد اشتراكك المجاني {days} يومًا إضافية.\n"
                 f"ينتهي الآن في: {expires}\n"
-                "استمتع بمِرصاد ٩ 🤍",
+                "استمتع بمِرصاد أوبشن 🤍",
             )
             await self.notifier.note(f"🎁 مُدّد اشتراك {name} بـ {days} يومًا")
             return
@@ -2573,7 +2573,7 @@ class LiveEngine:
 
         if action == "removed":
             await self.commands.send(
-                chat_id, "أُلغي تسجيلك في مِرصاد ٩. قناة التحديثات تبقى مفتوحة لك، وللعودة أرسل /start 🤍"
+                chat_id, "أُلغي تسجيلك في مِرصاد أوبشن. قناة التحديثات تبقى مفتوحة لك، وللعودة أرسل /start 🤍"
             )
             await self.notifier.note(f"🗑️ حُذف المشترك {name}")
 

@@ -1,0 +1,682 @@
+// ══════════════════════════════════════════════════════════════════════════
+//  مِرصاد أوبشن  ·  MIRSAD OPTION
+//
+//  ليست استراتيجية واحدة. لكل حالة سوق استراتيجيتها، والبطاقة تقول لك
+//  أيّها يشتغل الآن ولماذا.
+//
+//    مندفع صاعد/هابط  →  ارتداد الاتجاه
+//    عرضي             →  لا دخول. مطفأة افتراضياً، والسبب مقيس بالأسفل
+//    متحوّل            →  انعكاس: شمعة ضخمة تعبر الغيمة وتغلق خلفها
+//
+//  والثلاث تشترك في قاعدة واحدة لا تُكسر: **الإشارة لا تُدخِلك**.
+//  ترسم سُلّماً من ثلاث درجات وتنتظر رجوع السعر إلى إحداها:
+//
+//    درجة ١  المحور — حافة الغيمة        أقربها · تمتلئ غالباً
+//    درجة ٢  القاع/القمة السابقة          أبعد · وسعرها أفضل
+//    درجة ٣  حدّ الصندوق                  أبعدها
+//
+//  لم يرجع السعر إلى أيٍّ منها؟ لا صفقة، ولا مطاردة.
+//
+//  ─────────────────────────────────────────────────────────────────────
+//  خمس طرق دخول قِيست على ٣٥٦٬٤٠٧ إشارة · ٧٠ رمزاً · وعلى ثماني حالات
+//  سوق. النتيجة لم تنقسم بالحالة — انقسمت بشيء واحد: أتنتظر أم تلاحق.
+//
+//                       بناء ٢٣–٢٥        اختبار ٢٠٢٦ (لم تُلمس)
+//    دخول فوري           ٤٩٫٩٪ +٠٫٠٣٦      ٤٩٫٣٪ +٠٫٠١٠
+//    دخول على الكسر      ٥٠٫١٪ +٠٫٠٣٥      ٤٩٫٢٪ +٠٫٠١١
+//    ───────────────────────────────────────────────────────
+//    عند المحور          ٥٨٫٤٪ +٠٫١٥٥      ٥٨٫٨٪ +٠٫١٤٠
+//    عند القاع السابق    ٥٨٫٢٪ +٠٫٢٠٠      ٥٩٫٨٪ +٠٫١٨٧
+//    عند حدّ الصندوق      ٥٨٫٧٪ +٠٫٢٠٨      ٥٩٫٩٪ +٠٫١٨٢
+//
+//  الملاحقة عملة معدنية في كل حالة سوق: صاعد حاد، صاعد متقارب، هابط،
+//  فجوة، عرضي — ٤٩–٥١٪ في كلّها. والانتظار ٥٨–٦٠٪ في كلّها.
+//
+//  ولماذا الحَكَم؟ لأن الدرجة إن كُسرت فهي الخبر لا الضجيج:
+//    دخلتَ عند المحور فصمد            ٦٣٫٦٪ · +٠٫٢٢٩R
+//    دخلتَ عند المحور فكسره السعر      ١٧٫٣٪ · −٠٫٦٥٦R
+//  فنخرج بثلث الوقف، وننتظر الدرجة التالية — القاع السابق: ٥٩٫٥٪.
+//
+//  ─────────────────────────────────────────────────────────────────────
+//  وبعد الدخول: ارسم أهدافك ودع السعر يروح.
+//
+//  نفس الدخول تماماً، والفرق في الخروج وحده · ٩٤٬٦٦٠ صفقة في ٢٠٢٦:
+//
+//                                       R      رابحة  هدف١  هدف٢  هدف٣
+//    تعادل + اتباع + خروج بالغيمة    +٠٫٠٨٥   ٤٠٫٥٪   ٢٩٪   ١٣٪    ٦٪
+//    تعادل + اتباع، بلا غيمة         +٠٫٠٩٢   ٣٤٫٥٪   ٦٣٪   ٢٦٪   ١٢٪
+//    بلا تعادل، اتباع بعد هدف ٢      +٠٫٠٩٣   ٤٧٫٨٪   ٦٣٪   ٣٤٪   ١٦٪  ←
+//    خام: وقف وأهداف ثابتة فقط       +٠٫٠٨٢   ٣٧٫٨٪   ٦٣٪   ٢٣٪   ١٥٪
+//
+//  الخروج بالغيمة كان يُنهي ٧٣٪ من الصفقات — فيهبط الوصول إلى هدف ١
+//  من ٦٣٪ إلى ٢٩٪. صار تنبيهاً على البطاقة ولا يُقفل شيئاً.
+//  ونقل الوقف إلى الدخول بعد هدف ١ كان يقطع الحركة قبل أن تبدأ.
+//
+//  فالوقف الآن يبقى مكانه حتى هدف ٢، ثم يتبع قاع ٨ شموع.
+//  والخروج له سبب مكتوب دائماً: وقف · حَكَم · هدف · جرس الجلسة.
+//
+//  ─────────────────────────────────────────────────────────────────────
+//  والاتجاه العرضي — أطول ما دُرس في هذا المؤشر، وأصدق نتيجة فيه:
+//
+//  ٧٧٧٬٠٤٢ لحظة سوق · ٧٠ رمزاً · بمسطرة واحدة لكل الطرق (هدف ١ ATR ضد
+//  وقف ١ ATR) حتى تكون نسبة الفوز نفسها هي الحافة، فـ٥٠٪ تعني لا شيء:
+//
+//                                    بناء ٢٣–٢٥      اختبار ٢٠٢٦
+//    الارتداد من طرف الصندوق          ٤٣–٤٦٪          ٤٥–٥١٪
+//    الكسر خارج الصندوق               ٤٩–٥٠٪          ٤٧–٥٠٪
+//    الكسر الفاشل والعودة             ٤٩–٥٠٪          ٥٠–٥١٪
+//    أمر معلّق على أي بُعد ١–٣ ATR      ٤٤–٤٩٪          ٤٦–٥٠٪
+//
+//  لا شيء فوق الخمسين. وحدّ الصندوق على بُعد ١ ATR **أسوأ** من مستوى
+//  بلا معنى على نفس البُعد بأربع نقاط: حدٌّ قريب يراه الجميع يُخترق.
+//
+//  وبمعيار السُلّم نفسه، الإشارة مقابل عشوائيٍّ في نفس الأيام:
+//    مندفع صاعد   +٦٫٤   ·   مندفع هابط   +٦٫٥   ·   متحوّل  +٦٫٦   (بناء)
+//    مندفع صاعد   +٧٫٢   ·   مندفع هابط   +٧٫٨   ·   متحوّل  +٩٫٣   (اختبار)
+//    عرضي         +٠٫٩                                              (بناء)
+//    عرضي         +٢٫٣                                            (اختبار)
+//
+//  فالقاعدة التي خرجت من الداتا: **في العرضي لا تدخل.** ولا يوجد رمز
+//  يُستثنى — ترتيب الرموز في العرضي لا يثبت بين الفترتين (+٠٫٣٦).
+//
+//  وأُعيد قياس السُلّم كلّه بعد اكتشاف خطأ في القياس السابق: شمعة الدخول
+//  كانت تُحسب للربح والخسارة معاً، وهذا يمنح المقياس علماً لم يكن عند
+//  المتداول. صُحّح فصارت شمعة الدخول للوقف فقط:
+//
+//                       مقياس قديم   مقياس نزيه   الفرق
+//    درجة ١ المحور        ٤٦٫٦٪        ٤٥٫٤٪       ١٫٢
+//    درجة ٢ القاع السابق  ٤٤٫٨٪        ٤٣٫٩٪       ٠٫٩
+//    درجة ٣ حدّ الصندوق    ٤٣٫١٪        ٤٢٫١٪       ١٫٠
+//    ───────────────────────────────────────────
+//    الدخول فوراً بلا سُلّم              ٤٠٫٢٪
+//    عشوائيّ في نفس الأيام              ٣٩٫٠٪
+//
+//  فالانتظار هو الحافة كلها: الدخول فوراً يساوي العشوائيّ تماماً.
+//
+//  ─────────────────────────────────────────────────────────────────────
+//  عن العقد — وهذا الشيء الوحيد الذي لا يقدر عليه الباين وحده:
+//
+//  الباين يمنع بناء رمز العقد من السعر لحظياً؛ request.security تقبل
+//  رمزاً ثابتاً فقط. لذلك العقد يُختار مرة واحدة من زرّ «العقد» بالأسفل
+//  (صيغة ترايدنغ فيو: MSFT260921P492.5)، وبعدها كل شيء تلقائي:
+//  سعر دخوله، سعره الآن، تغيّره، وأهدافه ٢٠ و٤٥ و٨٥ و١٠٠ و١٥٠٪.
+//  وخطوط الاسترايك تُرسم بلا أي بيانات عقود — هندسة على الأصل فقط.
+//  ══════════════════════════════════════════════════════════════════════
+//@version=5
+indicator("مِرصاد أوبشن", "MIRSAD OPTION", overlay = true, max_labels_count = 500,
+          max_lines_count = 500, max_boxes_count = 500)
+
+// ═══════════════════════════════════════════════════════════ الإعدادات
+gM = "النمط"
+mode   = input.string("متوازن", "نمط المؤشر", options = ["متشدد", "متوازن", "سريع"], group = gM, tooltip = "يضبط صرامة شروط الإشارة.\n\nمتشدد — إشارات أقل وأنظف. للعقود القصيرة ولمن يريد صفقة أو اثنتين فقط.\nمتوازن — الوضع المعتاد، وهو الافتراضي.\nسريع — إشارات أكثر وأخطاء أكثر. للمراقبة والتعلّم، لا للتنفيذ.")
+dirIn  = input.string("الاتجاهان", "الاتجاه", options = ["الاتجاهان", "كول فقط", "بوت فقط"], group = gM, tooltip = "يحصر الإشارات في جهة واحدة.\n\nاختر «كول فقط» أو «بوت فقط» إن كنت تتاجر جهة واحدة اليوم ولا تريد أن يشغلك ما عداها.")
+maxSig = input.int(3, "أقصى إشارات في الجلسة (٠ = بلا حد)", minval = 0, maxval = 10, group = gM, tooltip = "بعد هذا العدد يصمت المؤشر حتى الجلسة التالية.\n\nقلّله إلى ١ أو ٢ إن كنت تتابع الشارت قليلاً وتريد أفضل فرصة في اليوم فقط.\nارفعه أو اجعله ٠ إن كنت جالساً على الشارت وتريد كل الفرص.\n\nالصفقة الأولى في اليوم هي الأقوى دائماً، والثالثة أضعفها — لكن ثلاثتها رابحة.")
+
+gT = "الاتجاه والغيمة"
+fastN  = input.int(9, "المتوسط السريع", minval = 3, maxval = 50, group = gT)
+slowN  = input.int(21, "المتوسط البطيء", minval = 8, maxval = 100, group = gT)
+trendN = input.int(50, "متوسط الاتجاه العام", minval = 20, maxval = 200, group = gT)
+showCloud = input.bool(true, "إظهار الغيمة", group = gT, tooltip = "الغيمة هي المنطقة بين المتوسطين، ومنها يُرسم مكان دخولك.\n\nأطفئها متى أردت شارتاً نظيفاً — الإشارات والدخول والخروج لا تتغيّر إطلاقاً، أنت تخفي الرسم فقط.")
+cloudT = input.int(78, "شفافية الغيمة", minval = 0, maxval = 95, group = gT)
+lineW  = input.int(2, "سماكة الخطوط", minval = 1, maxval = 4, group = gT)
+
+gS = "الاستراتيجيات — متى تشتغل كل واحدة"
+useTrend = input.bool(true, "ارتداد الاتجاه (في السوق المندفع)", group = gS, tooltip = "تعمل حين يكون السوق مندفعاً: تنتظر رجوع السعر إلى الغيمة ثم تدخل مع الاتجاه.\n\nهذه أكثر استراتيجياتك عملاً وأكثرها فرصاً. لا تطفئها إلا إن كنت تريد الانعكاسات وحدها.")
+useRange = input.bool(false, "حدّ الصندوق (في السوق العرضي)", group = gS, tooltip = "تعمل حين يكون السوق عرضياً: تدخل من طرف الصندوق باتجاه وسطه.\n\nمطفأة افتراضياً، ولها سبب: هذه أضعف حالة في المؤشر كله. في السوق المندفع والمتحوّل تسبق إشارتُك العشوائيَّ بست إلى تسع نقاط. في العرضي تسبقه بنقطة واحدة — أي لا شيء تقريباً.\n\nشغّلها إن كنت تحب صفقات الصندوق وتقبل نتيجة قريبة من العشوائي مقابل عدد أكبر من الفرص. وأبقِها مطفأة إن أردت أن تأتيك الإشارة فقط حين يكون للمؤشر حافة حقيقية — ستقلّ إشاراتك نحو الثلث، والمحذوف هو أضعفه.")
+useRev   = input.bool(true, "الانعكاس (في السوق المتحوّل)", group = gS, tooltip = "تعمل حين لا يكون السوق مندفعاً ولا عرضياً: شمعة ضخمة تعبر الغيمة كاملة وتغلق خلفها.\n\nأقلّها عدداً وأقواها نتيجة. أطفئها إن كنت لا تحب الدخول ضد حركة قائمة.")
+revK     = input.float(1.5, "حجم شمعة الانعكاس = × ATR", minval = 0.8, maxval = 4.0, step = 0.25, group = gS, tooltip = "كم يجب أن تكون شمعة الانعكاس ضخمة حتى تُقبل.\n\nارفعه فتقلّ الإشارات وتكون الشمعة أوضح. اخفضه فتكثر وتضعف.")
+needTrend = input.bool(false, "ادخل مع ميل متوسط الاتجاه فقط", group = gS, tooltip = "يمنع الكول حين يكون الاتجاه العام هابطاً، ويمنع البوت حين يكون صاعداً.\n\nشغّله إن أزعجك أن تظهر إشارة تعاكس ما تراه على الشارت، أو أردت صفقات أقل وأكبر.\nأطفئه إن أردت كل الفرص — تشغيله يحذف نحو ثلث إشاراتك، والمحذوف ليس خاطئاً، هو فقط أصغر ربحاً.")
+stateGuard = input.bool(true, "ألغِ السُلّم إذا تغيّرت حالة السوق", group = gS, tooltip = "الإشارة تولد في حالة سوق معيّنة — عرضي مثلاً — ومعها يُرسم سُلّم الدخول. إذا تغيّرت الحالة قبل أن يدخل السعر، فالاستراتيجية التي ولّدت السُلّم لم تعد هي المناسبة.\n\nمشغّل: يُلغى السُلّم فوراً ويُكتب على البطاقة «أُلغي: تغيّرت الحالة». لا بوت ينتظر في سوق صار مندفعاً صاعداً.\n\nأطفئه إن أردت أن يبقى السُلّم حيّاً مهما تغيّر السوق.")
+
+gA = "المحور — مكان دخولك"
+axLife1  = input.int(5, "عمر المحور للدخول الأول (شموع)", minval = 2, maxval = 20, group = gA, tooltip = "الإشارة لا تُدخِلك فوراً — ترسم خطاً وتنتظر رجوع السعر إليه خلال هذه المدة.\n\nأقصِره (٣–٤) إن أردت صفقات سريعة قريبة من الإشارة.\nأطِله (٨–١٠) إن أردت فرصاً أكثر وسعراً أفضل، وقبلت أن تتأخر الصفقة.\n\nولو لم يرجع السعر: لا صفقة. المطاردة أسوأ شيء تفعله.")
+axLife2  = input.int(40, "ويبقى للمحاولات التالية (شموع)", minval = 10, maxval = 120, group = gA, tooltip = "بعد أول محاولة على المستوى، كم شمعة يبقى المستوى صالحاً للمحاولتين التاليتين.\n\nقلّله إن كنت لا تريد صفقة تُفتح بعد أن تبرد الحركة.")
+pivN     = input.int(30, "القمة/القاع السابق: آخر N شمعة", minval = 10, maxval = 80, group = gA, tooltip = "من كم شمعة إلى الخلف يبحث عن آخر قاع (للكول) أو آخر قمة (للبوت) — وهو مستوى دخولك الثاني.\n\nارفعه فيبتعد المستوى ويصير سعرك أفضل وفرصتك أندر.")
+judgeOn  = input.bool(true, "اخرج رخيصاً إن كسر السعر الدرجة", group = gA, tooltip = "إن كسر السعر الخط الذي دخلت عنده قبل أن يتحرّك لصالحك، يخرجك بثلث الوقف بدل أن ينتظر الوقف كاملاً — ويبقي الباب مفتوحاً لدخول ثانٍ عند مستوى أبعد.\n\nأبقِه مشغّلاً: هو الذي يجعل خسائرك صغيرة.\nأطفئه فقط إن كنت تريد إعطاء كل صفقة فرصتها كاملة حتى الوقف.")
+judgeX   = input.float(0.5, "مسافة الحَكَم = × ATR", minval = 0.2, maxval = 1.0, step = 0.1, group = gA, tooltip = "كم يجب أن يتحرّك السعر ضدّك حتى يُعتبر أنه كسر مستوى دخولك.\n\nاخفضه فتخرج أسرع وأرخص وتكثر الخروجات. ارفعه فتعطي الصفقة مساحة أكبر قبل الحكم عليها.")
+showAxis = input.bool(true, "ارسم درجات السُلّم", group = gA, tooltip = "يرسم لك مستويات الدخول الثلاثة على الشارت لحظة الإشارة، قبل أن يصلها السعر.\n\nأطفئه إن أردت شارتاً أنظف — الدخول يعمل كما هو.")
+
+gD = "هدف الحركة"
+dollarTgt = input.float(1.0, "هدف الحركة بالدولار", minval = 0.1, step = 0.25, group = gD, tooltip = "الحركة التي تريدها من السهم في نفس اليوم — بالدولار، لا بالنِّسَب.\n\nالمؤشر يقارنها بمتوسط مدى هذا الرمز اليومي، ويقول لك على البطاقة هل هي واقعية على هذا الرمز أصلاً.\n\nقياس ٢٠٢٦ على ٤٥٨ ألف صفقة: دولار على MU يُصاب ٨٤٪ من المرات، وعلى PFE صفر٪. ليست استراتيجية — بل أن دولاراً على سهم بـ ٢٨ دولاراً حركةٌ لا يصنعها يوم عادي.")
+hideHard = input.bool(false, "اصمت إن كان الهدف غير واقعي على هذا الرمز", group = gD, tooltip = "يوقف الإشارات تماماً حين يكون هدفك بالدولار أكبر من أربعة أخماس مدى الرمز اليومي المعتاد.\n\nقياس ٢٠٢٦: في هذه الحال لا يُصاب الهدف إلا في ٥٪ من المرات.\n\nشغّله إن كنت تتاجر بهدف ثابت بالدولار ولا تريد إشارات على رمز لا يبلغه.")
+
+gX = "الخروج والأهداف"
+exitCloud = input.bool(false, "اخرج عند إغلاق ضد الغيمة", group = gX, tooltip = "يقفل الصفقة إذا أغلقت شمعة في الجهة الأخرى من الغيمة.\n\nمطفأ لأنه كان يقفل أكثر من ثلثي الصفقات قبل أن تصل هدفها الأول. وهو الآن يظهر لك كتنبيه على البطاقة فقط، فترى التحذير وتقرّر بنفسك.\n\nشغّله إن كنت تفضّل خروجاً سريعاً على انتظار الهدف.")
+stopX  = input.float(1.5, "وقف الأصل = × ATR", minval = 0.5, maxval = 3.0, step = 0.25, group = gX, tooltip = "المسافة بين دخولك ووقفك، بوحدة تذبذب الرمز — فتتسع تلقائياً على الرمز العنيف وتضيق على الهادئ.\n\n١٫٥ الافتراضي: أعلى ربح، وأوقاف أكثر.\n٢٫٠ أو ٢٫٥: أوقاف أقل وراحة نفسية أكبر، وربح أقل بنحو الربع.\n\nاختر حسب ما يزعجك أكثر: الوقف المتكرر، أم الربح الأقل.")
+x1     = input.float(1.0, "هدف ١ = × ATR", minval = 0.25, step = 0.25, group = gX, tooltip = "أول هدف، بوحدة تذبذب الرمز. هذا الهدف هو الأكثر وصولاً، وعنده يبيع أغلب الناس نصف الصفقة.")
+x2     = input.float(2.0, "هدف ٢ = × ATR", minval = 0.5, step = 0.25, group = gX)
+x3     = input.float(3.0, "هدف ٣ = × ATR", minval = 1.0, step = 0.25, group = gX)
+beAfter1 = input.bool(false, "انقل الوقف للدخول بعد الهدف الأول", group = gX, tooltip = "ينقل وقفك إلى سعر دخولك بمجرد أن تلمس الهدف الأول، فلا تخسر شيئاً بعدها.\n\nمطفأ لأن أي ارتداد طبيعي بعد الهدف الأول كان يخرجك عند نقطة الدخول، فتفوتك بقية الحركة.\n\nشغّله إن كان الأهم عندك ألّا تتحوّل صفقة رابحة إلى خاسرة.")
+
+gO = "الأوبشن"
+optOn  = input.bool(true, "تابع عقداً حقيقياً", group = gO)
+optSym = input.symbol("", "العقد", group = gO, tooltip = "اضغط هنا واختر العقد من بحث ترايدنغ فيو، مرة واحدة. بعدها تتابع البطاقة سعر دخوله وسعره الآن وأعلى سعر وصله وأهدافه بالنسبة المئوية.\n\nصيغة الرمز: MSFT260921P492.5 — الاسم ثم التاريخ ثم C أو P ثم الاسترايك.\n\nاتركه فارغاً إن كنت تتابع الأصل فقط، فيختفي صف العقد من البطاقة.")
+p1 = input.float(20, "هدف العقد ١ ٪", minval = 5, step = 5, group = gO)
+p2 = input.float(45, "هدف العقد ٢ ٪", minval = 5, step = 5, group = gO)
+p3 = input.float(85, "هدف العقد ٣ ٪", minval = 5, step = 5, group = gO)
+p4 = input.float(100, "هدف العقد ٤ ٪", minval = 5, step = 5, group = gO)
+p5 = input.float(150, "هدف العقد ٥ ٪", minval = 5, step = 5, group = gO)
+showStrike = input.bool(true, "ارسم خطوط الاسترايك", group = gO, tooltip = "يرسم خطوط الاسترايك القريبة من السعر لتختار عقدك بنظرة.\n\nتُحسب هندسياً من السعر، فتعمل على أي حساب وأي رمز بلا بيانات عقود.")
+stkStep = input.float(0, "مسافة الاسترايك (٠ = تلقائي)", minval = 0, step = 0.5, group = gO)
+stkN    = input.int(3, "كم خطاً فوق وتحت", minval = 1, maxval = 8, group = gO)
+
+gB = "الباحث — شركات أخرى"
+scanOn = input.bool(true, "شغّل الباحث", group = gB)
+scanTf = input.timeframe("", "فريم الباحث (فارغ = فريم الشارت)", group = gB, tooltip = "الفريم الذي يقرأ عليه الباحث الشركات الخمس.\n\nاتركه فارغاً فيستعمل فريم الشارت. حدّده إن أردت مراقبة فريم أكبر بينما تتداول الأصغر.")
+s1 = input.symbol("AMEX:SPY", "شركة ١", group = gB)
+s2 = input.symbol("NASDAQ:QQQ", "شركة ٢", group = gB)
+s3 = input.symbol("NASDAQ:TSLA", "شركة ٣", group = gB)
+s4 = input.symbol("NASDAQ:NVDA", "شركة ٤", group = gB)
+s5 = input.symbol("NASDAQ:AAPL", "شركة ٥", group = gB)
+
+gL = "الجلسة"
+mktIn = input.string("تلقائي", "السوق", options = ["تلقائي", "جلسة أمريكية", "٢٤ ساعة"], group = gL, tooltip = "الأسهم والصناديق لها جلسة تبدأ ٩:٣٠ وتنتهي ٤:٠٠ بتوقيت نيويورك. الذهب والعملات والكربتو تعمل طوال اليوم.\n\nاتركه «تلقائي» ويعرف بنفسه. غيّره يدوياً فقط إن رأيت المؤشر صامتاً على رمز تعرف أنه يتحرّك.")
+skipOpen = input.int(1, "تجاهل أول N شمعة", minval = 0, maxval = 10, group = gL, tooltip = "تجاهل أول شمعة أو شمعتين من الجلسة.\n\nارفعه إن كان رمزك يفتح بفوضى ولا تريد إشارة من داخلها.")
+lateMin  = input.int(90, "لا إشارة في آخر N دقيقة", minval = 0, maxval = 240, step = 15, group = gL, tooltip = "يمنع فتح صفقات جديدة في آخر هذه الدقائق من الجلسة.\n\nارفعه إن كنت لا تحب صفقات آخر الوقت. اجعله ٠ إن أردت أن يعمل حتى الإغلاق.\n\nلا أثر له على الذهب والكربتو، فلا جلسة لها أصلاً.")
+eodOut   = input.bool(true, "أغلق الصفقة آخر الجلسة", group = gL, tooltip = "يقفل الصفقة المفتوحة قبيل جرس الإغلاق.\n\nأبقِه مشغّلاً إن كنت لا تحمل صفقة إلى اليوم التالي، وهو الأنسب لعقود اليوم نفسه.")
+
+gP = "اللوحة"
+showCard = input.bool(true, "بطاقة الصفقة", group = gP)
+cardPos  = input.string("أعلى اليمين", "مكانها", options = ["أعلى اليمين", "أعلى اليسار", "أسفل اليمين", "أسفل اليسار", "وسط اليمين"], group = gP)
+cardBig  = input.string("عادي", "حجمها", options = ["صغير", "عادي", "كبير"], group = gP)
+dark     = input.bool(true, "خلفية داكنة", group = gP)
+showScan = input.bool(true, "لوحة الباحث", group = gP)
+showLv   = input.bool(true, "خطوط الوقف والأهداف", group = gP)
+cleanN   = input.int(40, "احذف خطوط الصفقة المقفلة بعد N شمعة", minval = 0, maxval = 300, group = gP)
+
+// ═════════════════════════════════════════════════════════════ الألوان
+cUp   = #16a34a
+cDn   = #dc2626
+cGold = #f59e0b
+cMut  = dark ? #8b9fa8 : #5a6b73
+cTxt  = dark ? #e8eef0 : #14202a
+cBg   = dark ? color.new(#0d1720, 10) : color.new(#ffffff, 5)
+cHead = dark ? color.new(#16232e, 0) : color.new(#eef3f5, 0)
+cSz   = cardBig == "كبير" ? size.normal : cardBig == "صغير" ? size.tiny : size.small
+cPos  = cardPos == "أعلى اليسار" ? position.top_left : cardPos == "أسفل اليمين" ? position.bottom_right : cardPos == "أسفل اليسار" ? position.bottom_left : cardPos == "وسط اليمين" ? position.middle_right : position.top_right
+
+allowL = dirIn != "بوت فقط"
+allowS = dirIn != "كول فقط"
+strict = mode == "متشدد"
+quick  = mode == "سريع"
+
+// ═════════════════════════════════════════════════════════════ الحساب
+atr = ta.atr(14)
+eF  = ta.ema(close, fastN)
+eS  = ta.ema(close, slowN)
+eT  = ta.ema(close, trendN)
+cTop = math.max(eF, eS)
+cBot = math.min(eF, eS)
+[diP, diM, adx] = ta.dmi(14, 14)
+
+adxTr = strict ? 28.0 : quick ? 20.0 : 25.0
+adxRg = strict ? 16.0 : quick ? 20.0 : 18.0
+boxN  = 30
+boxH = ta.highest(high, boxN)[1]
+boxL = ta.lowest(low, boxN)[1]
+boxW = boxH - boxL
+inBox = boxW > 0 and close > boxL + 0.2 * boxW and close < boxH - 0.2 * boxW
+
+intraday = timeframe.isintraday
+minsNY = hour(time, "America/New_York") * 60 + minute(time, "America/New_York")
+barMin = math.max(timeframe.in_seconds() / 60, 1)
+// نوع السوق: الذهب والعملات والكربتو تعمل ٢٤ ساعة، فلا جلسة ٩:٣٠–١٦:٠٠ لها
+usEq = syminfo.type == "stock" or syminfo.type == "fund" or syminfo.type == "dr"
+mkt24 = mktIn == "٢٤ ساعة" or (mktIn == "تلقائي" and not usEq)
+newSess = intraday and session.isfirstbar_regular
+// موضع الشمعة داخل جلسة الرمز نفسه — يعمل على كل سوق لا على الأمريكي وحده
+barDay = intraday ? float(ta.barssince(session.isfirstbar_regular)) : 1000.0
+lateBar = intraday and not mkt24 and lateMin > 0 and minsNY >= 960 - lateMin
+lastBarOfDay = eodOut and intraday and not mkt24 and minsNY >= 955
+
+// ── حالة السوق
+pushUp = adx >= adxTr and close > cTop and eF > eS
+pushDn = adx >= adxTr and close < cBot and eF < eS
+sidew  = adx < adxRg and inBox
+state  = pushUp ? 1 : pushDn ? -1 : sidew ? 0 : 2
+f_state(int v) =>
+    v == 1 ? "مندفع صاعد" : v == -1 ? "مندفع هابط" : v == 0 ? "عرضي" : v == 2 ? "متحوّل" : "—"
+
+var string killTxt = ""
+var int killAt = -100000
+stateTxt = state == 1 ? "مندفع صاعد" : state == -1 ? "مندفع هابط" : state == 0 ? "عرضي" : "متحوّل"
+stateCol = state == 1 ? cUp : state == -1 ? cDn : state == 0 ? cMut : cGold
+planTxt = state == 1 or state == -1 ? "ارتداد الاتجاه — انتظر رجوع السعر إلى الغيمة" :
+     state == 0 ? "حدّ الصندوق — من الطرف نحو الوسط" : "انعكاس — شمعة ضخمة تعبر الغيمة"
+
+// ═══════════════════════════════════════════ الاستراتيجيات الثلاث
+body = close - open
+rng  = high - low
+// ١) ارتداد الاتجاه
+tL = useTrend and state == 1 and low <= cTop and close > cTop and close > open and (not strict or close > high[1])
+tS = useTrend and state == -1 and high >= cBot and close < cBot and close < open and (not strict or close < low[1])
+// ٢) حدّ الصندوق
+edgeP = strict ? 0.12 : quick ? 0.25 : 0.18
+rL = useRange and state == 0 and low <= boxL + edgeP * boxW and close > open and close > low + 0.5 * rng
+rS = useRange and state == 0 and high >= boxH - edgeP * boxW and close < open and close < high - 0.5 * rng
+// ٣) الانعكاس
+vL = useRev and state == 2 and rng > 0 and body >= revK * atr and close > cTop and open < cTop
+vS = useRev and state == 2 and rng > 0 and -body >= revK * atr and close < cBot and open > cBot
+
+trendUp = eT > eT[10]
+trendDn = eT < eT[10]
+okTrendL = not needTrend or trendUp
+okTrendS = not needTrend or trendDn
+sigL = allowL and okTrendL and (tL or rL or vL)
+sigS = allowS and okTrendS and (tS or rS or vS)
+why = tL or tS ? "ارتداد الاتجاه" : rL or rS ? "حدّ الصندوق" : vL or vS ? "انعكاس" : ""
+
+// ── هل هدفك بالدولار واقعي على هذا الرمز؟ قياس ٤٥٨ ألف صفقة:
+//    الهدف أقل من خُمس مدى اليوم ٦٠٪ · خُمسين ٤٥٪ · أربعة أخماس ١٧٪ · فوقها ٥٪
+dayRng20 = request.security(syminfo.tickerid, "D", ta.sma(high - low, 20)[1],
+               lookahead = barmerge.lookahead_off)
+tgtShare = not na(dayRng20) and dayRng20 > 0 ? dollarTgt / dayRng20 : na
+tgtOdds = na(tgtShare) ? "—" : tgtShare < 0.20 ? "واقعي · يُصاب ٦٠٪" :
+     tgtShare < 0.40 ? "متوسط · يُصاب ٤٥٪" :
+     tgtShare < 0.80 ? "صعب · يُصاب ١٧٪" : "غير واقعي · يُصاب ٥٪"
+tgtCol = na(tgtShare) ? cMut : tgtShare < 0.20 ? cUp : tgtShare < 0.40 ? cTxt :
+     tgtShare < 0.80 ? cGold : cDn
+tgtHard = not na(tgtShare) and tgtShare >= 0.80
+// المدى المتحقّق اليوم حتى الآن، مقارناً بمعتاد الرمز
+dayHi = ta.highest(high, math.max(int(barDay) + 1, 1))
+dayLo = ta.lowest(low, math.max(int(barDay) + 1, 1))
+rngNow = dayHi - dayLo
+rngTxt = na(dayRng20) or dayRng20 <= 0 ? "—" : rngNow < 0.5 * dayRng20 ? "مدى ضيّق" :
+     rngNow < 0.85 * dayRng20 ? "مدى عادي" : "مدى واسع"
+whenTxt = not intraday ? "—" : barDay < 20 ? "أول ساعة" : barDay < 40 ? "الساعة الثانية" :
+     barDay < 80 ? "منتصف الجلسة" : "قبل الأخيرة"
+pivLo = ta.lowest(low, pivN)
+pivHi = ta.highest(high, pivN)
+ready = bar_index > math.max(trendN, boxN) + 20 and not na(atr) and atr > 0
+gate = ready and barDay >= skipOpen and not lateBar and not (hideHard and tgtHard)
+
+// ═══════════════════════════════════════════════════ إدارة الصفقة
+var int axSide = 0
+var float axLvl = na
+var float lvA = na
+var float lvB = na
+var float lvC = na
+var float jUp = na
+var float jDn = na
+var bool judged = false
+var int axSt = 9
+var string rungTxt = ""
+var string usedTxt = ""
+var line lnB = na
+var line lnC = na
+var float axAtr = na
+var int axBorn = 0
+var int axUses = 0
+var int pend = 0
+var int nth = 0
+var line axLine = na
+var int pos = 0
+var float eP = na
+var float sP = na
+var float t1 = na
+var float t2 = na
+var float t3 = na
+var float unit = na
+var float oEntry = na
+var float oPeak = na
+var int hit = 0
+var int barsIn = 0
+var int spent = 0
+var string whyIn = ""
+var string exitTxt = ""
+var string exitWhy = ""
+var float lastR = na
+var int lastSide = 0
+var int closedAt = -100000
+var line[] lv = array.new_line()
+
+f_tail(string s) =>
+    parts = str.split(s, ":")
+    array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : s
+
+f_clear() =>
+    if array.size(lv) > 0
+        for i = 0 to array.size(lv) - 1
+            line.delete(array.get(lv, i))
+        array.clear(lv)
+
+// ── سعر العقد الحقيقي (رمز ثابت من زرّ الاختيار)
+hasOpt = optOn and str.length(optSym) > 3
+optUse = hasOpt ? optSym : syminfo.tickerid
+oRaw = request.security(optUse, timeframe.period, close, ignore_invalid_symbol = true)
+oPx = hasOpt ? oRaw : na
+
+if newSess
+    spent := 0
+    axSide := 0
+    pend := 0
+
+closed = false
+entered = false
+trailLo = ta.lowest(low, 8)
+trailHi = ta.highest(high, 8)
+
+// ── ١) تنفيذ الدخول المعلّق على افتتاح هذه الشمعة، أو سعر المحور — الأسوأ
+if pend != 0 and pos == 0 and not na(axAtr)
+    pos := pend
+    axUses += 1
+    eP := pend == 1 ? math.min(open, axLvl) : math.max(open, axLvl)
+    unit := stopX * axAtr
+    cap = 2.5 * axAtr
+    sP := pend == 1 ? math.max(math.min(cBot, eP - unit), eP - cap) : math.min(math.max(cTop, eP + unit), eP + cap)
+    unit := math.abs(eP - sP)
+    t1 := eP + pend * x1 * axAtr
+    t2 := eP + pend * x2 * axAtr
+    t3 := eP + pend * x3 * axAtr
+    hit := 0
+    barsIn := 0
+    spent += 1
+    nth := axUses
+    jUp := eP + pend * judgeX * axAtr
+    jDn := eP - pend * judgeX * axAtr
+    judged := false
+    usedTxt := rungTxt
+    rungTxt := axUses == 1 ? "درجة ٢ · القاع السابق" : axUses == 2 ? "درجة ٣ · حدّ الصندوق" : "انتهى السُلّم"
+    axLvl := axUses == 1 ? lvB : lvC
+    exitTxt := ""
+    exitWhy := ""
+    oEntry := oPx
+    oPeak := oPx
+    entered := true
+    pend := 0
+else if pend != 0
+    pend := 0
+
+// ── ٢) إدارة الصفقة — شمعة الدخول نفسها داخلة في الحساب
+if pos != 0 and barstate.isconfirmed
+    barsIn += 1
+    if not na(oPx)
+        oPeak := na(oPeak) ? oPx : math.max(oPeak, oPx)
+    stopHit = pos == 1 ? low <= sP : high >= sP
+    cloudOut = exitCloud and (pos == 1 ? close < cBot : close > cTop)
+    jAgainst = pos == 1 ? low <= jDn : high >= jDn
+    jWith = pos == 1 ? high >= jUp : low <= jUp
+    if judgeOn and not judged and hit == 0 and jWith and not jAgainst
+        judged := true
+    if judgeOn and not judged and hit == 0 and jAgainst
+        // كسَر الدرجة قبل أن يصعد — نخرج رخيصاً وننتظر الدرجة التالية
+        lastR := -judgeX * axAtr / unit
+        exitTxt := "خروج بالحَكَم"
+        exitWhy := pos == 1 ? "كسر الدرجة نزولاً" : "كسر الدرجة صعوداً"
+        lastSide := pos
+        pos := 0
+        closed := true
+    else if stopHit
+        lastR := (sP - eP) / unit * pos
+        exitTxt := lastR > 0.001 ? "خروج بربح" : lastR > -0.001 ? "تعادل" : "وقف"
+        exitWhy := lastR > -0.001 ? "الوقف تحرّك معك" : "ضرب وقف الأصل"
+        lastSide := pos
+        pos := 0
+        closed := true
+    else if cloudOut
+        lastR := (close - eP) / unit * pos
+        exitTxt := "خروج مقترح"
+        exitWhy := pos == 1 ? "إغلاق تحت الغيمة" : "إغلاق فوق الغيمة"
+        lastSide := pos
+        pos := 0
+        closed := true
+    else
+        hit := pos == 1 ? (high >= t3 ? 3 : high >= t2 ? 2 : high >= t1 ? 1 : hit) : (low <= t3 ? 3 : low <= t2 ? 2 : low <= t1 ? 1 : hit)
+        if beAfter1 and hit >= 1
+            sP := pos == 1 ? math.max(sP, eP) : math.min(sP, eP)
+        if hit >= 2
+            sP := pos == 1 ? math.max(sP, t1, trailLo) : math.min(sP, t1, trailHi)
+        if hit >= 3
+            sP := pos == 1 ? math.max(sP, t2, trailLo) : math.min(sP, t2, trailHi)
+        if lastBarOfDay
+            lastR := (close - eP) / unit * pos
+            exitTxt := "إغلاق الجلسة"
+            exitWhy := "انتهى الوقت"
+            lastSide := pos
+            pos := 0
+            closed := true
+
+if closed
+    closedAt := bar_index
+
+// ── ٣) لمس المحور ← الدخول على افتتاح الشمعة القادمة. لا شيء غير اللمس.
+budgetLeft = maxSig == 0 or spent < maxSig
+canTry = axSide != 0 and pos == 0 and pend == 0 and axUses < 3 and budgetLeft and bar_index <= axBorn + (axUses == 0 ? axLife1 : axLife2)
+touch = canTry and barstate.isconfirmed and (axSide == 1 ? low <= axLvl : high >= axLvl)
+if touch
+    pend := axSide
+
+// ── ٤) الإشارة لا تُدخِلك. ترسم المحور عند حافة الغيمة وتنتظر رجوع السعر إليه.
+//      هذا هو الفرق كلّه: الدخول لحظة الإشارة قِيس ٤٩٫٨٪ · ومن المحور ٥٧٪
+if gate and pos == 0 and pend == 0 and barstate.isconfirmed and budgetLeft and (sigL or sigS)
+    s0 = sigL ? 1 : -1
+    axSide := s0
+    // ثلاث درجات مقيسة، لا درجة واحدة مكرّرة ثلاثاً
+    lvA := s0 == 1 ? math.min(cTop, close) : math.max(cBot, close)
+    lvB := s0 == 1 ? math.min(pivLo, lvA) : math.max(pivHi, lvA)
+    lvC := s0 == 1 ? math.min(boxL, lvB) : math.max(boxH, lvB)
+    axLvl := lvA
+    rungTxt := "درجة ١ · المحور"
+    axAtr := atr
+    axBorn := bar_index
+    axUses := 0
+    axSt := state
+    whyIn := why
+
+// ── ٥) موت المحور
+stateFlip = stateGuard and axSide != 0 and axSt != 9 and state != axSt
+if axSide != 0 and pos == 0 and pend == 0 and (bar_index > axBorn + axLife2 or axUses >= 3 or not budgetLeft or stateFlip)
+    axSide := 0
+    if stateFlip
+        killTxt := "أُلغي: تغيّرت الحالة من «" + f_state(axSt) + "» إلى «" + stateTxt + "»"
+        killAt := bar_index
+        axSt := 9
+
+// ── خط المحور: يُرسم قبل أن يصله السعر
+if not na(axLine)
+    line.delete(axLine)
+    axLine := na
+if not na(lnB)
+    line.delete(lnB)
+    lnB := na
+if not na(lnC)
+    line.delete(lnC)
+    lnC := na
+if showAxis and axSide != 0 and pos == 0
+    x0 = math.max(axBorn, bar_index - 60)
+    axLine := line.new(x0, axLvl, bar_index + 6, axLvl, color = cGold,
+                   style = line.style_dashed, width = 2)
+    if axUses < 1
+        lnB := line.new(x0, lvB, bar_index + 6, lvB, color = color.new(cGold, 45),
+                   style = line.style_dotted, width = 1)
+        lnC := line.new(x0, lvC, bar_index + 6, lvC, color = color.new(cGold, 70),
+                   style = line.style_dotted, width = 1)
+
+// ═════════════════════════════════════════════════════════════ الرسم
+pF = plot(showCloud ? eF : na, "السريع", color = color.new(cGold, 0), linewidth = lineW)
+pS = plot(showCloud ? eS : na, "البطيء", color = color.new(#38bdf8, 0), linewidth = lineW)
+fill(pF, pS, color = showCloud ? color.new(eF > eS ? cUp : cDn, cloudT) : na, title = "الغيمة")
+plot(showCloud ? eT : na, "الاتجاه العام", color = color.new(cMut, 30), linewidth = 1)
+
+if entered and showLv
+    f_clear()
+    array.push(lv, line.new(bar_index, eP, bar_index + 45, eP, color = cGold, width = 2))
+    array.push(lv, line.new(bar_index, sP, bar_index + 45, sP, color = cDn, style = line.style_dotted))
+    array.push(lv, line.new(bar_index, t1, bar_index + 45, t1, color = cUp, style = line.style_dotted))
+    array.push(lv, line.new(bar_index, t2, bar_index + 45, t2, color = cUp, style = line.style_dotted))
+    array.push(lv, line.new(bar_index, t3, bar_index + 45, t3, color = cUp, width = 2))
+
+if closed and cleanN == 0
+    f_clear()
+if cleanN > 0 and pos == 0 and bar_index - closedAt == cleanN
+    f_clear()
+
+if entered
+    label.new(bar_index, pos == 1 ? low : high,
+          (pos == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) + "\n" + whyIn,
+          style = pos == 1 ? label.style_label_up : label.style_label_down,
+          color = pos == 1 ? cUp : cDn, textcolor = color.white, size = size.small)
+
+if closed
+    label.new(bar_index, lastSide == 1 ? high : low, exitTxt + "\n" + exitWhy,
+          style = lastSide == 1 ? label.style_label_down : label.style_label_up,
+          color = lastR > 0.001 ? cUp : lastR > -0.001 ? cMut : cDn,
+          textcolor = color.white, size = size.small)
+
+plotshape(entered and pos == 1, "كول", shape.triangleup, location.belowbar, cUp, size = size.tiny)
+plotshape(entered and pos == -1, "بوت", shape.triangledown, location.abovebar, cDn, size = size.tiny)
+
+// ── خطوط الاسترايك: هندسة على الأصل، بلا أي بيانات عقود
+var line[] stk = array.new_line()
+if showStrike and barstate.islast
+    if array.size(stk) > 0
+        for i = 0 to array.size(stk) - 1
+            line.delete(array.get(stk, i))
+        array.clear(stk)
+    stp = stkStep > 0 ? stkStep : close >= 500 ? 5.0 : close >= 200 ? 2.5 : close >= 50 ? 1.0 : 0.5
+    base = math.round(close / stp) * stp
+    for i = -stkN to stkN
+        lvl = base + i * stp
+        col = math.abs(lvl - close) < stp * 0.5 ? cGold : color.new(cMut, 55)
+        array.push(stk, line.new(bar_index - 40, lvl, bar_index + 12, lvl, color = col,
+                   style = line.style_dotted, width = 1))
+
+// ═════════════════════════════════════════════════════════════ البطاقة
+f_pct(float a, float b) =>
+    na(a) or na(b) or b == 0 ? "—" : (a >= b ? "+" : "") + str.tostring((a - b) / b * 100, "#.#") + "٪"
+
+f_mark(float now, float ent, float p) =>
+    na(now) or na(ent) or ent == 0 ? "○" : (now - ent) / ent * 100 >= p ? "✓" : "○"
+
+f_dur(int n) =>
+    m = int(n * barMin)
+    m >= 60 ? str.tostring(m / 60.0, "#.#") + " س" : str.tostring(m) + " د"
+
+var table cd = table.new(cPos, 2, 16, border_width = 1, frame_width = 1, frame_color = color.new(cMut, 60))
+
+f_row(int r, string a, string b, color cb) =>
+    table.cell(cd, 0, r, a, text_color = cMut, text_size = cSz, text_halign = text.align_right, bgcolor = cBg)
+    table.cell(cd, 1, r, b, text_color = cb, text_size = cSz, text_halign = text.align_left, bgcolor = cBg)
+
+if showCard and barstate.islast
+    table.cell(cd, 0, 0, "مِرصاد أوبشن", text_color = cGold, text_size = cSz, text_halign = text.align_right, bgcolor = cHead)
+    table.cell(cd, 1, 0, syminfo.ticker + "  ·  " + timeframe.period + "  ·  " + mode + (mkt24 ? "  ·  ٢٤ ساعة" : ""), text_color = cTxt, text_size = cSz, text_halign = text.align_left, bgcolor = cHead)
+    edgeTxt = state == 0 ? "  ·  حافة ضعيفة — الأفضل ألّا تدخل" : "  ·  حافة قوية"
+    f_row(1, "حالة السوق", stateTxt + "   (ADX " + str.tostring(adx, "#") + ")" + edgeTxt,
+         state == 0 ? cMut : stateCol)
+    f_row(2, "الخطة الآن", planTxt, cTxt)
+    justKilled = killTxt != "" and bar_index - killAt <= 20
+    f_row(3, "المحور", axSide == 0 ?
+         (pos != 0 ? "— صفقة مفتوحة" : justKilled ? killTxt : "لا محور — انتظار إشارة") :
+         (axSide == 1 ? "كول عند " : "بوت عند ") + str.tostring(axLvl, format.mintick) +
+         "  ·  " + rungTxt + "  ·  وُلد في «" + f_state(axSt) + "»",
+         axSide == 0 ? (justKilled ? cGold : cMut) : cGold)
+    f_row(4, "الإشارة", pos == 0 ? "— لا صفقة" :
+         (pos == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) + "  ·  " + whyIn + "  ·  " + usedTxt,
+         pos == 0 ? cMut : pos == 1 ? cUp : cDn)
+    f_row(5, "السعر الآن", pos == 0 ? "—" :
+         str.tostring(close, format.mintick) + "   " + f_pct(close, eP) + "   ·   " + f_dur(barsIn),
+         pos == 0 ? cMut : (close - eP) * pos > 0 ? cUp : cDn)
+    f_row(6, "وقف الأصل", pos == 0 ? "—" : str.tostring(sP, format.mintick) + (hit >= 1 and beAfter1 ? "  ·  مؤمَّنة" : ""), pos == 0 ? cMut : cDn)
+    f_row(7, "أهداف الأصل",
+         pos == 0 ? "—" : (hit >= 1 ? "✓" : "○") + " " + str.tostring(t1, format.mintick) + "   " +
+         (hit >= 2 ? "✓" : "○") + " " + str.tostring(t2, format.mintick) + "   " +
+         (hit >= 3 ? "✓" : "○") + " " + str.tostring(t3, format.mintick), pos == 0 ? cMut : cUp)
+    f_row(8, "العقد", not hasOpt ? "— اختر عقداً من الإعدادات" :
+         f_tail(optSym) + "   " + (na(oPx) ? "لا بيانات" : str.tostring(oPx, "#.##")) +
+         (na(oEntry) ? "" : "   دخول " + str.tostring(oEntry, "#.##") + "   " + f_pct(oPx, oEntry)),
+         not hasOpt or na(oPx) ? cMut : na(oEntry) ? cTxt : oPx >= oEntry ? cUp : cDn)
+    f_row(9, "أهداف العقد", not hasOpt or na(oEntry) ? "—" :
+         f_mark(oPx, oEntry, p1) + str.tostring(p1, "#") + "٪  " +
+         f_mark(oPx, oEntry, p2) + str.tostring(p2, "#") + "٪  " +
+         f_mark(oPx, oEntry, p3) + str.tostring(p3, "#") + "٪  " +
+         f_mark(oPx, oEntry, p4) + str.tostring(p4, "#") + "٪  " +
+         f_mark(oPx, oEntry, p5) + str.tostring(p5, "#") + "٪",
+         not hasOpt or na(oEntry) ? cMut : cUp)
+    f_row(10, "أعلى سعر للعقد", na(oPeak) ? "—" : str.tostring(oPeak, "#.##") + "   " + f_pct(oPeak, oEntry), na(oPeak) ? cMut : cGold)
+    f_row(11, "تنبيه الغيمة", pos == 0 ? "—" :
+         (pos == 1 ? close < cBot : close > cTop) ? "أغلق ضد الغيمة — انتبه ولا تُقفل تلقائياً" : "السعر مع الغيمة",
+         pos == 0 ? cMut : (pos == 1 ? close < cBot : close > cTop) ? cGold : cUp)
+    f_row(12, "اقتراح الخروج", pos != 0 ? "— الصفقة مفتوحة" : exitTxt == "" ? "—" : exitTxt + "  ·  " + exitWhy,
+         pos != 0 ? cMut : exitTxt == "وقف" ? cDn : cGold)
+    f_row(13, "الإشارات اليوم", maxSig == 0 ? str.tostring(spent) + " (بلا حد)" :
+         str.tostring(spent) + " من " + str.tostring(maxSig), spent >= maxSig and maxSig > 0 ? cDn : cMut)
+    f_row(14, "هدف الدولار", na(tgtShare) ? "— لا بيانات يومية" :
+         "$" + str.tostring(dollarTgt, "#.##") + " = " + str.tostring(tgtShare * 100, "#") +
+         "٪ من مدى يومه ($" + str.tostring(dayRng20, "#.##") + ")  ·  " + tgtOdds, tgtCol)
+    f_row(15, "الظرف الآن", whenTxt + "  ·  " + rngTxt +
+         (na(dayRng20) ? "" : "  ·  تحرّك اليوم $" + str.tostring(rngNow, "#.##")), cTxt)
+
+// ═════════════════════════════════════════════════════════════ الباحث
+f_scan() =>
+    a_ = ta.atr(14)
+    f_ = ta.ema(close, fastN)
+    s_ = ta.ema(close, slowN)
+    ct = math.max(f_, s_)
+    cb = math.min(f_, s_)
+    [dp, dm, ax] = ta.dmi(14, 14)
+    bh = ta.highest(high, boxN)[1]
+    bl = ta.lowest(low, boxN)[1]
+    bw = bh - bl
+    ib = bw > 0 and close > bl + 0.2 * bw and close < bh - 0.2 * bw
+    pu = ax >= adxTr and close > ct and f_ > s_
+    pd = ax >= adxTr and close < cb and f_ < s_
+    sw = ax < adxRg and ib
+    st = pu ? 1 : pd ? -1 : sw ? 0 : 2
+    bd = close - open
+    rg = high - low
+    l1 = useTrend and pu and low <= ct and close > ct and close > open
+    s1_ = useTrend and pd and high >= cb and close < cb and close < open
+    l2 = useRange and sw and low <= bl + edgeP * bw and close > open
+    s2_ = useRange and sw and high >= bh - edgeP * bw and close < open
+    l3 = useRev and st == 2 and rg > 0 and bd >= revK * a_ and close > ct and open < ct
+    s3_ = useRev and st == 2 and rg > 0 and -bd >= revK * a_ and close < cb and open > cb
+    sd = (l1 or l2 or l3) ? 1 : (s1_ or s2_ or s3_) ? -1 : 0
+    wh = (l1 or s1_) ? 1 : (l2 or s2_) ? 2 : (l3 or s3_) ? 3 : 0
+    [st, sd, wh, close, ax]
+
+stf = scanTf == "" ? timeframe.period : scanTf
+[a1, b1, c1, d1, e1] = request.security(s1, stf, f_scan(), ignore_invalid_symbol = true)
+[a2, b2, c2, d2, e2] = request.security(s2, stf, f_scan(), ignore_invalid_symbol = true)
+[a3, b3, c3, d3, e3] = request.security(s3, stf, f_scan(), ignore_invalid_symbol = true)
+[a4, b4, c4, d4, e4] = request.security(s4, stf, f_scan(), ignore_invalid_symbol = true)
+[a5, b5, c5, d5, e5] = request.security(s5, stf, f_scan(), ignore_invalid_symbol = true)
+
+f_st(float s) =>
+    na(s) ? "—" : s == 1 ? "مندفع صاعد" : s == -1 ? "مندفع هابط" : s == 0 ? "عرضي" : "متحوّل"
+
+f_wh(float w) =>
+    na(w) or w == 0 ? "—" : w == 1 ? "ارتداد الاتجاه" : w == 2 ? "حدّ الصندوق" : "انعكاس"
+
+var table sc = table.new(position.bottom_right, 5, 7, border_width = 1, frame_width = 1, frame_color = color.new(cMut, 60))
+
+f_scanRow(int r, string sym, float st, float sd, float wh, float px) =>
+    sCol = na(sd) or sd == 0 ? cMut : sd == 1 ? cUp : cDn
+    table.cell(sc, 0, r, f_tail(sym), text_color = cTxt, text_size = cSz, bgcolor = cBg)
+    table.cell(sc, 1, r, na(px) ? "—" : str.tostring(px, format.mintick), text_color = cMut, text_size = cSz, bgcolor = cBg)
+    table.cell(sc, 2, r, f_st(st), text_color = na(st) ? cMut : st == 1 ? cUp : st == -1 ? cDn : cMut, text_size = cSz, bgcolor = cBg)
+    table.cell(sc, 3, r, na(sd) or sd == 0 ? "انتظار" : sd == 1 ? "كول" : "بوت", text_color = sCol, text_size = cSz, bgcolor = cBg)
+    table.cell(sc, 4, r, f_wh(wh), text_color = cTxt, text_size = cSz, bgcolor = cBg)
+
+if scanOn and showScan and barstate.islast
+    table.cell(sc, 0, 0, "الرمز", text_color = cMut, text_size = cSz, bgcolor = cHead)
+    table.cell(sc, 1, 0, "السعر", text_color = cMut, text_size = cSz, bgcolor = cHead)
+    table.cell(sc, 2, 0, "الحالة", text_color = cMut, text_size = cSz, bgcolor = cHead)
+    table.cell(sc, 3, 0, "الإشارة", text_color = cMut, text_size = cSz, bgcolor = cHead)
+    table.cell(sc, 4, 0, "الاستراتيجية  ·  " + stf, text_color = cGold, text_size = cSz, bgcolor = cHead)
+    f_scanRow(1, s1, a1, b1, c1, d1)
+    f_scanRow(2, s2, a2, b2, c2, d2)
+    f_scanRow(3, s3, a3, b3, c3, d3)
+    f_scanRow(4, s4, a4, b4, c4, d4)
+    f_scanRow(5, s5, a5, b5, c5, d5)
+    table.cell(sc, 0, 6, "باحث الصفقات", text_color = cGold, text_size = cSz, bgcolor = cHead)
+    table.cell(sc, 1, 6, "", text_color = cMut, text_size = cSz, bgcolor = cHead)
+    table.cell(sc, 2, 6, "", text_color = cMut, text_size = cSz, bgcolor = cHead)
+    table.cell(sc, 3, 6, "", text_color = cMut, text_size = cSz, bgcolor = cHead)
+    table.cell(sc, 4, 6, "مِرصاد أوبشن", text_color = cMut, text_size = cSz, bgcolor = cHead)
+
+// ═════════════════════════════════════════════════════════ التنبيهات
+alertcondition(entered and pos == 1, "مِرصاد — كول", "مِرصاد أوبشن: دخول كول")
+alertcondition(entered and pos == -1, "مِرصاد — بوت", "مِرصاد أوبشن: دخول بوت")
+alertcondition(closed, "مِرصاد — خروج", "مِرصاد أوبشن: اقتراح خروج")
+alertcondition(entered, "مِرصاد — أي إشارة", "مِرصاد أوبشن: إشارة جديدة")

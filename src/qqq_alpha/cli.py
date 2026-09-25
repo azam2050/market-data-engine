@@ -222,7 +222,7 @@ def live(
     notifier = ConsoleNotifier(console)
     if settings.telegram_bot_token and settings.telegram_chat_id:
         # the desk's own cards and notes reach the operator only; the
-        # channels carry MIRSAD 9's reports and nothing else
+        # channels carry MIRSAD OPTION's reports and nothing else
         notifier = FanoutNotifier(
             notifier,
             TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id),

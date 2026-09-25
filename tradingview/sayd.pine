@@ -1,0 +1,257 @@
+// ══════════════════════════════════════════════════════════════════════════
+//  صَيْد  ·  SAYD
+//
+//  مؤشر واحد، قاعدة واحدة، خرجت من بحث آليّ في ٢٫١ مليون لحظة سوق:
+//
+//      حجم ≥ ٣× المعتاد  +  الدولار ≤ ٢ ATR  +  السعر عند طرف مدى اليوم
+//      ثم **لا تدخل** — انتظره يرجع لك ١ ATR.
+//
+//  ─────────────────────────────────────────────────────────────────────
+//  كيف خرجت: ٢٨ شرطاً من كل المدارس، والآلة جرّبت كل تركيباتها الثنائية
+//  والثلاثية — ٦٬٧٥١ قاعدة. الاختيار من ٢٠٢٣–٢٠٢٥ وحدها، والحكم من ٢٠٢٦
+//  التي لم تُلمس. ٧٠ رمزاً · الجلسة النظامية · آخر ساعة ونصف لا دخول.
+//
+//                      وصل الدولار   اتجاه صحيح   ينزل عليك   الوقت
+//    دخول فوري            ٧٦٫٤٪        ٤٥٫٦٪       −٢٫٣٠$     ١٩ د
+//    رجوع ٠٫٧٥ ATR        ٨٠٫٨٪        ٥٤٫٩٪       −١٫٥٣$     ١٤ د
+//    رجوع ١ ATR           ٨٢٫٥٪        ٥٨٫٢٪       −١٫٤٠$     ١٣ د
+//    رجوع ١٫٥ ATR         ٨٤٫٤٪        ٥٩٫٩٪       −١٫٣٢$     ١١ د
+//                                     (خط العشوائيّ ٥٠٪ و٣٩٪)
+//
+//  ونفس الترتيب في البناء ٢٣–٢٥. ثابت في الفترتين.
+//
+//  ─────────────────────────────────────────────────────────────────────
+//  وثلاثة أشياء تُقال بصراحة قبل أن تُستعمل:
+//
+//  ١) هذا ليس متنبّئاً بالاتجاه. القاعدة تقول «الدولار متاح اليوم» بـ٨٢٪،
+//     وتقولها في الجهتين معاً. ولا يوجد في الداتا كلها ما يعطي اتجاهاً
+//     فوق الستين — لا القمم والقيعان، ولا تبادل الأدوار، ولا المذبذبات،
+//     ولا خلطها. قِيست ٢٤ عائلة، كلّها على خط العشوائيّ بالضبط.
+//
+//  ٢) الحافة كلها في **الانتظار**، لا في الشرط. نفس الإشارة تماماً:
+//     تدخل فوراً ٤٥٫٦٪، وتنتظرها ترجع ١ ATR فتصير ٥٨٫٢٪.
+//
+//  ٣) «بلا وقف» ليست مجاناً. الوسط ينزل عليك ١٫٤٠$ قبل أن يأتي دولارك،
+//     والمؤشر يرسم لك هذا الخط بالذات حتى تعرف ما الذي ستحتمله.
+//  ══════════════════════════════════════════════════════════════════════
+//@version=5
+indicator("صَيْد", "SAYD", overlay = true, max_labels_count = 500,
+          max_lines_count = 500)
+
+// ═══════════════════════════════════════════════════════════ الإعدادات
+gR = "القاعدة"
+volMult = input.float(3.0, "الحجم ≥ ×المعتاد", minval = 1.5, maxval = 8.0, step = 0.5, group = gR,
+     tooltip = "المعتاد = وسيط حجم آخر ٣٠ شمعة قبل الحالية.\n\nارفعه فتقلّ الإشارات وتكون أنظف. اخفضه إلى ٢ فتكثر الإشارات وتضعف قليلاً — المقيس عند ٢ كان أقلّ بنقطتين.")
+maxDolATR = input.float(2.0, "الدولار ≤ × ATR على هذا الرمز", minval = 0.5, maxval = 10.0, step = 0.5, group = gR,
+     tooltip = "هذا هو الشرط الأهم في القاعدة كلها: هل الدولار هدف واقعي على هذا الرمز أصلاً؟\n\nعلى سهم متحرّك يساوي الدولار نصف ATR فالهدف قريب. وعلى سهم هادئ يساوي عشرة أضعاف ATR فالدولار لا يأتي أبداً — قِيس: يصل مرتين في الألف.\n\nأبقِه عند ٢. رفعه يفتح لك رموزاً لا يأتي فيها دولارك.")
+edgePct = input.float(20.0, "السعر عند طرف مدى اليوم — آخر ٪", minval = 5.0, maxval = 50.0, step = 5.0, group = gR,
+     tooltip = "الإشارة لا تُقبل إلا والسعر في أعلى أو أسفل هذه النسبة من مدى اليوم حتى الآن.\n\nوسّعه فتكثر الإشارات وتبتعد عن الأطراف.")
+dollarT = input.float(1.0, "الهدف بالدولار", minval = 0.25, maxval = 10.0, step = 0.25, group = gR,
+     tooltip = "هدفك على الأصل. كل أرقام المؤشر مقيسة على دولار كامل.")
+
+gE = "الدخول — وهنا الحافة كلها"
+backATR = input.float(1.0, "انتظر رجوعه × ATR", minval = 0.0, maxval = 3.0, step = 0.25, group = gE,
+     tooltip = "بعد الإشارة لا تدخل. المؤشر يرسم لك مستوىً أبعد بهذا المقدار وينتظر السعر يرجع إليه.\n\nصفر = دخول فوري: ٤٥٫٦٪ اتجاه و−٢٫٣٠$ نزولاً.\n٠٫٧٥ = ٥٤٫٩٪ و−١٫٥٣$ · تتعبّأ ٧٣٪ من المرات.\n١ = ٥٨٫٢٪ و−١٫٤٠$ · تتعبّأ ٦٦٪.\n١٫٥ = ٥٩٫٩٪ و−١٫٣٢$ · لكن تتعبّأ ٥٠٪ فقط.\n\nكلما زدته تحسّن كل شيء وقلّت الفرص. وواحد هو الاتزان المقيس.")
+waitBars = input.int(12, "مهلة الانتظار (شموع)", minval = 3, maxval = 40, group = gE,
+     tooltip = "إن لم يرجع السعر إلى مستواك خلال هذه المدة، تُلغى الإشارة ولا صفقة.\n\nولا تطارده. المطاردة هي الفرق بين ٥٨٪ و٤٥٪.")
+useStop = input.bool(false, "أغلق عند دولار ضدّك", group = gE,
+     tooltip = "مطفأ افتراضياً لأنك طلبت بلا وقف.\n\nمشغّل: تُغلق الصفقة إن نزل دولار ضدّك قبل دولارك — وهذا هو المقياس الذي أعطى ٥٨٫٢٪.\nمطفأ: تنتظر الدولار مهما نزل — يأتي ٨٢٫٥٪ من المرات، لكن الوسط ينزل عليك ١٫٤٠$ في الطريق، وهذا ما يقتل العقد.")
+maxSig = input.int(3, "أقصى إشارات في الجلسة (٠ = بلا حد)", minval = 0, maxval = 20, group = gE)
+coolBars = input.int(10, "أقل مسافة بين إشارتين (شموع)", minval = 1, maxval = 40, group = gE)
+
+gT = "الوقت"
+mktIn = input.string("تلقائي", "نوع السوق", options = ["تلقائي", "جلسة أمريكية", "٢٤ ساعة"], group = gT,
+     tooltip = "الجلسة الأمريكية تمنع الدخول في آخر ساعة ونصف — وهي قاعدة كل القياس.\nالذهب والعملات والكربتو تعمل ٢٤ ساعة فلا جلسة لها.")
+lateMin = input.int(90, "امنع الدخول في آخر … دقيقة", minval = 0, maxval = 240, group = gT,
+     tooltip = "كل أرقام هذا المؤشر مقيسة مع منع الدخول في آخر ساعة ونصف. تقليله يخرجك عن المقيس.")
+
+gV = "الشكل"
+showCard = input.bool(true, "أظهر البطاقة", group = gV)
+showLines = input.bool(true, "أظهر خطوط الدخول والهدف", group = gV)
+showPain = input.bool(true, "أظهر خط «ما ستحتمله»", group = gV,
+     tooltip = "خط رمادي عند ١٫٤٠$ تحت دخولك — وهو الوسط المقيس لما ينزل السعر عليك قبل أن يأتي دولارك.\n\nليس وقفاً. هو تذكير بأن ٨٢٪ ليست مجاناً.")
+cardPos = input.string("أعلى اليمين", "مكان البطاقة", options = ["أعلى اليمين", "أعلى اليسار", "أسفل اليمين", "أسفل اليسار"], group = gV)
+cardSz = input.string("عادي", "حجم البطاقة", options = ["صغير", "عادي", "كبير"], group = gV)
+
+cUp = color.new(#16c784, 0)
+cDn = color.new(#ea3943, 0)
+cGold = color.new(#e8b339, 0)
+cTxt = color.new(#e8eaed, 0)
+cMut = color.new(#8b949e, 0)
+cBg = color.new(#0d1117, 12)
+cHd = color.new(#161b22, 8)
+
+// ═════════════════════════════════════════════════════════════ الحساب
+atr = ta.atr(14)
+vMed = ta.median(volume, 30)[1]
+usEq = syminfo.type == "stock" or syminfo.type == "fund" or syminfo.type == "dr"
+mkt24 = mktIn == "٢٤ ساعة" or (mktIn == "تلقائي" and not usEq)
+intraday = timeframe.isintraday
+minsNY = hour(time, "America/New_York") * 60 + minute(time, "America/New_York")
+newSess = intraday and session.isfirstbar_regular
+lateBar = intraday and not mkt24 and lateMin > 0 and minsNY >= 960 - lateMin
+
+var float dayHi = na
+var float dayLo = na
+var int barsToday = 0
+var int sigCount = 0
+if newSess or na(dayHi)
+    dayHi := high
+    dayLo := low
+    barsToday := 0
+    sigCount := 0
+else
+    dayHi := math.max(dayHi, high)
+    dayLo := math.min(dayLo, low)
+    barsToday := barsToday + 1
+dayRng = math.max(dayHi - dayLo, syminfo.mintick)
+
+// ــ أرجل القاعدة الثلاث
+legVol = not na(vMed) and vMed > 0 and volume >= volMult * vMed
+legDol = atr > 0 and (dollarT / atr) <= maxDolATR
+atLo = (close - dayLo) / dayRng <= edgePct / 100.0
+atHi = (dayHi - close) / dayRng <= edgePct / 100.0
+legEdge = atLo or atHi
+budget = maxSig == 0 or sigCount < maxSig
+fresh = legVol and legDol and legEdge and barsToday >= 1 and not lateBar and budget
+
+// ═════════════════════════════════════════════ آلة الحالة: ترقّب ثم صفقة
+var int stage = 0
+var int armBar = -1
+var float lvlUp = na
+var float lvlDn = na
+var float armAtr = na
+var int lastSig = -10000
+var int pos = 0
+var float entry = na
+var float target = na
+var float pain = na
+var int entryBar = -1
+
+var int nSig = 0
+var int nFill = 0
+var int nWin = 0
+var int nLoss = 0
+var int nOpen = 0
+var float sumMin = 0.0
+var float worstNow = 0.0
+
+// ١) إشارة جديدة → نتسلّح عند الشمعة التالية
+if fresh and stage == 0 and pos == 0 and bar_index - lastSig >= coolBars
+    stage := 1
+    armBar := bar_index
+    armAtr := atr
+    lastSig := bar_index
+    sigCount := sigCount + 1
+    nSig := nSig + 1
+
+// ٢) الشمعة التالية: نرسم المستويين من افتتاحها
+if stage == 1 and bar_index == armBar + 1
+    lvlDn := open - backATR * armAtr
+    lvlUp := open + backATR * armAtr
+    stage := 2
+
+// ٣) الترقّب: أيّهما يُلمس أولاً هو الصفقة. والأسوأ أولاً داخل الشمعة.
+if stage == 2 and pos == 0
+    hitDn = low <= lvlDn
+    hitUp = high >= lvlUp
+    side = hitDn and hitUp ? (open - lvlDn <= lvlUp - open ? 1 : -1) : hitDn ? 1 : hitUp ? -1 : 0
+    if side != 0
+        pos := side
+        entry := side == 1 ? lvlDn : lvlUp
+        target := entry + side * dollarT
+        pain := entry - side * 1.40
+        entryBar := bar_index
+        stage := 0
+        nFill := nFill + 1
+        worstNow := 0.0
+    else if bar_index > armBar + waitBars
+        stage := 0
+        lvlDn := na
+        lvlUp := na
+
+// ٤) داخل الصفقة
+exitTxt = ""
+if pos != 0
+    adv = (pos == 1 ? low : high) - entry
+    worstNow := math.min(worstNow, adv * pos)
+    lose = useStop and ((pos == 1 ? low : high) - entry) * pos <= -dollarT
+    winn = ((pos == 1 ? high : low) - entry) * pos >= dollarT
+    eod = intraday and not mkt24 and minsNY >= 955
+    if lose
+        exitTxt := "أُغلقت بدولار ضدّك"
+        nLoss := nLoss + 1
+        pos := 0
+    else if winn
+        exitTxt := "وصل الدولار"
+        nWin := nWin + 1
+        sumMin := sumMin + (bar_index - entryBar) * math.max(timeframe.in_seconds() / 60, 1)
+        pos := 0
+    else if eod
+        exitTxt := "جرس الجلسة — لم يأتِ"
+        nOpen := nOpen + 1
+        pos := 0
+
+// ═══════════════════════════════════════════════════════════════ الرسم
+plotshape(fresh and stage == 1 and bar_index == armBar, "إشارة", shape.diamond,
+     location.abovebar, cGold, size = size.tiny)
+plot(showLines and stage == 2 ? lvlDn : na, "مستوى الكول", cUp, 2, plot.style_linebr)
+plot(showLines and stage == 2 ? lvlUp : na, "مستوى البوت", cDn, 2, plot.style_linebr)
+plot(showLines and pos != 0 ? entry : na, "الدخول", cGold, 2, plot.style_linebr)
+plot(showLines and pos != 0 ? target : na, "الهدف", pos == 1 ? cUp : cDn, 2, plot.style_linebr)
+plot(showPain and pos != 0 ? pain : na, "ما ستحتمله", cMut, 1, plot.style_linebr)
+
+if pos != 0 and pos != pos[1]
+    lb = label.new(bar_index, pos == 1 ? low : high,
+         (pos == 1 ? "كول " : "بوت ") + str.tostring(entry, format.mintick),
+         style = pos == 1 ? label.style_label_up : label.style_label_down,
+         color = pos == 1 ? cUp : cDn, textcolor = color.white, size = size.small)
+if exitTxt != ""
+    label.new(bar_index, close, exitTxt, style = label.style_label_left,
+         color = cBg, textcolor = exitTxt == "وصل الدولار" ? cUp : cMut, size = size.tiny)
+
+// ═══════════════════════════════════════════════════════════════ البطاقة
+f_pos() =>
+    cardPos == "أعلى اليمين" ? position.top_right : cardPos == "أعلى اليسار" ? position.top_left :
+     cardPos == "أسفل اليمين" ? position.bottom_right : position.bottom_left
+f_sz() =>
+    cardSz == "صغير" ? size.tiny : cardSz == "كبير" ? size.normal : size.small
+
+var table cd = table.new(f_pos(), 2, 8, border_width = 1, border_color = color.new(#30363d, 40))
+f_row(int r, string a, string b, color cb_) =>
+    table.cell(cd, 0, r, a, text_color = cMut, text_size = f_sz(), text_halign = text.align_right, bgcolor = cBg)
+    table.cell(cd, 1, r, b, text_color = cb_, text_size = f_sz(), text_halign = text.align_left, bgcolor = cBg)
+
+if showCard and barstate.islast
+    dATR = atr > 0 ? dollarT / atr : na
+    okTxt = na(dATR) ? "—" : str.tostring(dATR, "#.##") + "× ATR  ·  " +
+         (dATR <= maxDolATR ? "الرمز صالح" : "الدولار بعيد على هذا الرمز")
+    volTxt = na(vMed) or vMed <= 0 ? "—" : str.tostring(volume / vMed, "#.#") + "× المعتاد"
+    placeTxt = atLo ? "عند قاع اليوم" : atHi ? "عند قمة اليوم" : "في وسط المدى"
+    stTxt = pos != 0 ? ((pos == 1 ? "كول مفتوح عند " : "بوت مفتوح عند ") + str.tostring(entry, format.mintick)) :
+         stage == 2 ? ("ترقّب  ·  كول عند " + str.tostring(lvlDn, format.mintick) +
+         "  ·  بوت عند " + str.tostring(lvlUp, format.mintick)) :
+         stage == 1 ? "إشارة — المستويان يُرسمان الشمعة القادمة" : "لا إشارة"
+    done = nWin + nLoss + nOpen
+    hitP = done > 0 ? 100.0 * nWin / done : na
+    fillP = nSig > 0 ? 100.0 * nFill / nSig : na
+    table.cell(cd, 0, 0, "صَيْد", text_color = cGold, text_size = f_sz(), text_halign = text.align_right, bgcolor = cHd)
+    table.cell(cd, 1, 0, syminfo.ticker + "  ·  " + timeframe.period + (mkt24 ? "  ·  ٢٤ ساعة" : ""),
+         text_color = cTxt, text_size = f_sz(), text_halign = text.align_left, bgcolor = cHd)
+    f_row(1, "هل الدولار واقعي؟", okTxt, legDol ? cUp : cDn)
+    f_row(2, "الحجم الآن", volTxt, legVol ? cUp : cMut)
+    f_row(3, "موقع السعر", placeTxt, legEdge ? cUp : cMut)
+    f_row(4, "الحالة", stTxt, pos != 0 ? cGold : stage == 2 ? cTxt : cMut)
+    f_row(5, "نزل عليك حتى الآن", pos == 0 ? "—" : str.tostring(worstNow, "#.##") + "$",
+         pos == 0 ? cMut : worstNow < -1.40 ? cDn : cTxt)
+    f_row(6, "على هذا الشارت", str.tostring(nSig) + " إشارة  ·  تعبّأ " +
+         (na(fillP) ? "—" : str.tostring(fillP, "#") + "٪") + "  ·  وصل الدولار " +
+         (na(hitP) ? "—" : str.tostring(hitP, "#") + "٪"), cTxt)
+    f_row(7, "متوسط زمن الوصول", nWin > 0 ? str.tostring(sumMin / nWin, "#") + " دقيقة" : "—", cMut)
+
+// ═══════════════════════════════════════════════════════════════ التنبيهات
+alertcondition(fresh and stage == 1 and bar_index == armBar, "صَيْد — إشارة",
+     "صَيْد: إشارة جديدة. المستويان يُرسمان الشمعة القادمة.")
+alertcondition(pos == 1 and pos[1] != 1, "صَيْد — كول", "صَيْد: دخول كول عند المستوى.")
+alertcondition(pos == -1 and pos[1] != -1, "صَيْد — بوت", "صَيْد: دخول بوت عند المستوى.")
+alertcondition(exitTxt == "وصل الدولار", "صَيْد — وصل الهدف", "صَيْد: وصل الدولار.")

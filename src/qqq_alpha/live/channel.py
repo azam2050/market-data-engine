@@ -1,4 +1,4 @@
-"""The channels — where MIRSAD 9's reports go.
+"""The channels — where MIRSAD OPTION's reports go.
 
 Nothing here is a signal. A channel receives the indicator's after-the-bell
 report cards (daily, weekly, monthly) and nothing else; the posting
