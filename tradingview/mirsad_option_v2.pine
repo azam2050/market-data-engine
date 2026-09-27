@@ -37,10 +37,17 @@ useRange = input.bool(false, "حدّ الصندوق (سوق عرضي)", group = 
      tooltip = "في السوق العرضي: الدخول من طرف الصندوق نحو وسطه. مطفأة لأن العرضي يذيب قيمة العقد بلا حركة. شغّلها إن كنت تتاجر العرضي بقصد.")
 revK = input.float(1.5, "حجم شمعة الانعكاس × ATR", minval = 0.8, maxval = 4.0, step = 0.25, group = gS,
      tooltip = "ارفعه فتقلّ إشارات الانعكاس وتصير الشمعة أوضح.")
-useBrk = input.bool(true, "كسر القمة والقاع (أي سوق)", group = gS,
-     tooltip = "شمعة قوية بحجم عالٍ تغلق فوق أعلى قمة أو تحت أدنى قاع لآخر شموع. تمسك الانطلاقات السريعة — مثل نزول الافتتاح الحاد — التي لا ترجع للغيمة.")
+useBrk = input.bool(true, "تبادل الأدوار (كسر ثم اختبار)", group = gS,
+     tooltip = "الكسر لا يُدخلك. شمعة قوية بحجم عالٍ تكسر قمة (أو قاعاً) فيُحفظ المستوى المكسور، ثم ينتظر المؤشر رجوع السعر إليه، ويدخل مع شمعة ترتدّ منه — القمة المكسورة صارت أرضية.\nهكذا لا تدخل على رأس الاختراق.")
 brkN = input.int(20, "الكسر: قمة/قاع آخر … شمعة", minval = 5, maxval = 100, group = gS)
 brkVol = input.float(1.5, "الكسر: حجم الشمعة ≥ × المعتاد", minval = 1.0, maxval = 5.0, step = 0.25, group = gS)
+rrWait = input.int(15, "مهلة الرجوع للمستوى (شموع)", minval = 3, maxval = 60, group = gS,
+     tooltip = "إن لم يرجع السعر يختبر المستوى المكسور خلال هذه المدة، يُنسى الكسر.")
+rrTol = input.float(0.25, "قرب الاختبار من المستوى × ATR", minval = 0.0, maxval = 1.5, step = 0.05, group = gS)
+confirmNext = input.bool(true, "انتظر التأكيد قبل الدخول", group = gS,
+     tooltip = "إشارات الغيمة والانعكاس لا تُدخلك فوراً: تنتظر شمعة تغلق فوق قمة شمعة الإشارة (للكول) أو تحت قاعها (للبوت) خلال ٣ شموع. إن لم يأتِ التأكيد تُلغى.")
+avoidSide = input.bool(true, "لا إشارات في السوق العرضي", group = gS,
+     tooltip = "يصمت المؤشر حين تكون الحالة «عرضي» — السوق بلا اتجاه والعقد يذوب.")
 needTrend = input.bool(false, "مع ميل متوسط الاتجاه فقط", group = gS,
      tooltip = "يمنع الكول والاتجاه العام نازل، والبوت والاتجاه العام طالع. شغّله إن أزعجتك إشارات عكس ما تراه.")
 
@@ -240,7 +247,7 @@ f_tf(string p) =>
     f_ar(p) + " دقائق"
 
 f_why(int w) =>
-    w == 1 ? "ارتداد الاتجاه" : w == 2 ? "حدّ الصندوق" : w == 3 ? "انعكاس" : w == 4 ? "كسر القمة/القاع" : "—"
+    w == 1 ? "ارتداد الاتجاه" : w == 2 ? "حدّ الصندوق" : w == 3 ? "انعكاس" : w == 4 ? "تبادل الأدوار" : "—"
 
 f_sigName(int w) =>
     showWhy ? f_why(w) : "إشارة مِرصاد"
@@ -279,8 +286,26 @@ f_engine() =>
     hiN_ = ta.highest(high, brkN)[1]
     loN_ = ta.lowest(low, brkN)[1]
     rvE_ = volume / math.max(nz(ta.sma(volume, 20)[1]), 1)
-    l4 = useBrk and rg_ > 0 and close > hiN_ and bd_ >= 0.6 * a_ and (close - low) >= 0.7 * rg_ and rvE_ >= brkVol
-    s4 = useBrk and rg_ > 0 and close < loN_ and -bd_ >= 0.6 * a_ and (high - close) >= 0.7 * rg_ and rvE_ >= brkVol
+    // تبادل الأدوار: الكسر يحفظ المستوى، والدخول عند اختباره من الجهة الأخرى
+    var float rrU = na
+    var int rrUBar = na
+    var float rrD = na
+    var int rrDBar = na
+    brkU_ = rg_ > 0 and close > hiN_ and bd_ >= 0.5 * a_ and rvE_ >= brkVol
+    brkD_ = rg_ > 0 and close < loN_ and -bd_ >= 0.5 * a_ and rvE_ >= brkVol
+    l4 = useBrk and not na(rrU) and bar_index > rrUBar and low <= rrU + rrTol * a_ and close > rrU and close > open
+    s4 = useBrk and not na(rrD) and bar_index > rrDBar and high >= rrD - rrTol * a_ and close < rrD and close < open
+    // بعد الفحص: استهلاك المستوى أو إلغاؤه أو تسجيل كسر جديد
+    if l4 or (not na(rrU) and (bar_index - rrUBar > rrWait or close < rrU - 0.5 * a_))
+        rrU := na
+    if s4 or (not na(rrD) and (bar_index - rrDBar > rrWait or close > rrD + 0.5 * a_))
+        rrD := na
+    if brkU_
+        rrU := hiN_
+        rrUBar := bar_index
+    if brkD_
+        rrD := loN_
+        rrDBar := bar_index
     sd_ = l1 or l2 or l3 or l4 ? 1 : s1 or s2 or s3 or s4 ? -1 : 0
     wh_ = l1 or s1 ? 1 : l2 or s2 ? 2 : l3 or s3 ? 3 : l4 or s4 ? 4 : 0
     [sd_, st_, wh_, ct_, cb_, a_, ax_]
@@ -336,7 +361,7 @@ allowS = dirIn != "كول فقط"
 trendUp = eT > eT[10]
 trendDn = eT < eT[10]
 budget = maxSig == 0 or sigToday < maxSig
-gateOk = barsToday >= 1 and not lateBar and budget
+gateOk = barsToday >= 1 and not lateBar and budget and not (avoidSide and state == 0)
 // ــ مناطق العرض والطلب: من القمم والقيعان المؤكّدة فقط (تظهر بعد pivN شمعة — لا نظر للمستقبل)
 var array<float> supTop = array.new<float>()
 var array<float> supBot = array.new<float>()
@@ -464,8 +489,32 @@ var array<string> logSym = array.new<string>()
 var array<string> logTxt = array.new<string>()
 var array<float> logRes = array.new<float>()
 
-sigL = rawL and barstate.isconfirmed and pos == 0
-sigS = rawS and barstate.isconfirmed and pos == 0
+// إشارة الغيمة والانعكاس تنتظر شمعة تأكيد · تبادل الأدوار تأكيده فيه
+var int pendSd = 0
+var float pendLvl = na
+var int pendBar = na
+var int pendWhy = 0
+candL = rawL and barstate.isconfirmed and pos == 0
+candS = rawS and barstate.isconfirmed and pos == 0
+confL = pendSd == 1 and barstate.isconfirmed and pos == 0 and bar_index > pendBar and close > pendLvl and gateOk
+confS = pendSd == -1 and barstate.isconfirmed and pos == 0 and bar_index > pendBar and close < pendLvl and gateOk
+sigL = confirmNext ? (confL or (candL and rawWhy == 4)) : candL
+sigS = confirmNext ? (confS or (candS and rawWhy == 4)) : candS
+entWhy = confL or confS ? pendWhy : rawWhy
+if sigL or sigS
+    pendSd := 0
+else if confirmNext and candL and rawWhy != 4
+    pendSd := 1
+    pendLvl := high
+    pendBar := bar_index
+    pendWhy := rawWhy
+else if confirmNext and candS and rawWhy != 4
+    pendSd := -1
+    pendLvl := low
+    pendBar := bar_index
+    pendWhy := rawWhy
+else if pendSd != 0 and barstate.isconfirmed and bar_index >= pendBar + 3
+    pendSd := 0
 preL = rawL and barstate.isrealtime and not barstate.isconfirmed and pos == 0
 preS = rawS and barstate.isrealtime and not barstate.isconfirmed and pos == 0
 conWindow = time >= last_bar_time - conDays * 86400000
@@ -585,7 +634,7 @@ if sigL or sigS
     sP := close - side * unit
     peakR := 0.0
     eBar := bar_index
-    eWhy := rawWhy
+    eWhy := entWhy
     eQual := side == 1 ? qL : qS
     sigToday += 1
     conMsg := ""
@@ -633,11 +682,11 @@ if sigL or sigS
     cTxtL = conSym == "" ? "" : "\n" + conName +
          (na(conEntry) ? "" : "  ·  " + str.tostring(conEntry * 100, "#") + "$")
     label.new(bar_index, side == 1 ? low : high,
-         (side == 1 ? "كول" : "بوت") + " · " + f_sigName(rawWhy) + " · جودة " + str.tostring(eQual) + cTxtL,
+         (side == 1 ? "كول" : "بوت") + " · " + f_sigName(entWhy) + " · جودة " + str.tostring(eQual) + cTxtL,
          style = side == 1 ? label.style_label_up : label.style_label_down,
          color = side == 1 ? cUp : cDn, textcolor = color.white, size = size.small)
     alert("مِرصاد أوبشن: " + (side == 1 ? "كول " : "بوت ") + syminfo.ticker + " عند " +
-         str.tostring(close, format.mintick) + " · " + f_sigName(rawWhy) + " · جودة " + str.tostring(eQual) +
+         str.tostring(close, format.mintick) + " · " + f_sigName(entWhy) + " · جودة " + str.tostring(eQual) +
          (conName == "" ? "" : " · العقد " + conName), alert.freq_once_per_bar_close)
 
 if preL or preS
@@ -695,11 +744,13 @@ if barstate.islast and not scanOnly
     stCol = state == 1 ? cUp : state == -1 ? cDn : state == 0 ? cMut : cGold
     f_row(2, "حالة السوق", f_state(state), "قوة الاتجاه " + f_n(adx, "#"),
          mobile ? "" : f_tf(otherTf) + " " + (na(stOther) ? "—" : f_state(int(stOther))), stCol)
-    sd1 = pos == 1 ? "كول" : pos == -1 ? "بوت" : preL ? "استعداد كول" : preS ? "استعداد بوت" : "لا صفقة"
-    sd2 = pos != 0 ? f_sigName(eWhy) : preL or preS ? "تتأكد بإغلاق الشمعة" : ""
+    sd1 = pos == 1 ? "كول" : pos == -1 ? "بوت" : pendSd == 1 ? "انتظار تأكيد كول" : pendSd == -1 ? "انتظار تأكيد بوت" :
+         preL ? "استعداد كول" : preS ? "استعداد بوت" : "لا صفقة"
+    sd2 = pos != 0 ? f_sigName(eWhy) : pendSd != 0 ? (pendSd == 1 ? "إغلاق فوق " : "إغلاق تحت ") + f_n(pendLvl, "#.##") :
+         preL or preS ? "تتأكد بإغلاق الشمعة" : ""
     sd3 = pos != 0 ? "دخول " + f_n(eP, "#.##") + SEP + "جودة " + f_n(eQual, "#") :
          preL ? "جودة " + f_n(qL, "#") : preS ? "جودة " + f_n(qS, "#") : ""
-    f_row(3, "الإشارة", sd1, sd2, sd3, pos == 1 or preL ? cUp : pos == -1 or preS ? cDn : cMut)
+    f_row(3, "الإشارة", sd1, sd2, sd3, pos == 1 or preL or pendSd == 1 ? cUp : pos == -1 or preS or pendSd == -1 ? cDn : cMut)
     gNow = conSym != "" and not na(conNow) and not na(conEntry) and conEntry > 0 ? (conNow / conEntry - 1) * 100 : na
     if conSym != ""
         f_row(4, "العقد", LRM + syminfo.ticker + LRM + "  " + conName, "مثبّت",
