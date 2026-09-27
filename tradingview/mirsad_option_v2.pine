@@ -23,6 +23,8 @@ dirIn = input.string("الاتجاهان", "الاتجاه", options = ["الا�
      tooltip = "اختر جهة واحدة إن كنت تتاجر جهة واحدة اليوم ولا تريد أن تشغلك الأخرى.")
 maxSig = input.int(3, "أقصى إشارات في الجلسة (٠ = بلا حد)", minval = 0, maxval = 10, group = gM,
      tooltip = "بعد هذا العدد يصمت المؤشر حتى الجلسة التالية. قلّله إن كنت تريد صفقة أو اثنتين فقط في اليوم.")
+minQual = input.int(0, "أدنى جودة للإشارة (٠ = الكل)", minval = 0, maxval = 100, group = gM,
+     tooltip = "الجودة وصفٌ لظروف الإشارة من ١٠٠: قوة الاتجاه · السيولة · القوة مقابل السوق · مجال الحركة الباقي · قوة الشمعة.\nليست احتمال نجاح. ارفعها لترى إشارات أقل في ظروف أوضح.")
 mobile = input.bool(false, "وضع الجوال", group = gM,
      tooltip = "بطاقة أصغر بالمعلومات الأساسية فقط، وتخفي الباحث — مناسبة لشاشة الجوال.")
 
@@ -75,6 +77,10 @@ incIn = input.float(0.0, "مسافة السترايك (٠ = تلقائي)", minv
 priceMin = input.float(25, "أقل تكلفة للعقد $", minval = 0, group = gC, inline = "pr")
 priceMax = input.float(300, "أعلى $", minval = 1, group = gC, inline = "pr",
      tooltip = "التكلفة = سعر العقد × ١٠٠. عقد أرخص من اللازم غالباً بعيد عن السعر ويتحرك ببطء.")
+allowOtm = input.bool(true, "اسمح بعقود خارج المال", group = gC,
+     tooltip = "مطفأ: يُختار العقد على السعر أو داخل المال فقط — أغلى، ويذوب أبطأ.")
+conStopPct = input.int(0, "وقف العقد ٪ (٠ = وقف السهم فقط)", minval = 0, maxval = 90, group = gC,
+     tooltip = "يخرجك إن خسر العقد هذه النسبة من سعر دخوله، ولو لم يضرب وقف السهم. المؤشر يكتب لك السعر بالضبط لتضعه أمر وقف في منصتك.")
 strikeFmt = input.string("745.0", "صيغة السترايك في الرمز", options = ["745.0", "745"], group = gC,
      tooltip = "صيغة ترايدنغ فيو المعتادة 745.0. غيّرها فقط إن ظهر «لا عقد مطابق» على كل الرموز.")
 conPrefix = input.string("OPRA:", "بادئة رمز العقد", group = gC)
@@ -103,6 +109,7 @@ cardPos = input.string("أعلى اليمين", "مكان البطاقة", optio
 scanPos = input.string("أسفل اليمين", "مكان الباحث", options = ["أعلى اليمين", "أعلى اليسار", "أسفل اليمين", "أسفل اليسار"], group = gV)
 cardSz = input.string("عادي", "حجم الخط", options = ["صغير", "عادي", "كبير"], group = gV)
 showLines = input.bool(true, "خطوط الدخول والوقف والأهداف", group = gV)
+nTg = input.int(3, "عدد أهداف السهم على الشارت", minval = 1, maxval = 5, group = gV)
 
 // ═══════════════════════════════════════════════════════════ الألوان
 cUp = color.new(#16c784, 0)
@@ -198,7 +205,14 @@ f_scan() =>
     rv_ = ta.sma(volume, 3) / math.max(nz(ta.sma(volume, 60)[3]), 1)
     last_ = ta.valuewhen(sd_ != 0, sd_, 0)
     ago_ = ta.barssince(sd_ != 0)
-    [nz(last_), nz(ago_, 999), st_, f_chg(), rv_]
+    px_ = ta.valuewhen(sd_ != 0, close, 0)
+    inv_ = nz(last_) == 1 ? cb_ : nz(last_) == -1 ? ct_ : na
+    since_ = na(px_) or px_ == 0 ? na : (close / px_ - 1) * 100 * nz(last_)
+    [nz(last_), nz(ago_, 999), st_, f_chg(), rv_, inv_, since_]
+
+f_st1() =>
+    [sd_, st_, wh_, ct_, cb_, a_, ax_] = f_engine()
+    st_[1]
 
 // ═════════════════════════════════════════════════════════════ الحساب
 [rawSide, state, rawWhy, cTop, cBot, atr, adx] = f_engine()
@@ -234,8 +248,8 @@ trendUp = eT > eT[10]
 trendDn = eT < eT[10]
 budget = maxSig == 0 or sigToday < maxSig
 gateOk = barsToday >= 1 and not lateBar and budget
-rawL = rawSide == 1 and allowL and (not needTrend or trendUp) and gateOk
-rawS = rawSide == -1 and allowS and (not needTrend or trendDn) and gateOk
+rawL0 = rawSide == 1 and allowL and (not needTrend or trendUp) and gateOk
+rawS0 = rawSide == -1 and allowS and (not needTrend or trendDn) and gateOk
 
 // عدّاد الحركة والقوة مقابل السوق
 dAtr = request.security(syminfo.tickerid, "D", ta.atr(14)[1], lookahead = barmerge.lookahead_off)
@@ -245,6 +259,27 @@ myChg = f_chg()
 rsVsMkt = nz(myChg) - nz(spyChg)
 usedPct = na(dAtr) or dAtr <= 0 ? na : (dayHi - dayLo) / dAtr * 100
 tgtShare = na(dRng) or dRng <= 0 ? na : dollarTgt / dRng
+qqqChg = request.security("QQQ", timeframe.period, f_chg(), ignore_invalid_symbol = true)
+rvNow = ta.sma(volume, 3) / math.max(nz(ta.sma(volume, 60)[3]), 1)
+otherTf = timeframe.period == "3" ? "5" : timeframe.period == "5" ? "15" : "5"
+stOther = request.security(syminfo.tickerid, otherTf, f_st1(), lookahead = barmerge.lookahead_on)
+tfMs = timeframe.in_seconds() * 1000
+stockLive = barstate.isrealtime and timenow - time < 2 * tfMs
+
+// جودة الإعداد من ١٠٠ — وصفٌ للظروف، لا احتمال نجاح
+f_qual(int sd) =>
+    q1 = math.min(nz(adx), 40) / 40 * 20
+    q2 = math.min(nz(rvNow), 3) / 3 * 20
+    q3 = math.max(math.min(rsVsMkt * sd, 1.5), 0) / 1.5 * 20
+    q4 = na(usedPct) ? 10.0 : usedPct < 60 ? 20.0 : usedPct < 100 ? 10.0 : 0.0
+    rg = high - low
+    q5 = rg > 0 ? math.max((sd == 1 ? close - low : high - close) / rg, 0) * 20 : 0.0
+    int(math.round(q1 + q2 + q3 + q4 + q5))
+
+qL = f_qual(1)
+qS = f_qual(-1)
+rawL = rawL0 and qL >= minQual
+rawS = rawS0 and qS >= minQual
 
 // ═════════════════════════════════════════════════════ الصفقة على السهم
 var int pos = 0
@@ -254,6 +289,7 @@ var float unit = na
 var float peakR = 0.0
 var int eBar = na
 var int eWhy = 0
+var int eQual = 0
 var string exitTxt = ""
 var int exitAt = na
 
@@ -261,9 +297,15 @@ var int exitAt = na
 var string conSym = ""
 var float conEntry = na
 var float conNow = na
+var float conHiNow = na
+var float conLo = na
+var float conT = na
+var float conMax = na
 var float conPeak = 0.0
 var bool conLock = false
+var float conLockPx = na
 var string conMsg = ""
+var int tgHit = 0
 
 // السجلّ الصادق
 var int nTr = 0
@@ -273,6 +315,9 @@ var float sumPeakR = 0.0
 var int nCon = 0
 var float sumCon = 0.0
 var float sumConPeak = 0.0
+var array<string> logSym = array.new<string>()
+var array<string> logTxt = array.new<string>()
+var array<float> logRes = array.new<float>()
 
 sigL = rawL and barstate.isconfirmed and pos == 0
 sigS = rawS and barstate.isconfirmed and pos == 0
@@ -280,39 +325,45 @@ preL = rawL and barstate.isrealtime and not barstate.isconfirmed and pos == 0
 preS = rawS and barstate.isrealtime and not barstate.isconfirmed and pos == 0
 conWindow = time >= timenow - conDays * 86400000
 
-// ــ ١) الخروج أولاً (قبل أي دخول جديد)
+// ــ ١) الخروج أولاً
 exitNow = false
 exitReason = ""
 exitPx = close
+conExitPx = float(na)
 if pos != 0 and bar_index > eBar
     favR = ((pos == 1 ? high : low) - eP) * pos / unit
-    peakR := math.max(peakR, favR)
     stopHit = pos == 1 ? low <= sP : high >= sP
     curR = (close - eP) * pos / unit
-    // العقد الحيّ
     conOk = conSym != "" and not na(conEntry) and conEntry > 0
     if conOk
-        [cc_, ch_] = request.security(conSym, timeframe.period, [close, high], ignore_invalid_symbol = true)
+        [cc_, ch_, cl_, ct_] = request.security(conSym, timeframe.period, [close, high, low, time], ignore_invalid_symbol = true)
         conNow := cc_
-        if not na(ch_)
-            conPeak := math.max(conPeak, (ch_ / conEntry - 1) * 100)
-    gainC = conOk and not na(conNow) ? (conNow / conEntry - 1) * 100 : na
-    lockHit = false
-    if exitMode == "قفل الربح"
-        if not na(gainC)
-            conLock := conPeak >= lockAfter
-            lockLvl = math.max(5.0, conPeak * (1 - giveback / 100.0))
-            lockHit := conLock and gainC <= lockLvl
-        else
-            lockLvlR = math.max(0.1, peakR * (1 - giveback / 100.0))
-            lockHit := peakR >= 1.0 and curR <= lockLvlR
+        conHiNow := ch_
+        conLo := cl_
+        conT := ct_
+    // مستوى القفل من القمة **قبل** هذه الشمعة، ثم يُفحص قاعها — الأسوأ أولاً
+    conLockPx := conOk and exitMode == "قفل الربح" and conPeak >= lockAfter ?
+         conEntry * (1 + math.max(5.0, conPeak * (1 - giveback / 100.0)) / 100) : na
+    conStopPx = conOk and conStopPct > 0 ? conEntry * (1 - conStopPct / 100.0) : na
+    lockHitC = not na(conLockPx) and not na(conLo) and conLo <= conLockPx
+    cStopHit = not na(conStopPx) and not na(conLo) and conLo <= conStopPx
+    lockLvlR = math.max(0.1, peakR * (1 - giveback / 100.0))
+    lockHitR = exitMode == "قفل الربح" and (not conOk or na(conNow)) and peakR >= 1.0 and curR <= lockLvlR
     cloudHit = exitMode == "إغلاق خلف الغيمة" and (pos == 1 ? close < cBot : close > cTop)
     oppHit = pos == 1 ? rawS and barstate.isconfirmed : rawL and barstate.isconfirmed
     if stopHit
         exitNow := true
-        exitReason := "وقف"
+        exitReason := "وقف السهم"
         exitPx := sP
-    else if barstate.isconfirmed and lockHit
+    else if cStopHit
+        exitNow := true
+        exitReason := "وقف العقد"
+        conExitPx := conStopPx
+    else if lockHitC
+        exitNow := true
+        exitReason := "قفل الربح"
+        conExitPx := conLockPx
+    else if barstate.isconfirmed and lockHitR
         exitNow := true
         exitReason := "قفل الربح"
     else if barstate.isconfirmed and cloudHit
@@ -324,6 +375,19 @@ if pos != 0 and bar_index > eBar
     else if barstate.isconfirmed and bellBar
         exitNow := true
         exitReason := "جرس الجلسة"
+    // بعد الفحص فقط: تحديث القمم
+    peakR := math.max(peakR, favR)
+    if conOk and not na(conHiNow)
+        conPeak := math.max(conPeak, (conHiNow / conEntry - 1) * 100)
+        conMax := na(conMax) ? conHiNow : math.max(conMax, conHiNow)
+    conLock := conPeak >= lockAfter
+    // تنبيه عند كل هدف جديد للعقد
+    hits = (conPeak >= tg1 ? 1 : 0) + (conPeak >= tg2 ? 1 : 0) + (conPeak >= tg3 ? 1 : 0) +
+         (conPeak >= tg4 ? 1 : 0) + (conPeak >= tg5 ? 1 : 0)
+    if hits > tgHit and not exitNow
+        alert("مِرصاد أوبشن: " + syminfo.ticker + " · العقد حقق الهدف " + str.tostring(hits) +
+             " (+" + str.tostring(conPeak, "#") + "٪) — ارفع وقف العقد", alert.freq_once_per_bar)
+        tgHit := hits
 
 if exitNow
     rR = (exitPx - eP) * pos / unit
@@ -331,23 +395,39 @@ if exitNow
     nWin += rR > 0 ? 1 : 0
     sumR += rR
     sumPeakR += peakR
-    conRes = conSym != "" and not na(conEntry) and not na(conNow) ? (conNow / conEntry - 1) * 100 : na
+    cOut = not na(conExitPx) ? conExitPx : conNow
+    conRes = conSym != "" and not na(conEntry) and not na(cOut) ? (cOut / conEntry - 1) * 100 : na
     if not na(conRes)
         nCon += 1
         sumCon += conRes
         sumConPeak += conPeak
+        array.unshift(logSym, str.replace_all(conSym, conPrefix, ""))
+        array.unshift(logTxt, "دخول " + str.tostring(conEntry, "0.00") + "  ·  أعلى " +
+             (na(conMax) ? "—" : str.tostring(conMax, "0.00")) + "  ·  خروج " + str.tostring(cOut, "0.00") +
+             "  ·  " + f_sg(conRes, "#") + "٪  ·  " + exitReason)
+        array.unshift(logRes, conRes)
+        if array.size(logSym) > 5
+            array.pop(logSym)
+            array.pop(logTxt)
+            array.pop(logRes)
     exitTxt := exitReason + (na(conRes) ? "  ·  " + f_sg(rR, "0.00") + "R" :
          "  ·  العقد " + f_sg(conRes, "#") + "٪ (القمة " + f_sg(conPeak, "#") + "٪)")
     exitAt := bar_index
     label.new(bar_index, pos == 1 ? high : low, "خروج · " + exitTxt,
          style = pos == 1 ? label.style_label_down : label.style_label_up,
-         color = color.new(#161b22, 0), textcolor = rR > 0 ? cUp : cMut, size = size.small)
+         color = color.new(#161b22, 0), textcolor = (na(conRes) ? rR : conRes) > 0 ? cUp : cMut, size = size.small)
+    alert("مِرصاد أوبشن: خروج " + syminfo.ticker + " · " + exitTxt, alert.freq_once_per_bar)
     pos := 0
     conSym := ""
     conEntry := na
     conNow := na
+    conHiNow := na
+    conLo := na
+    conMax := na
     conPeak := 0.0
     conLock := false
+    conLockPx := na
+    tgHit := 0
 
 // ــ ٢) الدخول
 if sigL or sigS
@@ -359,6 +439,7 @@ if sigL or sigS
     peakR := 0.0
     eBar := bar_index
     eWhy := rawWhy
+    eQual := side == 1 ? qL : qS
     sigToday += 1
     conMsg := ""
     if conOn and manualSym != ""
@@ -374,14 +455,14 @@ if sigL or sigS
         if strikeMode == "حسب نطاق السعر"
             for j = 0 to 3
                 off = j == 0 ? 0.0 : j == 1 ? 1.0 : j == 2 ? -1.0 : 2.0
-                if pick == ""
+                if pick == "" and (allowOtm or off <= 0)
                     sym_ = f_occ(root, expT, side, kAtm + side * off * inc)
                     px_ = request.security(sym_, timeframe.period, close, ignore_invalid_symbol = true)
                     if not na(px_) and px_ * 100 >= priceMin and px_ * 100 <= priceMax
                         pick := sym_
                         pickPx := px_
         else
-            off1 = strikeMode == "داخل المال بدرجة" ? -1.0 : strikeMode == "خارج المال بدرجة" ? 1.0 : 0.0
+            off1 = strikeMode == "داخل المال بدرجة" ? -1.0 : strikeMode == "خارج المال بدرجة" and allowOtm ? 1.0 : 0.0
             sym1 = f_occ(root, expT, side, kAtm + side * off1 * inc)
             px1 = request.security(sym1, timeframe.period, close, ignore_invalid_symbol = true)
             if not na(px1)
@@ -393,15 +474,18 @@ if sigL or sigS
         else
             conMsg := "لا عقد مطابق — راجع مسافة السترايك أو نطاق السعر"
     conNow := conEntry
+    conMax := conEntry
     conPeak := 0.0
-    cTxtL = conSym == "" ? "" : "\n" + conSym + (na(conEntry) ? "" : "  ·  " + str.tostring(conEntry * 100, "#") + "$")
+    tgHit := 0
+    cTxtL = conSym == "" ? "" : "\n" + str.replace_all(conSym, conPrefix, "") +
+         (na(conEntry) ? "" : "  ·  " + str.tostring(conEntry * 100, "#") + "$")
     label.new(bar_index, side == 1 ? low : high,
-         (side == 1 ? "كول" : "بوت") + " · " + f_why(rawWhy) + cTxtL,
+         (side == 1 ? "كول" : "بوت") + " · " + f_why(rawWhy) + " · جودة " + str.tostring(eQual) + cTxtL,
          style = side == 1 ? label.style_label_up : label.style_label_down,
          color = side == 1 ? cUp : cDn, textcolor = color.white, size = size.small)
     alert("مِرصاد أوبشن: " + (side == 1 ? "كول " : "بوت ") + syminfo.ticker + " عند " +
-         str.tostring(close, format.mintick) + " · " + f_why(rawWhy) +
-         (conSym == "" ? "" : " · العقد " + conSym), alert.freq_once_per_bar_close)
+         str.tostring(close, format.mintick) + " · " + f_why(rawWhy) + " · جودة " + str.tostring(eQual) +
+         (conSym == "" ? "" : " · العقد " + str.replace_all(conSym, conPrefix, "")), alert.freq_once_per_bar_close)
 
 if preL or preS
     alert("مِرصاد أوبشن: استعداد " + (preL ? "كول " : "بوت ") + syminfo.ticker +
@@ -415,8 +499,10 @@ inTr = pos != 0 and showLines
 plot(inTr ? eP : na, "الدخول", cGold, 2, plot.style_linebr)
 plot(inTr ? sP : na, "الوقف", cDn, 1, plot.style_linebr)
 plot(inTr ? eP + pos * unit : na, "هدف ١", cUp, 1, plot.style_linebr)
-plot(inTr ? eP + pos * 2 * unit : na, "هدف ٢", cUp, 1, plot.style_linebr)
-plot(inTr ? eP + pos * 3 * unit : na, "هدف ٣", cUp, 1, plot.style_linebr)
+plot(inTr and nTg >= 2 ? eP + pos * 2 * unit : na, "هدف ٢", cUp, 1, plot.style_linebr)
+plot(inTr and nTg >= 3 ? eP + pos * 3 * unit : na, "هدف ٣", cUp, 1, plot.style_linebr)
+plot(inTr and nTg >= 4 ? eP + pos * 4 * unit : na, "هدف ٤", cUp, 1, plot.style_linebr)
+plot(inTr and nTg >= 5 ? eP + pos * 5 * unit : na, "هدف ٥", cUp, 1, plot.style_linebr)
 plotshape(preL, "استعداد كول", shape.circle, location.belowbar, color.new(cUp, 40), size = size.tiny)
 plotshape(preS, "استعداد بوت", shape.circle, location.abovebar, color.new(cDn, 40), size = size.tiny)
 
@@ -425,7 +511,7 @@ alertcondition(sigS, "مِرصاد — بوت", "مِرصاد أوبشن: إشا
 alertcondition(exitNow, "مِرصاد — خروج", "مِرصاد أوبشن: خروج من الصفقة")
 
 // ═══════════════════════════════════════════════════════════════ البطاقة
-var table cd = table.new(f_pos(cardPos), 2, 14, border_width = 1, border_color = color.new(#30363d, 30))
+var table cd = table.new(f_pos(cardPos), 2, 22, border_width = 1, border_color = color.new(#30363d, 30))
 f_row(int r, string a, string b, color cb_) =>
     table.cell(cd, 0, r, a, text_color = cMut, text_size = f_sz(), text_halign = text.align_right, bgcolor = cBg)
     table.cell(cd, 1, r, b, text_color = cb_, text_size = f_sz(), text_halign = text.align_left, bgcolor = cBg)
@@ -436,70 +522,91 @@ f_tgt(float peak) =>
      (peak >= tg5 ? "✓" : "·") + str.tostring(tg5) + "٪"
 
 if barstate.islast
-    table.clear(cd, 0, 0, 1, 13)
-    stCol = state == 1 ? cUp : state == -1 ? cDn : state == 0 ? cMut : cGold
+    table.clear(cd, 0, 0, 1, 21)
     table.cell(cd, 0, 0, "مِرصاد أوبشن", text_color = cGold, text_size = f_sz(), text_halign = text.align_right, bgcolor = cHd)
-    table.cell(cd, 1, 0, syminfo.ticker + "  ·  " + timeframe.period + "  ·  " + mode + (mkt24 ? "  ·  ٢٤ ساعة" : ""),
+    table.cell(cd, 1, 0, syminfo.ticker + "  ·  " + timeframe.period + "  ·  " + mode + "  ·  " + exitMode + (mkt24 ? "  ·  ٢٤ ساعة" : ""),
          text_color = cTxt, text_size = f_sz(), text_halign = text.align_left, bgcolor = cHd)
-    f_row(1, "حالة السوق", f_state(state) + "   ADX " + str.tostring(adx, "#"), stCol)
-    sigTxt = pos != 0 ? (pos == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) + "  ·  " + f_why(eWhy) :
-         preL ? "استعداد كول — تتأكد بإغلاق الشمعة" : preS ? "استعداد بوت — تتأكد بإغلاق الشمعة" : "لا صفقة"
-    f_row(2, "الإشارة", sigTxt, pos == 1 or preL ? cUp : pos == -1 or preS ? cDn : cMut)
-    gNow = conSym != "" and not na(conNow) and not na(conEntry) and conEntry > 0 ? (conNow / conEntry - 1) * 100 : na
-    conTxt = conSym != "" ? conSym : conMsg != "" ? conMsg : pos != 0 ? "بلا عقد (خارج نافذة الجلب أو ليس سهماً)" : "—"
-    f_row(3, "العقد", conTxt, conSym != "" ? cTxt : cMut)
+    conFresh = not na(conT) and timenow - conT < 3 * tfMs
+    f_row(1, "البيانات", "السهم " + (stockLive ? "مباشرة ●" : "غير مؤكدة ○") + "   ·   العقد " +
+         (conSym == "" ? "—" : conFresh ? "مباشرة ●" : "غير مؤكدة ○"), stockLive ? cUp : cMut)
+    stCol = state == 1 ? cUp : state == -1 ? cDn : state == 0 ? cMut : cGold
+    f_row(2, "حالة السوق", f_state(state) + "   ADX " + str.tostring(adx, "#"), stCol)
     if not mobile
-        prTxt = na(conEntry) ? "—" : "دخول " + str.tostring(conEntry * 100, "#") + "$  ·  الآن " +
-             (na(conNow) ? "—" : str.tostring(conNow * 100, "#") + "$") +
-             (na(gNow) ? "" : "  ·  " + f_sg(gNow, "#") + "٪") +
+        f_row(3, "حركة الفريمات", timeframe.period + "د " + f_state(state) + "   ·   " + otherTf + "د " +
+             (na(stOther) ? "—" : f_state(int(stOther))), cTxt)
+    sigTxt = pos != 0 ? (pos == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) + "  ·  " + f_why(eWhy) +
+         "  ·  جودة " + str.tostring(eQual) + "/100" :
+         preL ? "استعداد كول — تتأكد بإغلاق الشمعة  ·  جودة " + str.tostring(qL) :
+         preS ? "استعداد بوت — تتأكد بإغلاق الشمعة  ·  جودة " + str.tostring(qS) : "لا صفقة"
+    f_row(4, "الإشارة", sigTxt, pos == 1 or preL ? cUp : pos == -1 or preS ? cDn : cMut)
+    gNow = conSym != "" and not na(conNow) and not na(conEntry) and conEntry > 0 ? (conNow / conEntry - 1) * 100 : na
+    conTxt = conSym != "" ? str.replace_all(conSym, conPrefix, "") + "  ·  مثبّت" : conMsg != "" ? conMsg :
+         pos != 0 ? "بلا عقد (خارج نافذة الجلب أو ليس سهماً)" : "—"
+    f_row(5, "العقد", conTxt, conSym != "" ? cTxt : cMut)
+    if not mobile
+        prTxt = na(conEntry) ? "—" : "دخول " + str.tostring(conEntry, "0.00") + "  ·  الآن " +
+             (na(conNow) ? "—" : str.tostring(conNow, "0.00")) +
+             (na(gNow) ? "" : "  ·  " + f_sg(gNow, "#") + "٪") + "  ·  أعلى " + f_sg(conPeak, "#") + "٪" +
              (showSar and not na(conNow) ? "  ·  " + str.tostring(conNow * 100 * sarRate, "#") + " ر.س" : "")
-        f_row(4, "سعر العقد", prTxt, na(gNow) ? cMut : gNow >= 0 ? cUp : cDn)
-        f_row(5, "أهداف العقد", conSym == "" ? "—" : f_tgt(conPeak), cTxt)
-    lockTxt = pos == 0 ? "—" : exitMode != "قفل الربح" ? exitMode :
-         conSym != "" ? (conLock ? "مقفول عند " + f_sg(math.max(5.0, conPeak * (1 - giveback / 100.0)), "#") + "٪  ·  القمة " + f_sg(conPeak, "#") + "٪" :
-         "يبدأ بعد +" + str.tostring(lockAfter) + "٪") :
-         (peakR >= 1.0 ? "مقفول عند " + str.tostring(math.max(0.1, peakR * (1 - giveback / 100.0)), "0.0") + "R" : "يبدأ بعد 1R")
-    f_row(mobile ? 4 : 6, "قفل الربح", lockTxt, conLock or peakR >= 1.0 ? cGold : cMut)
+        f_row(6, "سعر العقد", prTxt, na(gNow) ? cMut : gNow >= 0 ? cUp : cDn)
+        f_row(7, "أهداف العقد", conSym == "" ? "—" : f_tgt(conPeak), cTxt)
+    stopTxt = pos == 0 ? "—" : not na(conLockPx) ? "ضع وقف العقد عند " + str.tostring(conLockPx, "0.00") + "$  (قفل ربح " +
+         f_sg((conLockPx / conEntry - 1) * 100, "#") + "٪)" :
+         conSym != "" and conStopPct > 0 ? "ضع وقف العقد عند " + str.tostring(conEntry * (1 - conStopPct / 100.0), "0.00") + "$" :
+         conSym != "" and exitMode == "قفل الربح" ? "القفل يبدأ بعد +" + str.tostring(lockAfter) + "٪ على العقد" :
+         "وقف السهم " + str.tostring(sP, format.mintick)
+    f_row(8, "وقف العقد", stopTxt, not na(conLockPx) ? cGold : cTxt)
     showExit = exitTxt != "" and not na(exitAt) and bar_index - exitAt <= 30
-    f_row(mobile ? 5 : 7, "آخر خروج", showExit ? exitTxt : "—", showExit ? cTxt : cMut)
+    f_row(9, "آخر خروج", showExit ? exitTxt : "—", showExit ? cTxt : cMut)
     if not mobile
         mvTxt = na(usedPct) ? "—" : "قطع " + str.tostring(usedPct, "#") + "٪ من مداه المعتاد  ·  " +
              (usedPct < 60 ? "مجال واسع" : usedPct < 100 ? "مجال متوسط" : "استنفد مداه")
-        f_row(8, "حركة اليوم", mvTxt, na(usedPct) ? cMut : usedPct < 60 ? cUp : usedPct < 100 ? cGold : cDn)
+        f_row(10, "حركة اليوم", mvTxt, na(usedPct) ? cMut : usedPct < 60 ? cUp : usedPct < 100 ? cGold : cDn)
         dTxt = na(tgtShare) ? "—" : str.tostring(dollarTgt, "0.00") + "$ = " + str.tostring(tgtShare * 100, "#") + "٪ من مداه اليومي  ·  " +
              (tgtShare < 0.2 ? "قريب" : tgtShare < 0.4 ? "متوسط" : tgtShare < 0.8 ? "بعيد" : "بعيد جداً")
-        f_row(9, "هدف الدولار", dTxt, na(tgtShare) ? cMut : tgtShare < 0.4 ? cUp : cDn)
-        f_row(10, "مقابل السوق", (rsVsMkt >= 0 ? "أقوى من SPY بـ " : "أضعف من SPY بـ ") + str.tostring(math.abs(rsVsMkt), "0.00") + "٪",
-             rsVsMkt >= 0 ? cUp : cDn)
+        f_row(11, "هدف الدولار", dTxt, na(tgtShare) ? cMut : tgtShare < 0.4 ? cUp : cDn)
+        f_row(12, "مقابل السوق", (rsVsMkt >= 0 ? "أقوى من SPY بـ " : "أضعف من SPY بـ ") + str.tostring(math.abs(rsVsMkt), "0.00") +
+             "٪  ·  السيولة ×" + str.tostring(rvNow, "0.0"), rsVsMkt >= 0 ? cUp : cDn)
     recTxt = nTr == 0 ? "لا صفقات بعد على هذا الشارت" : str.tostring(nTr) + " صفقة  ·  رابحة " +
          str.tostring(100.0 * nWin / nTr, "#") + "٪  ·  متوسط " + f_sg(sumR / nTr, "0.00") +
          "R  ·  متوسط القمة " + str.tostring(sumPeakR / nTr, "0.00") + "R"
-    f_row(mobile ? 6 : 11, "سجلّ هذا الشارت", recTxt, cTxt)
+    f_row(13, "سجلّ هذا الشارت", recTxt, cTxt)
     if not mobile
         conRec = nCon == 0 ? "—" : str.tostring(nCon) + " عقد  ·  متوسط الخروج " + f_sg(sumCon / nCon, "#") +
              "٪  ·  متوسط القمة " + f_sg(sumConPeak / nCon, "#") + "٪"
-        f_row(12, "سجلّ العقود", conRec, cMut)
+        f_row(14, "سجلّ العقود", conRec, cMut)
+        nl = array.size(logSym)
+        if nl > 0
+            for r = 0 to nl - 1
+                f_row(15 + r, array.get(logSym, r), array.get(logTxt, r), array.get(logRes, r) >= 0 ? cUp : cDn)
     warn = chart.is_heikinashi ? "⚠ شموع هايكن آشي — غيّرها إلى شموع يابانية" :
          not intraday ? "⚠ المؤشر مصمَّم لفريمات الدقائق" : ""
     if warn != ""
-        f_row(mobile ? 7 : 13, "تنبيه", warn, cDn)
+        f_row(21, "تنبيه", warn, cDn)
 
 // ═══════════════════════════════════════════════════════════════ الباحث
-var table sc = table.new(f_pos(scanPos), 5, 17, border_width = 1, border_color = color.new(#30363d, 30))
+var table sc = table.new(f_pos(scanPos), 7, 20, border_width = 1, border_color = color.new(#30363d, 30))
 if scanOn and not mobile and barstate.islast
-    table.clear(sc, 0, 0, 4, 16)
+    table.clear(sc, 0, 0, 6, 19)
     syms = str.split(str.replace_all(scanList, " ", ""), ",")
     n = math.min(array.size(syms), 16)
+    mkTxt = "S&P " + f_sg(nz(spyChg), "0.00") + "٪  ·  ناسداك " + f_sg(nz(qqqChg), "0.00") + "٪  ·  " +
+         str.tostring(n) + " رمز  ·  " + timeframe.period + "د  ·  " + mode
+    table.cell(sc, 0, 0, "الباحث  ·  " + mkTxt, text_color = cGold, text_size = f_sz(), bgcolor = cHd)
+    table.merge_cells(sc, 0, 0, 6, 0)
     if n > 0
         scores = array.new_float(n, 0.0)
         sides = array.new_int(n, 0)
+        agos = array.new_int(n, 999)
         rsA = array.new_float(n, 0.0)
         rvA = array.new_float(n, 0.0)
+        invA = array.new_float(n, na)
+        snA = array.new_float(n, na)
         timeOk = barsToday >= 1 and not lateBar
         for j = 0 to n - 1
             s_ = array.get(syms, j)
-            [lst, ago, stt, chg, rv] = request.security(s_, timeframe.period, f_scan(), ignore_invalid_symbol = true)
-            d = nz(lst) != 0 ? int(nz(lst)) : stt == 1 ? 1 : stt == -1 ? -1 : 0
+            [lst, ago, stt, chg, rv, inv, snc] = request.security(s_, timeframe.period, f_scan(), ignore_invalid_symbol = true)
+            d = nz(lst) != 0 and nz(ago, 999) <= 20 ? int(nz(lst)) : stt == 1 ? 1 : stt == -1 ? -1 : 0
             rs = nz(chg) - nz(spyChg)
             sc_ = 0.0
             sc_ += nz(rv) >= 1.5 ? 1 : 0
@@ -509,24 +616,38 @@ if scanOn and not mobile and barstate.islast
             sc_ += d != 0 and stt == d ? 1 : 0
             array.set(scores, j, d == 0 ? sc_ - 0.5 : sc_)
             array.set(sides, j, d)
+            array.set(agos, j, int(nz(ago, 999)))
             array.set(rsA, j, rs)
             array.set(rvA, j, nz(rv))
+            array.set(invA, j, nz(ago, 999) <= 20 ? inv : na)
+            array.set(snA, j, nz(ago, 999) <= 20 ? snc : na)
         order_ = array.sort_indices(scores, order.descending)
-        hdrs = array.from("الرمز", "الميل", "الشروط", "مقابل السوق", "السيولة")
-        for c = 0 to 4
-            table.cell(sc, c, 0, array.get(hdrs, c), text_color = cGold, text_size = f_sz(), bgcolor = cHd)
+        hdrs = array.from("الرمز", "الحالة", "الشروط", "مقابل السوق", "السيولة", "تُلغى عند", "منذ الإشارة")
+        for c = 0 to 6
+            table.cell(sc, c, 1, array.get(hdrs, c), text_color = cGold, text_size = f_sz(), bgcolor = cHd)
         rows = math.min(n, scanRows)
         for r = 0 to rows - 1
             j = array.get(order_, r)
             d = array.get(sides, j)
-            scv = math.max(array.get(scores, j), 0.0)
-            k = int(math.round(scv))
-            dots = str.repeat("●", k) + str.repeat("○", 5 - k)
+            k = int(math.round(math.max(array.get(scores, j), 0.0)))
+            fresh = array.get(agos, j) <= 2
+            stTxt = fresh ? (d == 1 ? "فرصة CALL" : "فرصة PUT") : d == 1 ? "ميل صعود" : d == -1 ? "ميل هبوط" : "محايد"
             base = d == 1 ? #16c784 : d == -1 ? #ea3943 : #8b949e
             bg = color.new(base, 88 - k * 14)
             me = array.get(syms, j) == syminfo.ticker
-            table.cell(sc, 0, r + 1, array.get(syms, j), text_color = cTxt, text_size = f_sz(), bgcolor = me ? cSel : cBg)
-            table.cell(sc, 1, r + 1, d == 1 ? "ميل صعود" : d == -1 ? "ميل هبوط" : "محايد", text_color = cTxt, text_size = f_sz(), bgcolor = bg)
-            table.cell(sc, 2, r + 1, dots, text_color = cTxt, text_size = f_sz(), bgcolor = bg)
-            table.cell(sc, 3, r + 1, f_sg(array.get(rsA, j), "0.00") + "٪", text_color = array.get(rsA, j) >= 0 ? cUp : cDn, text_size = f_sz(), bgcolor = cBg)
-            table.cell(sc, 4, r + 1, "×" + str.tostring(array.get(rvA, j), "0.0"), text_color = array.get(rvA, j) >= 1.5 ? cGold : cMut, text_size = f_sz(), bgcolor = cBg)
+            iv = array.get(invA, j)
+            sn = array.get(snA, j)
+            table.cell(sc, 0, r + 2, (me ? "★ " : "") + array.get(syms, j), text_color = cTxt, text_size = f_sz(), bgcolor = me ? cSel : cBg)
+            table.cell(sc, 1, r + 2, stTxt, text_color = cTxt, text_size = f_sz(), bgcolor = bg)
+            table.cell(sc, 2, r + 2, str.repeat("●", k) + str.repeat("○", 5 - k), text_color = cTxt, text_size = f_sz(), bgcolor = bg)
+            table.cell(sc, 3, r + 2, f_sg(array.get(rsA, j), "0.00") + "٪", text_color = array.get(rsA, j) >= 0 ? cUp : cDn, text_size = f_sz(), bgcolor = cBg)
+            table.cell(sc, 4, r + 2, "×" + str.tostring(array.get(rvA, j), "0.0"), text_color = array.get(rvA, j) >= 1.5 ? cGold : cMut, text_size = f_sz(), bgcolor = cBg)
+            table.cell(sc, 5, r + 2, na(iv) ? "—" : (d == 1 ? "تحت " : "فوق ") + str.tostring(iv, "0.00"), text_color = cMut, text_size = f_sz(), bgcolor = cBg)
+            table.cell(sc, 6, r + 2, na(sn) ? "—" : f_sg(sn, "0.00") + "٪", text_color = na(sn) ? cMut : sn >= 0 ? cUp : cDn, text_size = f_sz(), bgcolor = cBg)
+        best = array.get(order_, 0)
+        bd = array.get(sides, best)
+        bk = int(math.round(math.max(array.get(scores, best), 0.0)))
+        foot = bd == 0 ? "لا فرصة واضحة الآن" : "أقوى فرصة الآن: " + array.get(syms, best) + (bd == 1 ? " CALL" : " PUT") +
+             "  ·  " + str.tostring(bk) + "/5" + (bd * nz(spyChg) < 0 ? "  ·  ⚠ عكس اتجاه السوق" : "")
+        table.cell(sc, 0, rows + 2, foot, text_color = cGold, text_size = f_sz(), bgcolor = cHd)
+        table.merge_cells(sc, 0, rows + 2, 6, rows + 2)
