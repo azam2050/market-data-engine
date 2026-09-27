@@ -1,0 +1,532 @@
+// ══════════════════════════════════════════════════════════════════════════
+//  مِرصاد أوبشن  ·  MIRSAD OPTION  ·  الإصدار الثاني (Pine v6)
+//
+//  إشارة · عقد يُختار تلقائياً · أهداف العقد · قفل الربح · استعداد قبل
+//  الإشارة · باحث في ١٦ رمزاً بخمسة شروط · عدّاد حركة اليوم · القوة
+//  مقابل السوق · وسجلّ صادق لكل إشارة على شارتك.
+//
+//  لا يكتب هذا المؤشر أيّ نسبة نجاح. السجلّ في البطاقة يعدّ نتائجه
+//  الفعلية على الرمز والفريم الذي أمامك، الرابح والخاسر معاً.
+//
+//  رمز العقد يُبنى لحظياً بصيغة ترايدنغ فيو: OPRA:META260926P745.0
+//  ويحتاج اشتراك أسعار الأوبشن المباشرة (OPRA) في حسابك.
+// ══════════════════════════════════════════════════════════════════════════
+//@version=6
+indicator("مِرصاد أوبشن", "MIRSAD OPTION", overlay = true, max_labels_count = 500,
+     max_lines_count = 100)
+
+// ═══════════════════════════════════════════════════════════ الإعدادات
+gM = "النمط"
+mode = input.string("متوازن", "نمط المؤشر", options = ["متشدد", "متوازن", "سريع"], group = gM,
+     tooltip = "متشدد: إشارات أقل وشروط أصعب. مفيد في أيام الأخبار والتذبذب حين تريد أن يصمت المؤشر أكثر.\nمتوازن: الوضع المعتاد.\nسريع: إشارات أكثر ومبكّرة، ومعها إشارات متذبذبة أكثر.")
+dirIn = input.string("الاتجاهان", "الاتجاه", options = ["الاتجاهان", "كول فقط", "بوت فقط"], group = gM,
+     tooltip = "اختر جهة واحدة إن كنت تتاجر جهة واحدة اليوم ولا تريد أن تشغلك الأخرى.")
+maxSig = input.int(3, "أقصى إشارات في الجلسة (٠ = بلا حد)", minval = 0, maxval = 10, group = gM,
+     tooltip = "بعد هذا العدد يصمت المؤشر حتى الجلسة التالية. قلّله إن كنت تريد صفقة أو اثنتين فقط في اليوم.")
+mobile = input.bool(false, "وضع الجوال", group = gM,
+     tooltip = "بطاقة أصغر بالمعلومات الأساسية فقط، وتخفي الباحث — مناسبة لشاشة الجوال.")
+
+gS = "الاستراتيجيات"
+useTrend = input.bool(true, "ارتداد الاتجاه (سوق مندفع)", group = gS,
+     tooltip = "في السوق المندفع: السعر يرجع يلمس الغيمة ثم يغلق معها مع الاتجاه. هي أكثر الاستراتيجيات إشارةً.")
+useRev = input.bool(true, "الانعكاس (سوق متحوّل)", group = gS,
+     tooltip = "شمعة ضخمة تعبر الغيمة كاملة وتغلق خلفها. قليلة وواضحة. أطفئها إن كنت لا تحب الدخول ضد حركة قائمة.")
+useRange = input.bool(false, "حدّ الصندوق (سوق عرضي)", group = gS,
+     tooltip = "في السوق العرضي: الدخول من طرف الصندوق نحو وسطه. مطفأة لأن العرضي يذيب قيمة العقد بلا حركة. شغّلها إن كنت تتاجر العرضي بقصد.")
+revK = input.float(1.5, "حجم شمعة الانعكاس × ATR", minval = 0.8, maxval = 4.0, step = 0.25, group = gS,
+     tooltip = "ارفعه فتقلّ إشارات الانعكاس وتصير الشمعة أوضح.")
+needTrend = input.bool(false, "مع ميل متوسط الاتجاه فقط", group = gS,
+     tooltip = "يمنع الكول والاتجاه العام نازل، والبوت والاتجاه العام طالع. شغّله إن أزعجتك إشارات عكس ما تراه.")
+
+gT = "الغيمة"
+fastN = input.int(9, "المتوسط السريع", minval = 3, maxval = 50, group = gT)
+slowN = input.int(21, "المتوسط البطيء", minval = 8, maxval = 100, group = gT)
+trendN = input.int(50, "متوسط الاتجاه العام", minval = 20, maxval = 200, group = gT)
+showCloud = input.bool(true, "إظهار الغيمة", group = gT,
+     tooltip = "إخفاؤها لا يغيّر أي إشارة — يخفي الرسم فقط لشارت أنظف.")
+cloudT = input.int(80, "شفافية الغيمة", minval = 0, maxval = 95, group = gT)
+
+gX = "الخروج"
+stopX = input.float(1.5, "الوقف على السهم × ATR", minval = 0.5, maxval = 4.0, step = 0.25, group = gX,
+     tooltip = "مسافة الوقف من سعر الدخول على السهم. أوسع = صبر أكثر وخسارة أكبر حين يضرب.")
+exitMode = input.string("قفل الربح", "طريقة الخروج", options = ["قفل الربح", "إغلاق خلف الغيمة", "الوقف والجرس فقط"], group = gX,
+     tooltip = "قفل الربح: بعد أن يربح العقد النسبة التي تحددها تحت، يتبعه المؤشر ويخرجك إن أرجع جزءاً كبيراً من قمته — حتى لا ينقلب +٧٣٪ إلى +٨٪.\nإغلاق خلف الغيمة: الخروج إذا أغلقت شمعة في الجهة الأخرى من الغيمة (أسلوب رويال).\nالوقف والجرس فقط: لا خروج إلا بالوقف أو قبل إغلاق السوق.")
+lockAfter = input.int(20, "قفل الربح يبدأ بعد ربح العقد ٪", minval = 5, maxval = 200, group = gX,
+     tooltip = "قبل هذه النسبة يُترك العقد يتنفّس. بعدها يبدأ القفل.")
+giveback = input.int(35, "أقصى ما يُترك من قمة الربح ٪", minval = 10, maxval = 80, group = gX,
+     tooltip = "إذا وصل ربح العقد +١٠٠٪ ثم نزل تحت +٦٥٪ (مع ٣٥ هنا) يخرجك.\nقلّله لحجز ربح أسرع، وارفعه لإعطاء الحركة مجالاً أكبر.")
+eodOut = input.bool(true, "اخرج قبل جرس الجلسة", group = gX,
+     tooltip = "يغلق أي صفقة قبل نهاية الجلسة الأمريكية بخمس دقائق — مهم لعقود اليوم الواحد.")
+lateMin = input.int(90, "لا دخول في آخر … دقيقة", minval = 0, maxval = 240, group = gX,
+     tooltip = "آخر الجلسة يتآكل فيه العقد بسرعة. صفر = بلا منع.")
+mktIn = input.string("تلقائي", "نوع السوق", options = ["تلقائي", "جلسة أمريكية", "٢٤ ساعة"], group = gX,
+     tooltip = "الذهب والعملات والكريبتو تعمل ٢٤ ساعة، فلا يُطبَّق عليها منع آخر الجلسة ولا جرسها.")
+
+gC = "العقد"
+conOn = input.bool(true, "اختيار العقد تلقائياً", group = gC,
+     tooltip = "يبني رمز العقد من السعر لحظة الإشارة ويجلب سعره ويتابعه حتى الخروج.")
+expMode = input.string("تلقائي", "تاريخ الانتهاء", options = ["تلقائي", "اليوم", "الجمعة القادمة", "الجمعة بعد القادمة", "يدوي"], group = gC,
+     tooltip = "تلقائي: عقد اليوم لـ SPY وQQQ وIWM، وعقد الجمعة لغيرها.\nإن وافق يومُ الجمعة عطلةً فاختر يدوي.")
+expManual = input.time(timestamp("2 Oct 2026 00:00 -0400"), "التاريخ اليدوي", group = gC)
+strikeMode = input.string("حسب نطاق السعر", "اختيار السترايك", options = ["على السعر", "داخل المال بدرجة", "خارج المال بدرجة", "حسب نطاق السعر"], group = gC,
+     tooltip = "حسب نطاق السعر: يجرّب على السعر ثم خارج المال ثم داخل المال، ويختار أول عقد سعره داخل النطاق الذي تحدده تحت — لمن محفظته محدودة.")
+incIn = input.float(0.0, "مسافة السترايك (٠ = تلقائي)", minval = 0.0, step = 0.5, group = gC,
+     tooltip = "المسافة بين سترايك وآخر في سلسلة الرمز. التلقائي: ٠٫٥ تحت ٢٥$، ١ حتى ١٥٠$، ٢٫٥ حتى ٥٠٠$، ٥ فوقها.\nإن ظهر «لا عقد مطابق» على رمز معيّن فاكتب مسافته هنا.")
+priceMin = input.float(25, "أقل تكلفة للعقد $", minval = 0, group = gC, inline = "pr")
+priceMax = input.float(300, "أعلى $", minval = 1, group = gC, inline = "pr",
+     tooltip = "التكلفة = سعر العقد × ١٠٠. عقد أرخص من اللازم غالباً بعيد عن السعر ويتحرك ببطء.")
+strikeFmt = input.string("745.0", "صيغة السترايك في الرمز", options = ["745.0", "745"], group = gC,
+     tooltip = "صيغة ترايدنغ فيو المعتادة 745.0. غيّرها فقط إن ظهر «لا عقد مطابق» على كل الرموز.")
+conPrefix = input.string("OPRA:", "بادئة رمز العقد", group = gC)
+manualSym = input.string("", "عقد يدوي (يتجاوز التلقائي)", group = gC,
+     tooltip = "اكتب رمز العقد كاملاً مثل OPRA:META260926P745.0 إن أردت عقداً محدداً.")
+conDays = input.int(1, "جلب العقود لآخر … أيام", minval = 1, maxval = 5, group = gC,
+     tooltip = "ترايدنغ فيو يسمح بنحو ٤٠ رمزاً في المؤشر الواحد، والباحث يأخذ ١٦ منها. كل إشارة تجلب عقداً أو أكثر، فالجلب محصور في آخر أيام. إن ظهر خطأ «too many securities» فقلّله أو قلّل رموز الباحث.")
+tg1 = input.int(20, "أهداف العقد ٪", group = gC, inline = "tg")
+tg2 = input.int(45, "", group = gC, inline = "tg")
+tg3 = input.int(85, "", group = gC, inline = "tg")
+tg4 = input.int(100, "", group = gC, inline = "tg")
+tg5 = input.int(150, "", group = gC, inline = "tg")
+showSar = input.bool(true, "اعرض القيمة بالريال", group = gC, inline = "sar")
+sarRate = input.float(3.75, "", group = gC, inline = "sar")
+
+gB = "الباحث"
+scanOn = input.bool(true, "تشغيل الباحث", group = gB,
+     tooltip = "يراقب قائمة رموز ويرتبها كل شمعة حسب خمسة شروط: السيولة · القوة مقابل السوق · شمعة التأكيد · التوقيت · توافق الحالة. كل ما غمق اللون كانت الشروط المكتملة أكثر.")
+scanList = input.string("NVDA,TSLA,META,AMZN,AAPL,MSFT,AMD,GOOGL,NFLX,AVGO,COIN,PLTR,MU,SMCI,SPY,QQQ", "الرموز (فاصلة بينها)", group = gB)
+scanRows = input.int(8, "عدد الصفوف المعروضة", minval = 3, maxval = 16, group = gB)
+dollarTgt = input.float(1.0, "هدف الحركة بالدولار", minval = 0.1, step = 0.25, group = gB,
+     tooltip = "يُستعمل في عدّاد الحركة: هل هذا الهدف قريب أم بعيد قياساً بمدى الرمز المعتاد في اليوم.")
+
+gV = "الشكل"
+cardPos = input.string("أعلى اليمين", "مكان البطاقة", options = ["أعلى اليمين", "أعلى اليسار", "أسفل اليمين", "أسفل اليسار"], group = gV)
+scanPos = input.string("أسفل اليمين", "مكان الباحث", options = ["أعلى اليمين", "أعلى اليسار", "أسفل اليمين", "أسفل اليسار"], group = gV)
+cardSz = input.string("عادي", "حجم الخط", options = ["صغير", "عادي", "كبير"], group = gV)
+showLines = input.bool(true, "خطوط الدخول والوقف والأهداف", group = gV)
+
+// ═══════════════════════════════════════════════════════════ الألوان
+cUp = color.new(#16c784, 0)
+cDn = color.new(#ea3943, 0)
+cGold = color.new(#e8b339, 0)
+cTxt = color.new(#e6edf3, 0)
+cMut = color.new(#8b949e, 0)
+cBg = color.new(#0d1117, 10)
+cHd = color.new(#161b22, 5)
+cSel = color.new(#e8b339, 70)
+
+strict = mode == "متشدد"
+quick = mode == "سريع"
+adxTr = strict ? 28.0 : quick ? 20.0 : 25.0
+adxRg = strict ? 16.0 : quick ? 20.0 : 18.0
+edgeP = strict ? 0.12 : quick ? 0.25 : 0.18
+TZ = "America/New_York"
+
+// ═══════════════════════════════════════════════════════════ الدوال
+f_pos(string p) =>
+    p == "أعلى اليمين" ? position.top_right : p == "أعلى اليسار" ? position.top_left :
+     p == "أسفل اليمين" ? position.bottom_right : position.bottom_left
+
+f_sz() =>
+    cardSz == "صغير" ? size.tiny : cardSz == "كبير" ? size.normal : size.small
+
+f_2(int x) =>
+    x < 10 ? "0" + str.tostring(x) : str.tostring(x)
+
+f_strike(float k) =>
+    whole = math.abs(k - math.round(k)) < 0.000001
+    whole ? (strikeFmt == "745" ? str.tostring(k, "#") : str.tostring(k, "#.0")) : str.tostring(k, "#.0##")
+
+f_occ(string root, int expT, int cp, float k) =>
+    conPrefix + root + f_2(year(expT, TZ) % 100) + f_2(month(expT, TZ)) + f_2(dayofmonth(expT, TZ)) +
+     (cp == 1 ? "C" : "P") + f_strike(k)
+
+f_inc(float px) =>
+    incIn > 0 ? incIn : px < 25 ? 0.5 : px < 150 ? 1.0 : px < 500 ? 2.5 : 5.0
+
+f_exp() =>
+    dw = dayofweek(time, TZ)
+    root = syminfo.ticker
+    daily = root == "SPY" or root == "QQQ" or root == "IWM"
+    toFri = (6 - dw + 7) % 7
+    d = expMode == "اليوم" ? 0 : expMode == "الجمعة القادمة" ? toFri :
+         expMode == "الجمعة بعد القادمة" ? toFri + 7 : daily ? 0 : toFri
+    expMode == "يدوي" ? expManual : time + d * 86400000
+
+f_sg(float x, string fmt) =>
+    (x >= 0 ? "+" : "") + str.tostring(x, fmt)
+
+f_why(int w) =>
+    w == 1 ? "ارتداد الاتجاه" : w == 2 ? "حدّ الصندوق" : w == 3 ? "انعكاس" : "—"
+
+f_state(int s) =>
+    s == 1 ? "مندفع صاعد" : s == -1 ? "مندفع هابط" : s == 0 ? "عرضي" : "متحوّل"
+
+// المحرّك نفسه — يعمل على الشارت وعلى كل رمز في الباحث
+f_engine() =>
+    a_ = ta.atr(14)
+    f_ = ta.ema(close, fastN)
+    s_ = ta.ema(close, slowN)
+    ct_ = math.max(f_, s_)
+    cb_ = math.min(f_, s_)
+    [dp_, dm_, ax_] = ta.dmi(14, 14)
+    bh_ = ta.highest(high, 30)[1]
+    bl_ = ta.lowest(low, 30)[1]
+    bw_ = bh_ - bl_
+    ib_ = bw_ > 0 and close > bl_ + 0.2 * bw_ and close < bh_ - 0.2 * bw_
+    pu_ = ax_ >= adxTr and close > ct_ and f_ > s_
+    pd_ = ax_ >= adxTr and close < cb_ and f_ < s_
+    sw_ = ax_ < adxRg and ib_
+    st_ = pu_ ? 1 : pd_ ? -1 : sw_ ? 0 : 2
+    rg_ = high - low
+    bd_ = close - open
+    l1 = useTrend and st_ == 1 and low <= ct_ and close > ct_ and close > open and (not strict or close > high[1])
+    s1 = useTrend and st_ == -1 and high >= cb_ and close < cb_ and close < open and (not strict or close < low[1])
+    l2 = useRange and st_ == 0 and low <= bl_ + edgeP * bw_ and close > open and close > low + 0.5 * rg_
+    s2 = useRange and st_ == 0 and high >= bh_ - edgeP * bw_ and close < open and close < high - 0.5 * rg_
+    l3 = useRev and st_ == 2 and rg_ > 0 and bd_ >= revK * a_ and close > ct_ and open < ct_
+    s3 = useRev and st_ == 2 and rg_ > 0 and -bd_ >= revK * a_ and close < cb_ and open > cb_
+    sd_ = l1 or l2 or l3 ? 1 : s1 or s2 or s3 ? -1 : 0
+    wh_ = l1 or s1 ? 1 : l2 or s2 ? 2 : l3 or s3 ? 3 : 0
+    [sd_, st_, wh_, ct_, cb_, a_, ax_]
+
+f_chg() =>
+    so = ta.valuewhen(session.isfirstbar_regular, open, 0)
+    na(so) or so == 0 ? 0.0 : (close / so - 1) * 100
+
+f_scan() =>
+    [sd_, st_, wh_, ct_, cb_, a_, ax_] = f_engine()
+    rv_ = ta.sma(volume, 3) / math.max(nz(ta.sma(volume, 60)[3]), 1)
+    last_ = ta.valuewhen(sd_ != 0, sd_, 0)
+    ago_ = ta.barssince(sd_ != 0)
+    [nz(last_), nz(ago_, 999), st_, f_chg(), rv_]
+
+// ═════════════════════════════════════════════════════════════ الحساب
+[rawSide, state, rawWhy, cTop, cBot, atr, adx] = f_engine()
+eF = ta.ema(close, fastN)
+eS = ta.ema(close, slowN)
+eT = ta.ema(close, trendN)
+
+intraday = timeframe.isintraday
+usEq = syminfo.type == "stock" or syminfo.type == "fund" or syminfo.type == "dr"
+mkt24 = mktIn == "٢٤ ساعة" or (mktIn == "تلقائي" and not usEq)
+minsNY = hour(time, TZ) * 60 + minute(time, TZ)
+newDay = mkt24 ? timeframe.change("D") : session.isfirstbar_regular
+lateBar = intraday and not mkt24 and lateMin > 0 and minsNY >= 960 - lateMin
+bellBar = eodOut and intraday and not mkt24 and minsNY >= 955
+
+var int barsToday = 0
+var int sigToday = 0
+var float dayHi = na
+var float dayLo = na
+if newDay or na(dayHi)
+    barsToday := 0
+    sigToday := 0
+    dayHi := high
+    dayLo := low
+else
+    barsToday += 1
+    dayHi := math.max(dayHi, high)
+    dayLo := math.min(dayLo, low)
+
+allowL = dirIn != "بوت فقط"
+allowS = dirIn != "كول فقط"
+trendUp = eT > eT[10]
+trendDn = eT < eT[10]
+budget = maxSig == 0 or sigToday < maxSig
+gateOk = barsToday >= 1 and not lateBar and budget
+rawL = rawSide == 1 and allowL and (not needTrend or trendUp) and gateOk
+rawS = rawSide == -1 and allowS and (not needTrend or trendDn) and gateOk
+
+// عدّاد الحركة والقوة مقابل السوق
+dAtr = request.security(syminfo.tickerid, "D", ta.atr(14)[1], lookahead = barmerge.lookahead_off)
+dRng = request.security(syminfo.tickerid, "D", ta.sma(high - low, 20)[1], lookahead = barmerge.lookahead_off)
+spyChg = request.security("SPY", timeframe.period, f_chg(), ignore_invalid_symbol = true)
+myChg = f_chg()
+rsVsMkt = nz(myChg) - nz(spyChg)
+usedPct = na(dAtr) or dAtr <= 0 ? na : (dayHi - dayLo) / dAtr * 100
+tgtShare = na(dRng) or dRng <= 0 ? na : dollarTgt / dRng
+
+// ═════════════════════════════════════════════════════ الصفقة على السهم
+var int pos = 0
+var float eP = na
+var float sP = na
+var float unit = na
+var float peakR = 0.0
+var int eBar = na
+var int eWhy = 0
+var string exitTxt = ""
+var int exitAt = na
+
+// العقد
+var string conSym = ""
+var float conEntry = na
+var float conNow = na
+var float conPeak = 0.0
+var bool conLock = false
+var string conMsg = ""
+
+// السجلّ الصادق
+var int nTr = 0
+var int nWin = 0
+var float sumR = 0.0
+var float sumPeakR = 0.0
+var int nCon = 0
+var float sumCon = 0.0
+var float sumConPeak = 0.0
+
+sigL = rawL and barstate.isconfirmed and pos == 0
+sigS = rawS and barstate.isconfirmed and pos == 0
+preL = rawL and barstate.isrealtime and not barstate.isconfirmed and pos == 0
+preS = rawS and barstate.isrealtime and not barstate.isconfirmed and pos == 0
+conWindow = time >= timenow - conDays * 86400000
+
+// ــ ١) الخروج أولاً (قبل أي دخول جديد)
+exitNow = false
+exitReason = ""
+exitPx = close
+if pos != 0 and bar_index > eBar
+    favR = ((pos == 1 ? high : low) - eP) * pos / unit
+    peakR := math.max(peakR, favR)
+    stopHit = pos == 1 ? low <= sP : high >= sP
+    curR = (close - eP) * pos / unit
+    // العقد الحيّ
+    conOk = conSym != "" and not na(conEntry) and conEntry > 0
+    if conOk
+        [cc_, ch_] = request.security(conSym, timeframe.period, [close, high], ignore_invalid_symbol = true)
+        conNow := cc_
+        if not na(ch_)
+            conPeak := math.max(conPeak, (ch_ / conEntry - 1) * 100)
+    gainC = conOk and not na(conNow) ? (conNow / conEntry - 1) * 100 : na
+    lockHit = false
+    if exitMode == "قفل الربح"
+        if not na(gainC)
+            conLock := conPeak >= lockAfter
+            lockLvl = math.max(5.0, conPeak * (1 - giveback / 100.0))
+            lockHit := conLock and gainC <= lockLvl
+        else
+            lockLvlR = math.max(0.1, peakR * (1 - giveback / 100.0))
+            lockHit := peakR >= 1.0 and curR <= lockLvlR
+    cloudHit = exitMode == "إغلاق خلف الغيمة" and (pos == 1 ? close < cBot : close > cTop)
+    oppHit = pos == 1 ? rawS and barstate.isconfirmed : rawL and barstate.isconfirmed
+    if stopHit
+        exitNow := true
+        exitReason := "وقف"
+        exitPx := sP
+    else if barstate.isconfirmed and lockHit
+        exitNow := true
+        exitReason := "قفل الربح"
+    else if barstate.isconfirmed and cloudHit
+        exitNow := true
+        exitReason := "إغلاق خلف الغيمة"
+    else if barstate.isconfirmed and oppHit
+        exitNow := true
+        exitReason := "إشارة معاكسة"
+    else if barstate.isconfirmed and bellBar
+        exitNow := true
+        exitReason := "جرس الجلسة"
+
+if exitNow
+    rR = (exitPx - eP) * pos / unit
+    nTr += 1
+    nWin += rR > 0 ? 1 : 0
+    sumR += rR
+    sumPeakR += peakR
+    conRes = conSym != "" and not na(conEntry) and not na(conNow) ? (conNow / conEntry - 1) * 100 : na
+    if not na(conRes)
+        nCon += 1
+        sumCon += conRes
+        sumConPeak += conPeak
+    exitTxt := exitReason + (na(conRes) ? "  ·  " + f_sg(rR, "0.00") + "R" :
+         "  ·  العقد " + f_sg(conRes, "#") + "٪ (القمة " + f_sg(conPeak, "#") + "٪)")
+    exitAt := bar_index
+    label.new(bar_index, pos == 1 ? high : low, "خروج · " + exitTxt,
+         style = pos == 1 ? label.style_label_down : label.style_label_up,
+         color = color.new(#161b22, 0), textcolor = rR > 0 ? cUp : cMut, size = size.small)
+    pos := 0
+    conSym := ""
+    conEntry := na
+    conNow := na
+    conPeak := 0.0
+    conLock := false
+
+// ــ ٢) الدخول
+if sigL or sigS
+    side = sigL ? 1 : -1
+    pos := side
+    eP := close
+    unit := stopX * atr
+    sP := close - side * unit
+    peakR := 0.0
+    eBar := bar_index
+    eWhy := rawWhy
+    sigToday += 1
+    conMsg := ""
+    if conOn and manualSym != ""
+        conSym := manualSym
+        conEntry := request.security(manualSym, timeframe.period, close, ignore_invalid_symbol = true)
+    else if conOn and intraday and usEq and conWindow
+        inc = f_inc(close)
+        kAtm = math.round(close / inc) * inc
+        expT = f_exp()
+        root = syminfo.ticker
+        pick = ""
+        pickPx = float(na)
+        if strikeMode == "حسب نطاق السعر"
+            for j = 0 to 3
+                off = j == 0 ? 0.0 : j == 1 ? 1.0 : j == 2 ? -1.0 : 2.0
+                if pick == ""
+                    sym_ = f_occ(root, expT, side, kAtm + side * off * inc)
+                    px_ = request.security(sym_, timeframe.period, close, ignore_invalid_symbol = true)
+                    if not na(px_) and px_ * 100 >= priceMin and px_ * 100 <= priceMax
+                        pick := sym_
+                        pickPx := px_
+        else
+            off1 = strikeMode == "داخل المال بدرجة" ? -1.0 : strikeMode == "خارج المال بدرجة" ? 1.0 : 0.0
+            sym1 = f_occ(root, expT, side, kAtm + side * off1 * inc)
+            px1 = request.security(sym1, timeframe.period, close, ignore_invalid_symbol = true)
+            if not na(px1)
+                pick := sym1
+                pickPx := px1
+        if pick != ""
+            conSym := pick
+            conEntry := pickPx
+        else
+            conMsg := "لا عقد مطابق — راجع مسافة السترايك أو نطاق السعر"
+    conNow := conEntry
+    conPeak := 0.0
+    cTxtL = conSym == "" ? "" : "\n" + conSym + (na(conEntry) ? "" : "  ·  " + str.tostring(conEntry * 100, "#") + "$")
+    label.new(bar_index, side == 1 ? low : high,
+         (side == 1 ? "كول" : "بوت") + " · " + f_why(rawWhy) + cTxtL,
+         style = side == 1 ? label.style_label_up : label.style_label_down,
+         color = side == 1 ? cUp : cDn, textcolor = color.white, size = size.small)
+    alert("مِرصاد أوبشن: " + (side == 1 ? "كول " : "بوت ") + syminfo.ticker + " عند " +
+         str.tostring(close, format.mintick) + " · " + f_why(rawWhy) +
+         (conSym == "" ? "" : " · العقد " + conSym), alert.freq_once_per_bar_close)
+
+if preL or preS
+    alert("مِرصاد أوبشن: استعداد " + (preL ? "كول " : "بوت ") + syminfo.ticker +
+         " — الإشارة تتأكد بإغلاق الشمعة", alert.freq_once_per_bar)
+
+// ═══════════════════════════════════════════════════════════════ الرسم
+pF = plot(showCloud ? eF : na, "المتوسط السريع", color.new(cUp, 100))
+pS = plot(showCloud ? eS : na, "المتوسط البطيء", color.new(cDn, 100))
+fill(pF, pS, eF > eS ? color.new(cUp, cloudT) : color.new(cDn, cloudT), "الغيمة")
+inTr = pos != 0 and showLines
+plot(inTr ? eP : na, "الدخول", cGold, 2, plot.style_linebr)
+plot(inTr ? sP : na, "الوقف", cDn, 1, plot.style_linebr)
+plot(inTr ? eP + pos * unit : na, "هدف ١", cUp, 1, plot.style_linebr)
+plot(inTr ? eP + pos * 2 * unit : na, "هدف ٢", cUp, 1, plot.style_linebr)
+plot(inTr ? eP + pos * 3 * unit : na, "هدف ٣", cUp, 1, plot.style_linebr)
+plotshape(preL, "استعداد كول", shape.circle, location.belowbar, color.new(cUp, 40), size = size.tiny)
+plotshape(preS, "استعداد بوت", shape.circle, location.abovebar, color.new(cDn, 40), size = size.tiny)
+
+alertcondition(sigL, "مِرصاد — كول", "مِرصاد أوبشن: إشارة كول")
+alertcondition(sigS, "مِرصاد — بوت", "مِرصاد أوبشن: إشارة بوت")
+alertcondition(exitNow, "مِرصاد — خروج", "مِرصاد أوبشن: خروج من الصفقة")
+
+// ═══════════════════════════════════════════════════════════════ البطاقة
+var table cd = table.new(f_pos(cardPos), 2, 14, border_width = 1, border_color = color.new(#30363d, 30))
+f_row(int r, string a, string b, color cb_) =>
+    table.cell(cd, 0, r, a, text_color = cMut, text_size = f_sz(), text_halign = text.align_right, bgcolor = cBg)
+    table.cell(cd, 1, r, b, text_color = cb_, text_size = f_sz(), text_halign = text.align_left, bgcolor = cBg)
+
+f_tgt(float peak) =>
+    (peak >= tg1 ? "✓" : "·") + str.tostring(tg1) + "  " + (peak >= tg2 ? "✓" : "·") + str.tostring(tg2) + "  " +
+     (peak >= tg3 ? "✓" : "·") + str.tostring(tg3) + "  " + (peak >= tg4 ? "✓" : "·") + str.tostring(tg4) + "  " +
+     (peak >= tg5 ? "✓" : "·") + str.tostring(tg5) + "٪"
+
+if barstate.islast
+    table.clear(cd, 0, 0, 1, 13)
+    stCol = state == 1 ? cUp : state == -1 ? cDn : state == 0 ? cMut : cGold
+    table.cell(cd, 0, 0, "مِرصاد أوبشن", text_color = cGold, text_size = f_sz(), text_halign = text.align_right, bgcolor = cHd)
+    table.cell(cd, 1, 0, syminfo.ticker + "  ·  " + timeframe.period + "  ·  " + mode + (mkt24 ? "  ·  ٢٤ ساعة" : ""),
+         text_color = cTxt, text_size = f_sz(), text_halign = text.align_left, bgcolor = cHd)
+    f_row(1, "حالة السوق", f_state(state) + "   ADX " + str.tostring(adx, "#"), stCol)
+    sigTxt = pos != 0 ? (pos == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) + "  ·  " + f_why(eWhy) :
+         preL ? "استعداد كول — تتأكد بإغلاق الشمعة" : preS ? "استعداد بوت — تتأكد بإغلاق الشمعة" : "لا صفقة"
+    f_row(2, "الإشارة", sigTxt, pos == 1 or preL ? cUp : pos == -1 or preS ? cDn : cMut)
+    gNow = conSym != "" and not na(conNow) and not na(conEntry) and conEntry > 0 ? (conNow / conEntry - 1) * 100 : na
+    conTxt = conSym != "" ? conSym : conMsg != "" ? conMsg : pos != 0 ? "بلا عقد (خارج نافذة الجلب أو ليس سهماً)" : "—"
+    f_row(3, "العقد", conTxt, conSym != "" ? cTxt : cMut)
+    if not mobile
+        prTxt = na(conEntry) ? "—" : "دخول " + str.tostring(conEntry * 100, "#") + "$  ·  الآن " +
+             (na(conNow) ? "—" : str.tostring(conNow * 100, "#") + "$") +
+             (na(gNow) ? "" : "  ·  " + f_sg(gNow, "#") + "٪") +
+             (showSar and not na(conNow) ? "  ·  " + str.tostring(conNow * 100 * sarRate, "#") + " ر.س" : "")
+        f_row(4, "سعر العقد", prTxt, na(gNow) ? cMut : gNow >= 0 ? cUp : cDn)
+        f_row(5, "أهداف العقد", conSym == "" ? "—" : f_tgt(conPeak), cTxt)
+    lockTxt = pos == 0 ? "—" : exitMode != "قفل الربح" ? exitMode :
+         conSym != "" ? (conLock ? "مقفول عند " + f_sg(math.max(5.0, conPeak * (1 - giveback / 100.0)), "#") + "٪  ·  القمة " + f_sg(conPeak, "#") + "٪" :
+         "يبدأ بعد +" + str.tostring(lockAfter) + "٪") :
+         (peakR >= 1.0 ? "مقفول عند " + str.tostring(math.max(0.1, peakR * (1 - giveback / 100.0)), "0.0") + "R" : "يبدأ بعد 1R")
+    f_row(mobile ? 4 : 6, "قفل الربح", lockTxt, conLock or peakR >= 1.0 ? cGold : cMut)
+    showExit = exitTxt != "" and not na(exitAt) and bar_index - exitAt <= 30
+    f_row(mobile ? 5 : 7, "آخر خروج", showExit ? exitTxt : "—", showExit ? cTxt : cMut)
+    if not mobile
+        mvTxt = na(usedPct) ? "—" : "قطع " + str.tostring(usedPct, "#") + "٪ من مداه المعتاد  ·  " +
+             (usedPct < 60 ? "مجال واسع" : usedPct < 100 ? "مجال متوسط" : "استنفد مداه")
+        f_row(8, "حركة اليوم", mvTxt, na(usedPct) ? cMut : usedPct < 60 ? cUp : usedPct < 100 ? cGold : cDn)
+        dTxt = na(tgtShare) ? "—" : str.tostring(dollarTgt, "0.00") + "$ = " + str.tostring(tgtShare * 100, "#") + "٪ من مداه اليومي  ·  " +
+             (tgtShare < 0.2 ? "قريب" : tgtShare < 0.4 ? "متوسط" : tgtShare < 0.8 ? "بعيد" : "بعيد جداً")
+        f_row(9, "هدف الدولار", dTxt, na(tgtShare) ? cMut : tgtShare < 0.4 ? cUp : cDn)
+        f_row(10, "مقابل السوق", (rsVsMkt >= 0 ? "أقوى من SPY بـ " : "أضعف من SPY بـ ") + str.tostring(math.abs(rsVsMkt), "0.00") + "٪",
+             rsVsMkt >= 0 ? cUp : cDn)
+    recTxt = nTr == 0 ? "لا صفقات بعد على هذا الشارت" : str.tostring(nTr) + " صفقة  ·  رابحة " +
+         str.tostring(100.0 * nWin / nTr, "#") + "٪  ·  متوسط " + f_sg(sumR / nTr, "0.00") +
+         "R  ·  متوسط القمة " + str.tostring(sumPeakR / nTr, "0.00") + "R"
+    f_row(mobile ? 6 : 11, "سجلّ هذا الشارت", recTxt, cTxt)
+    if not mobile
+        conRec = nCon == 0 ? "—" : str.tostring(nCon) + " عقد  ·  متوسط الخروج " + f_sg(sumCon / nCon, "#") +
+             "٪  ·  متوسط القمة " + f_sg(sumConPeak / nCon, "#") + "٪"
+        f_row(12, "سجلّ العقود", conRec, cMut)
+    warn = chart.is_heikinashi ? "⚠ شموع هايكن آشي — غيّرها إلى شموع يابانية" :
+         not intraday ? "⚠ المؤشر مصمَّم لفريمات الدقائق" : ""
+    if warn != ""
+        f_row(mobile ? 7 : 13, "تنبيه", warn, cDn)
+
+// ═══════════════════════════════════════════════════════════════ الباحث
+var table sc = table.new(f_pos(scanPos), 5, 17, border_width = 1, border_color = color.new(#30363d, 30))
+if scanOn and not mobile and barstate.islast
+    table.clear(sc, 0, 0, 4, 16)
+    syms = str.split(str.replace_all(scanList, " ", ""), ",")
+    n = math.min(array.size(syms), 16)
+    if n > 0
+        scores = array.new_float(n, 0.0)
+        sides = array.new_int(n, 0)
+        rsA = array.new_float(n, 0.0)
+        rvA = array.new_float(n, 0.0)
+        timeOk = barsToday >= 1 and not lateBar
+        for j = 0 to n - 1
+            s_ = array.get(syms, j)
+            [lst, ago, stt, chg, rv] = request.security(s_, timeframe.period, f_scan(), ignore_invalid_symbol = true)
+            d = nz(lst) != 0 ? int(nz(lst)) : stt == 1 ? 1 : stt == -1 ? -1 : 0
+            rs = nz(chg) - nz(spyChg)
+            sc_ = 0.0
+            sc_ += nz(rv) >= 1.5 ? 1 : 0
+            sc_ += d != 0 and rs * d >= 0.3 ? 1 : 0
+            sc_ += nz(ago, 999) <= 2 ? 1 : 0
+            sc_ += timeOk ? 1 : 0
+            sc_ += d != 0 and stt == d ? 1 : 0
+            array.set(scores, j, d == 0 ? sc_ - 0.5 : sc_)
+            array.set(sides, j, d)
+            array.set(rsA, j, rs)
+            array.set(rvA, j, nz(rv))
+        order_ = array.sort_indices(scores, order.descending)
+        hdrs = array.from("الرمز", "الميل", "الشروط", "مقابل السوق", "السيولة")
+        for c = 0 to 4
+            table.cell(sc, c, 0, array.get(hdrs, c), text_color = cGold, text_size = f_sz(), bgcolor = cHd)
+        rows = math.min(n, scanRows)
+        for r = 0 to rows - 1
+            j = array.get(order_, r)
+            d = array.get(sides, j)
+            scv = math.max(array.get(scores, j), 0.0)
+            k = int(math.round(scv))
+            dots = str.repeat("●", k) + str.repeat("○", 5 - k)
+            base = d == 1 ? #16c784 : d == -1 ? #ea3943 : #8b949e
+            bg = color.new(base, 88 - k * 14)
+            me = array.get(syms, j) == syminfo.ticker
+            table.cell(sc, 0, r + 1, array.get(syms, j), text_color = cTxt, text_size = f_sz(), bgcolor = me ? cSel : cBg)
+            table.cell(sc, 1, r + 1, d == 1 ? "ميل صعود" : d == -1 ? "ميل هبوط" : "محايد", text_color = cTxt, text_size = f_sz(), bgcolor = bg)
+            table.cell(sc, 2, r + 1, dots, text_color = cTxt, text_size = f_sz(), bgcolor = bg)
+            table.cell(sc, 3, r + 1, f_sg(array.get(rsA, j), "0.00") + "٪", text_color = array.get(rsA, j) >= 0 ? cUp : cDn, text_size = f_sz(), bgcolor = cBg)
+            table.cell(sc, 4, r + 1, "×" + str.tostring(array.get(rvA, j), "0.0"), text_color = array.get(rvA, j) >= 1.5 ? cGold : cMut, text_size = f_sz(), bgcolor = cBg)
