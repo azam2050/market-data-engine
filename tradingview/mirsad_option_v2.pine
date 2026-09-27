@@ -13,7 +13,7 @@
 // ══════════════════════════════════════════════════════════════════════════
 //@version=6
 indicator("مِرصاد أوبشن", "MIRSAD OPTION", overlay = true, max_labels_count = 500,
-     max_lines_count = 100)
+     max_lines_count = 100, max_boxes_count = 50)
 
 // ═══════════════════════════════════════════════════════════ الإعدادات
 gM = "النمط"
@@ -37,6 +37,10 @@ useRange = input.bool(false, "حدّ الصندوق (سوق عرضي)", group = 
      tooltip = "في السوق العرضي: الدخول من طرف الصندوق نحو وسطه. مطفأة لأن العرضي يذيب قيمة العقد بلا حركة. شغّلها إن كنت تتاجر العرضي بقصد.")
 revK = input.float(1.5, "حجم شمعة الانعكاس × ATR", minval = 0.8, maxval = 4.0, step = 0.25, group = gS,
      tooltip = "ارفعه فتقلّ إشارات الانعكاس وتصير الشمعة أوضح.")
+useBrk = input.bool(true, "كسر القمة والقاع (أي سوق)", group = gS,
+     tooltip = "شمعة قوية بحجم عالٍ تغلق فوق أعلى قمة أو تحت أدنى قاع لآخر شموع. تمسك الانطلاقات السريعة — مثل نزول الافتتاح الحاد — التي لا ترجع للغيمة.")
+brkN = input.int(20, "الكسر: قمة/قاع آخر … شمعة", minval = 5, maxval = 100, group = gS)
+brkVol = input.float(1.5, "الكسر: حجم الشمعة ≥ × المعتاد", minval = 1.0, maxval = 5.0, step = 0.25, group = gS)
 needTrend = input.bool(false, "مع ميل متوسط الاتجاه فقط", group = gS,
      tooltip = "يمنع الكول والاتجاه العام نازل، والبوت والاتجاه العام طالع. شغّله إن أزعجتك إشارات عكس ما تراه.")
 
@@ -47,6 +51,14 @@ trendN = input.int(50, "متوسط الاتجاه العام", minval = 20, maxv
 showCloud = input.bool(true, "إظهار الغيمة", group = gT,
      tooltip = "إخفاؤها لا يغيّر أي إشارة — يخفي الرسم فقط لشارت أنظف.")
 cloudT = input.int(80, "شفافية الغيمة", minval = 0, maxval = 95, group = gT)
+
+gZ = "مناطق العرض والطلب"
+showZones = input.bool(true, "ارسم المناطق", group = gZ,
+     tooltip = "منطقة عرض عند كل قمة واضحة، ومنطقة طلب عند كل قاع واضح. تختفي المنطقة إذا اخترقها السعر.")
+avoidZone = input.bool(true, "لا كول تحت عرض قريب ولا بوت فوق طلب قريب", group = gZ,
+     tooltip = "يمنع الدخول والسعر يصطدم بمنطقة قريبة ضدّك — الكول تحت سقف، والبوت فوق أرضية.")
+zoneDist = input.float(0.75, "قرب المنطقة × ATR", minval = 0.1, maxval = 3.0, step = 0.25, group = gZ)
+pivN = input.int(5, "وضوح القمة/القاع (شموع كل جهة)", minval = 2, maxval = 20, group = gZ)
 
 gX = "الخروج"
 stopX = input.float(1.5, "الوقف على السهم × ATR", minval = 0.5, maxval = 4.0, step = 0.25, group = gX,
@@ -97,17 +109,19 @@ showSar = input.bool(true, "اعرض القيمة بالريال", group = gC, i
 sarRate = input.float(3.75, "", group = gC, inline = "sar")
 
 gB = "الباحث"
+scanOnly = input.bool(false, "وضع الباحث فقط", group = gB,
+     tooltip = "يخفي البطاقة والإشارات ويبقي الباحث وحده، ويرفع حدّه إلى ٣٠ رمزاً. أضف المؤشر مرة ثانية بهذا الوضع وقائمة ثانية لتراقب رموزاً أكثر.")
 scanOn = input.bool(true, "تشغيل الباحث", group = gB,
      tooltip = "يراقب قائمة رموز ويرتبها كل شمعة حسب خمسة شروط: السيولة · القوة مقابل السوق · شمعة التأكيد · التوقيت · توافق الحالة. كل ما غمق اللون كانت الشروط المكتملة أكثر.")
 scanList = input.string("NVDA,TSLA,META,AMZN,AAPL,MSFT,AMD,GOOGL,NFLX,AVGO,COIN,PLTR,MU,SMCI,SPY,QQQ", "الرموز (فاصلة بينها)", group = gB)
-scanRows = input.int(8, "عدد الصفوف المعروضة", minval = 3, maxval = 16, group = gB)
+scanRows = input.int(8, "عدد الصفوف المعروضة", minval = 3, maxval = 30, group = gB)
 dollarTgt = input.float(1.0, "هدف الحركة بالدولار", minval = 0.1, step = 0.25, group = gB,
      tooltip = "يُستعمل في عدّاد الحركة: هل هذا الهدف قريب أم بعيد قياساً بمدى الرمز المعتاد في اليوم.")
 
 gV = "الشكل"
 cardPos = input.string("أعلى اليمين", "مكان البطاقة", options = ["أعلى اليمين", "أعلى اليسار", "أسفل اليمين", "أسفل اليسار"], group = gV)
 scanPos = input.string("أسفل اليمين", "مكان الباحث", options = ["أعلى اليمين", "أعلى اليسار", "أسفل اليمين", "أسفل اليسار"], group = gV)
-cardSz = input.string("عادي", "حجم الخط", options = ["صغير", "عادي", "كبير"], group = gV)
+cardSz = input.string("كبير", "حجم الخط", options = ["صغير", "عادي", "كبير"], group = gV)
 showLines = input.bool(true, "خطوط الدخول والوقف والأهداف", group = gV)
 nTg = input.int(3, "عدد أهداف السهم على الشارت", minval = 1, maxval = 5, group = gV)
 
@@ -159,11 +173,27 @@ f_exp() =>
          expMode == "الجمعة بعد القادمة" ? toFri + 7 : daily ? 0 : toFri
     expMode == "يدوي" ? expManual : time + d * 86400000
 
+LRM = "‎"
+RLM = "‏"
+SEP = RLM + "  ·  " + RLM
+
 f_sg(float x, string fmt) =>
-    (x >= 0 ? "+" : "") + str.tostring(x, fmt)
+    LRM + (x >= 0 ? "+" : "") + str.tostring(x, fmt) + LRM
+
+f_n(float x, string fmt) =>
+    LRM + str.tostring(x, fmt) + LRM
+
+f_m(float x) =>
+    LRM + str.tostring(x, "0.00") + "$" + LRM
+
+f_x(float x) =>
+    LRM + "×" + str.tostring(x, "0.0") + LRM
+
+f_tf(string p) =>
+    LRM + p + LRM + " د"
 
 f_why(int w) =>
-    w == 1 ? "ارتداد الاتجاه" : w == 2 ? "حدّ الصندوق" : w == 3 ? "انعكاس" : "—"
+    w == 1 ? "ارتداد الاتجاه" : w == 2 ? "حدّ الصندوق" : w == 3 ? "انعكاس" : w == 4 ? "كسر القمة/القاع" : "—"
 
 f_state(int s) =>
     s == 1 ? "مندفع صاعد" : s == -1 ? "مندفع هابط" : s == 0 ? "عرضي" : "متحوّل"
@@ -192,8 +222,13 @@ f_engine() =>
     s2 = useRange and st_ == 0 and high >= bh_ - edgeP * bw_ and close < open and close < high - 0.5 * rg_
     l3 = useRev and st_ == 2 and rg_ > 0 and bd_ >= revK * a_ and close > ct_ and open < ct_
     s3 = useRev and st_ == 2 and rg_ > 0 and -bd_ >= revK * a_ and close < cb_ and open > cb_
-    sd_ = l1 or l2 or l3 ? 1 : s1 or s2 or s3 ? -1 : 0
-    wh_ = l1 or s1 ? 1 : l2 or s2 ? 2 : l3 or s3 ? 3 : 0
+    hiN_ = ta.highest(high, brkN)[1]
+    loN_ = ta.lowest(low, brkN)[1]
+    rvE_ = volume / math.max(nz(ta.sma(volume, 20)[1]), 1)
+    l4 = useBrk and rg_ > 0 and close > hiN_ and bd_ >= 0.6 * a_ and (close - low) >= 0.7 * rg_ and rvE_ >= brkVol
+    s4 = useBrk and rg_ > 0 and close < loN_ and -bd_ >= 0.6 * a_ and (high - close) >= 0.7 * rg_ and rvE_ >= brkVol
+    sd_ = l1 or l2 or l3 or l4 ? 1 : s1 or s2 or s3 or s4 ? -1 : 0
+    wh_ = l1 or s1 ? 1 : l2 or s2 ? 2 : l3 or s3 ? 3 : l4 or s4 ? 4 : 0
     [sd_, st_, wh_, ct_, cb_, a_, ax_]
 
 f_chg() =>
@@ -248,8 +283,61 @@ trendUp = eT > eT[10]
 trendDn = eT < eT[10]
 budget = maxSig == 0 or sigToday < maxSig
 gateOk = barsToday >= 1 and not lateBar and budget
-rawL0 = rawSide == 1 and allowL and (not needTrend or trendUp) and gateOk
-rawS0 = rawSide == -1 and allowS and (not needTrend or trendDn) and gateOk
+// ــ مناطق العرض والطلب: من القمم والقيعان المؤكّدة فقط (تظهر بعد pivN شمعة — لا نظر للمستقبل)
+var array<float> supTop = array.new<float>()
+var array<float> supBot = array.new<float>()
+var array<box> supBox = array.new<box>()
+var array<float> demTop = array.new<float>()
+var array<float> demBot = array.new<float>()
+var array<box> demBox = array.new<box>()
+ph = ta.pivothigh(high, pivN, pivN)
+pl = ta.pivotlow(low, pivN, pivN)
+if not na(ph)
+    array.unshift(supTop, ph)
+    array.unshift(supBot, ph - 0.35 * atr)
+    array.unshift(supBox, showZones ? box.new(bar_index - pivN, ph, bar_index, ph - 0.35 * atr, border_color = color.new(cDn, 60),
+         bgcolor = color.new(cDn, 85), extend = extend.right) : box(na))
+    if array.size(supTop) > 4
+        array.pop(supTop)
+        array.pop(supBot)
+        box.delete(array.pop(supBox))
+if not na(pl)
+    array.unshift(demBot, pl)
+    array.unshift(demTop, pl + 0.35 * atr)
+    array.unshift(demBox, showZones ? box.new(bar_index - pivN, pl + 0.35 * atr, bar_index, pl, border_color = color.new(cUp, 60),
+         bgcolor = color.new(cUp, 85), extend = extend.right) : box(na))
+    if array.size(demBot) > 4
+        array.pop(demTop)
+        array.pop(demBot)
+        box.delete(array.pop(demBox))
+// منطقة يخترقها السعر بإغلاق تُحذف
+if array.size(supTop) > 0
+    for i = array.size(supTop) - 1 to 0
+        if close > array.get(supTop, i) + 0.1 * atr
+            array.remove(supTop, i)
+            array.remove(supBot, i)
+            box.delete(array.remove(supBox, i))
+if array.size(demBot) > 0
+    for i = array.size(demBot) - 1 to 0
+        if close < array.get(demBot, i) - 0.1 * atr
+            array.remove(demTop, i)
+            array.remove(demBot, i)
+            box.delete(array.remove(demBox, i))
+nearSup = false
+if array.size(supBot) > 0
+    for i = 0 to array.size(supBot) - 1
+        b_ = array.get(supBot, i)
+        if b_ >= close and b_ - close <= zoneDist * atr
+            nearSup := true
+nearDem = false
+if array.size(demTop) > 0
+    for i = 0 to array.size(demTop) - 1
+        t_ = array.get(demTop, i)
+        if t_ <= close and close - t_ <= zoneDist * atr
+            nearDem := true
+
+rawL0 = rawSide == 1 and allowL and (not needTrend or trendUp) and gateOk and not (avoidZone and nearSup) and not scanOnly
+rawS0 = rawSide == -1 and allowS and (not needTrend or trendDn) and gateOk and not (avoidZone and nearDem) and not scanOnly
 
 // عدّاد الحركة والقوة مقابل السوق
 dAtr = request.security(syminfo.tickerid, "D", ta.atr(14)[1], lookahead = barmerge.lookahead_off)
@@ -312,6 +400,8 @@ var int nTr = 0
 var int nWin = 0
 var float sumR = 0.0
 var float sumPeakR = 0.0
+var float sumD = 0.0
+var float sumPeakD = 0.0
 var int nCon = 0
 var float sumCon = 0.0
 var float sumConPeak = 0.0
@@ -323,7 +413,7 @@ sigL = rawL and barstate.isconfirmed and pos == 0
 sigS = rawS and barstate.isconfirmed and pos == 0
 preL = rawL and barstate.isrealtime and not barstate.isconfirmed and pos == 0
 preS = rawS and barstate.isrealtime and not barstate.isconfirmed and pos == 0
-conWindow = time >= timenow - conDays * 86400000
+conWindow = time >= last_bar_time - conDays * 86400000
 
 // ــ ١) الخروج أولاً
 exitNow = false
@@ -395,6 +485,8 @@ if exitNow
     nWin += rR > 0 ? 1 : 0
     sumR += rR
     sumPeakR += peakR
+    sumD += (exitPx - eP) * pos
+    sumPeakD += peakR * unit
     cOut = not na(conExitPx) ? conExitPx : conNow
     conRes = conSym != "" and not na(conEntry) and not na(cOut) ? (cOut / conEntry - 1) * 100 : na
     if not na(conRes)
@@ -402,18 +494,17 @@ if exitNow
         sumCon += conRes
         sumConPeak += conPeak
         array.unshift(logSym, str.replace_all(conSym, conPrefix, ""))
-        array.unshift(logTxt, "دخول " + str.tostring(conEntry, "0.00") + "  ·  أعلى " +
-             (na(conMax) ? "—" : str.tostring(conMax, "0.00")) + "  ·  خروج " + str.tostring(cOut, "0.00") +
-             "  ·  " + f_sg(conRes, "#") + "٪  ·  " + exitReason)
+        array.unshift(logTxt, "دخول " + f_m(conEntry) + SEP + "أعلى " + (na(conMax) ? "—" : f_m(conMax)) +
+             SEP + "خروج " + f_m(cOut) + SEP + f_sg(conRes, "#") + "٪" + SEP + exitReason)
         array.unshift(logRes, conRes)
         if array.size(logSym) > 5
             array.pop(logSym)
             array.pop(logTxt)
             array.pop(logRes)
-    exitTxt := exitReason + (na(conRes) ? "  ·  " + f_sg(rR, "0.00") + "R" :
-         "  ·  العقد " + f_sg(conRes, "#") + "٪ (القمة " + f_sg(conPeak, "#") + "٪)")
+    exitTxt := exitReason + SEP + (na(conRes) ? "السهم " + f_sg((exitPx - eP) * pos, "0.00") + "$" :
+         "العقد " + f_sg(conRes, "#") + "٪" + SEP + "القمة " + f_sg(conPeak, "#") + "٪")
     exitAt := bar_index
-    label.new(bar_index, pos == 1 ? high : low, "خروج · " + exitTxt,
+    label.new(bar_index, pos == 1 ? high : low, "خروج" + SEP + exitTxt,
          style = pos == 1 ? label.style_label_down : label.style_label_up,
          color = color.new(#161b22, 0), textcolor = (na(conRes) ? rR : conRes) > 0 ? cUp : cMut, size = size.small)
     alert("مِرصاد أوبشن: خروج " + syminfo.ticker + " · " + exitTxt, alert.freq_once_per_bar)
@@ -492,8 +583,8 @@ if preL or preS
          " — الإشارة تتأكد بإغلاق الشمعة", alert.freq_once_per_bar)
 
 // ═══════════════════════════════════════════════════════════════ الرسم
-pF = plot(showCloud ? eF : na, "المتوسط السريع", color.new(cUp, 100))
-pS = plot(showCloud ? eS : na, "المتوسط البطيء", color.new(cDn, 100))
+pF = plot(showCloud and not scanOnly ? eF : na, "المتوسط السريع", color.new(cUp, 100))
+pS = plot(showCloud and not scanOnly ? eS : na, "المتوسط البطيء", color.new(cDn, 100))
 fill(pF, pS, eF > eS ? color.new(cUp, cloudT) : color.new(cDn, cloudT), "الغيمة")
 inTr = pos != 0 and showLines
 plot(inTr ? eP : na, "الدخول", cGold, 2, plot.style_linebr)
@@ -511,88 +602,98 @@ alertcondition(sigS, "مِرصاد — بوت", "مِرصاد أوبشن: إشا
 alertcondition(exitNow, "مِرصاد — خروج", "مِرصاد أوبشن: خروج من الصفقة")
 
 // ═══════════════════════════════════════════════════════════════ البطاقة
-var table cd = table.new(f_pos(cardPos), 2, 22, border_width = 1, border_color = color.new(#30363d, 30))
-f_row(int r, string a, string b, color cb_) =>
-    table.cell(cd, 0, r, a, text_color = cMut, text_size = f_sz(), text_halign = text.align_right, bgcolor = cBg)
-    table.cell(cd, 1, r, b, text_color = cb_, text_size = f_sz(), text_halign = text.align_left, bgcolor = cBg)
+// أربعة أعمدة من اليمين: العنوان ثم ثلاث خانات — كل رقم في خانته فلا ينقلب الترتيب
+var table cd = table.new(f_pos(cardPos), 4, 22, border_width = 1, border_color = color.new(#30363d, 30))
+f_c(int c, int r, string t, color tc, color bg) =>
+    table.cell(cd, c, r, t, text_color = tc, text_size = f_sz(), text_halign = text.align_center, bgcolor = bg)
+f_row(int r, string lab, string v1, string v2, string v3, color tc) =>
+    table.cell(cd, 3, r, lab, text_color = cMut, text_size = f_sz(), text_halign = text.align_right, bgcolor = cHd)
+    f_c(2, r, v1, tc, cBg)
+    f_c(1, r, v2, tc, cBg)
+    f_c(0, r, v3, tc, cBg)
+f_wide(int r, string lab, string v, color tc) =>
+    table.cell(cd, 3, r, lab, text_color = cMut, text_size = f_sz(), text_halign = text.align_right, bgcolor = cHd)
+    f_c(0, r, v, tc, cBg)
+    table.merge_cells(cd, 0, r, 2, r)
 
 f_tgt(float peak) =>
-    (peak >= tg1 ? "✓" : "·") + str.tostring(tg1) + "  " + (peak >= tg2 ? "✓" : "·") + str.tostring(tg2) + "  " +
-     (peak >= tg3 ? "✓" : "·") + str.tostring(tg3) + "  " + (peak >= tg4 ? "✓" : "·") + str.tostring(tg4) + "  " +
-     (peak >= tg5 ? "✓" : "·") + str.tostring(tg5) + "٪"
+    (peak >= tg5 ? "✓" : "○") + f_n(tg5, "#") + "٪   " + (peak >= tg4 ? "✓" : "○") + f_n(tg4, "#") + "٪   " +
+     (peak >= tg3 ? "✓" : "○") + f_n(tg3, "#") + "٪   " + (peak >= tg2 ? "✓" : "○") + f_n(tg2, "#") + "٪   " +
+     (peak >= tg1 ? "✓" : "○") + f_n(tg1, "#") + "٪"
 
-if barstate.islast
-    table.clear(cd, 0, 0, 1, 21)
-    table.cell(cd, 0, 0, "مِرصاد أوبشن", text_color = cGold, text_size = f_sz(), text_halign = text.align_right, bgcolor = cHd)
-    table.cell(cd, 1, 0, syminfo.ticker + "  ·  " + timeframe.period + "  ·  " + mode + "  ·  " + exitMode + (mkt24 ? "  ·  ٢٤ ساعة" : ""),
-         text_color = cTxt, text_size = f_sz(), text_halign = text.align_left, bgcolor = cHd)
+if barstate.islast and not scanOnly
+    table.clear(cd, 0, 0, 3, 21)
+    table.cell(cd, 3, 0, "مِرصاد أوبشن", text_color = cGold, text_size = f_sz(), text_halign = text.align_right, bgcolor = cHd)
+    f_c(2, 0, LRM + syminfo.ticker + LRM, cTxt, cHd)
+    f_c(1, 0, f_tf(timeframe.period) + SEP + mode, cTxt, cHd)
+    f_c(0, 0, exitMode + (mkt24 ? SEP + "٢٤ ساعة" : ""), cTxt, cHd)
     conFresh = not na(conT) and timenow - conT < 3 * tfMs
-    f_row(1, "البيانات", "السهم " + (stockLive ? "مباشرة ●" : "غير مؤكدة ○") + "   ·   العقد " +
-         (conSym == "" ? "—" : conFresh ? "مباشرة ●" : "غير مؤكدة ○"), stockLive ? cUp : cMut)
+    f_row(1, "البيانات", "السهم " + (stockLive ? "● مباشرة" : "○ غير مؤكدة"),
+         "العقد " + (conSym == "" ? "—" : conFresh ? "● مباشرة" : "○ غير مؤكدة"), "", stockLive ? cUp : cMut)
     stCol = state == 1 ? cUp : state == -1 ? cDn : state == 0 ? cMut : cGold
-    f_row(2, "حالة السوق", f_state(state) + "   ADX " + str.tostring(adx, "#"), stCol)
-    if not mobile
-        f_row(3, "حركة الفريمات", timeframe.period + "د " + f_state(state) + "   ·   " + otherTf + "د " +
-             (na(stOther) ? "—" : f_state(int(stOther))), cTxt)
-    sigTxt = pos != 0 ? (pos == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) + "  ·  " + f_why(eWhy) +
-         "  ·  جودة " + str.tostring(eQual) + "/100" :
-         preL ? "استعداد كول — تتأكد بإغلاق الشمعة  ·  جودة " + str.tostring(qL) :
-         preS ? "استعداد بوت — تتأكد بإغلاق الشمعة  ·  جودة " + str.tostring(qS) : "لا صفقة"
-    f_row(4, "الإشارة", sigTxt, pos == 1 or preL ? cUp : pos == -1 or preS ? cDn : cMut)
+    f_row(2, "حالة السوق", f_state(state), "قوة الاتجاه " + f_n(adx, "#"),
+         mobile ? "" : f_tf(otherTf) + " " + (na(stOther) ? "—" : f_state(int(stOther))), stCol)
+    sd1 = pos == 1 ? "كول" : pos == -1 ? "بوت" : preL ? "استعداد كول" : preS ? "استعداد بوت" : "لا صفقة"
+    sd2 = pos != 0 ? f_why(eWhy) : preL or preS ? "تتأكد بإغلاق الشمعة" : ""
+    sd3 = pos != 0 ? "دخول " + f_n(eP, "#.##") + SEP + "جودة " + f_n(eQual, "#") :
+         preL ? "جودة " + f_n(qL, "#") : preS ? "جودة " + f_n(qS, "#") : ""
+    f_row(3, "الإشارة", sd1, sd2, sd3, pos == 1 or preL ? cUp : pos == -1 or preS ? cDn : cMut)
     gNow = conSym != "" and not na(conNow) and not na(conEntry) and conEntry > 0 ? (conNow / conEntry - 1) * 100 : na
-    conTxt = conSym != "" ? str.replace_all(conSym, conPrefix, "") + "  ·  مثبّت" : conMsg != "" ? conMsg :
-         pos != 0 ? "بلا عقد (خارج نافذة الجلب أو ليس سهماً)" : "—"
-    f_row(5, "العقد", conTxt, conSym != "" ? cTxt : cMut)
+    if conSym != ""
+        f_row(4, "العقد", LRM + str.replace_all(conSym, conPrefix, "") + LRM, "مثبّت",
+             showSar and not na(conNow) ? f_n(conNow * 100 * sarRate, "#") + " ر.س" : "", cTxt)
+    else
+        f_wide(4, "العقد", conMsg != "" ? conMsg : pos != 0 ? "بلا عقد — خارج نافذة الجلب أو ليس سهماً" : "—", cMut)
     if not mobile
-        prTxt = na(conEntry) ? "—" : "دخول " + str.tostring(conEntry, "0.00") + "  ·  الآن " +
-             (na(conNow) ? "—" : str.tostring(conNow, "0.00")) +
-             (na(gNow) ? "" : "  ·  " + f_sg(gNow, "#") + "٪") + "  ·  أعلى " + f_sg(conPeak, "#") + "٪" +
-             (showSar and not na(conNow) ? "  ·  " + str.tostring(conNow * 100 * sarRate, "#") + " ر.س" : "")
-        f_row(6, "سعر العقد", prTxt, na(gNow) ? cMut : gNow >= 0 ? cUp : cDn)
-        f_row(7, "أهداف العقد", conSym == "" ? "—" : f_tgt(conPeak), cTxt)
-    stopTxt = pos == 0 ? "—" : not na(conLockPx) ? "ضع وقف العقد عند " + str.tostring(conLockPx, "0.00") + "$  (قفل ربح " +
-         f_sg((conLockPx / conEntry - 1) * 100, "#") + "٪)" :
-         conSym != "" and conStopPct > 0 ? "ضع وقف العقد عند " + str.tostring(conEntry * (1 - conStopPct / 100.0), "0.00") + "$" :
-         conSym != "" and exitMode == "قفل الربح" ? "القفل يبدأ بعد +" + str.tostring(lockAfter) + "٪ على العقد" :
-         "وقف السهم " + str.tostring(sP, format.mintick)
-    f_row(8, "وقف العقد", stopTxt, not na(conLockPx) ? cGold : cTxt)
+        f_row(5, "سعر العقد", "دخول " + (na(conEntry) ? "—" : f_m(conEntry)),
+             "الآن " + (na(conNow) ? "—" : f_m(conNow)) + (na(gNow) ? "" : SEP + f_sg(gNow, "#") + "٪"),
+             "أعلى " + f_sg(conPeak, "#") + "٪", na(gNow) ? cMut : gNow >= 0 ? cUp : cDn)
+        f_wide(6, "أهداف العقد", conSym == "" ? "—" : f_tgt(conPeak), cTxt)
+    stopA = pos == 0 ? "—" : not na(conLockPx) ? "ضع الوقف عند " + f_m(conLockPx) :
+         conSym != "" and conStopPct > 0 ? "ضع الوقف عند " + f_m(conEntry * (1 - conStopPct / 100.0)) :
+         "وقف السهم " + f_n(sP, "#.##")
+    stopB = pos == 0 ? "" : not na(conLockPx) ? "قفل ربح " + f_sg((conLockPx / conEntry - 1) * 100, "#") + "٪" :
+         conSym != "" and exitMode == "قفل الربح" ? "القفل بعد " + f_sg(lockAfter, "#") + "٪" : ""
+    f_row(7, "وقف العقد", stopA, stopB, "", not na(conLockPx) ? cGold : cTxt)
     showExit = exitTxt != "" and not na(exitAt) and bar_index - exitAt <= 30
-    f_row(9, "آخر خروج", showExit ? exitTxt : "—", showExit ? cTxt : cMut)
+    f_wide(8, "آخر خروج", showExit ? exitTxt : "—", showExit ? cTxt : cMut)
     if not mobile
-        mvTxt = na(usedPct) ? "—" : "قطع " + str.tostring(usedPct, "#") + "٪ من مداه المعتاد  ·  " +
-             (usedPct < 60 ? "مجال واسع" : usedPct < 100 ? "مجال متوسط" : "استنفد مداه")
-        f_row(10, "حركة اليوم", mvTxt, na(usedPct) ? cMut : usedPct < 60 ? cUp : usedPct < 100 ? cGold : cDn)
-        dTxt = na(tgtShare) ? "—" : str.tostring(dollarTgt, "0.00") + "$ = " + str.tostring(tgtShare * 100, "#") + "٪ من مداه اليومي  ·  " +
-             (tgtShare < 0.2 ? "قريب" : tgtShare < 0.4 ? "متوسط" : tgtShare < 0.8 ? "بعيد" : "بعيد جداً")
-        f_row(11, "هدف الدولار", dTxt, na(tgtShare) ? cMut : tgtShare < 0.4 ? cUp : cDn)
-        f_row(12, "مقابل السوق", (rsVsMkt >= 0 ? "أقوى من SPY بـ " : "أضعف من SPY بـ ") + str.tostring(math.abs(rsVsMkt), "0.00") +
-             "٪  ·  السيولة ×" + str.tostring(rvNow, "0.0"), rsVsMkt >= 0 ? cUp : cDn)
-    recTxt = nTr == 0 ? "لا صفقات بعد على هذا الشارت" : str.tostring(nTr) + " صفقة  ·  رابحة " +
-         str.tostring(100.0 * nWin / nTr, "#") + "٪  ·  متوسط " + f_sg(sumR / nTr, "0.00") +
-         "R  ·  متوسط القمة " + str.tostring(sumPeakR / nTr, "0.00") + "R"
-    f_row(13, "سجلّ هذا الشارت", recTxt, cTxt)
+        f_row(9, "حركة اليوم", na(usedPct) ? "—" : "قطع " + f_n(usedPct, "#") + "٪ من مداه",
+             na(usedPct) ? "" : usedPct < 60 ? "مجال واسع" : usedPct < 100 ? "مجال متوسط" : "استنفد مداه", "",
+             na(usedPct) ? cMut : usedPct < 60 ? cUp : usedPct < 100 ? cGold : cDn)
+        f_row(10, "هدف الدولار", f_m(dollarTgt), na(tgtShare) ? "—" : f_n(tgtShare * 100, "#") + "٪ من مداه اليومي",
+             na(tgtShare) ? "" : tgtShare < 0.2 ? "قريب" : tgtShare < 0.4 ? "متوسط" : tgtShare < 0.8 ? "بعيد" : "بعيد جداً",
+             na(tgtShare) ? cMut : tgtShare < 0.4 ? cUp : cDn)
+        f_row(11, "مقابل السوق", (rsVsMkt >= 0 ? "أقوى من " : "أضعف من ") + LRM + "SPY" + LRM,
+             f_n(math.abs(rsVsMkt), "0.00") + "٪", "السيولة " + f_x(rvNow), rsVsMkt >= 0 ? cUp : cDn)
+    f_row(12, "سجلّ الشارت", nTr == 0 ? "لا صفقات بعد" : f_n(nTr, "#") + " صفقة",
+         nTr == 0 ? "" : "رابحة " + f_n(100.0 * nWin / nTr, "#") + "٪",
+         nTr == 0 ? "" : "متوسط " + f_sg(sumD / nTr, "0.00") + "$" + SEP + "القمة " + f_sg(sumPeakD / nTr, "0.00") + "$", cTxt)
     if not mobile
-        conRec = nCon == 0 ? "—" : str.tostring(nCon) + " عقد  ·  متوسط الخروج " + f_sg(sumCon / nCon, "#") +
-             "٪  ·  متوسط القمة " + f_sg(sumConPeak / nCon, "#") + "٪"
-        f_row(14, "سجلّ العقود", conRec, cMut)
+        f_row(13, "سجلّ العقود", nCon == 0 ? "—" : f_n(nCon, "#") + " عقد",
+             nCon == 0 ? "" : "متوسط الخروج " + f_sg(sumCon / nCon, "#") + "٪",
+             nCon == 0 ? "" : "متوسط القمة " + f_sg(sumConPeak / nCon, "#") + "٪", cMut)
         nl = array.size(logSym)
         if nl > 0
             for r = 0 to nl - 1
-                f_row(15 + r, array.get(logSym, r), array.get(logTxt, r), array.get(logRes, r) >= 0 ? cUp : cDn)
+                rc = array.get(logRes, r) >= 0 ? cUp : cDn
+                table.cell(cd, 3, 14 + r, LRM + array.get(logSym, r) + LRM, text_color = cTxt, text_size = f_sz(), text_halign = text.align_right, bgcolor = cHd)
+                f_c(0, 14 + r, array.get(logTxt, r), rc, cBg)
+                table.merge_cells(cd, 0, 14 + r, 2, 14 + r)
     warn = chart.is_heikinashi ? "⚠ شموع هايكن آشي — غيّرها إلى شموع يابانية" :
          not intraday ? "⚠ المؤشر مصمَّم لفريمات الدقائق" : ""
     if warn != ""
-        f_row(21, "تنبيه", warn, cDn)
+        f_wide(21, "تنبيه", warn, cDn)
 
 // ═══════════════════════════════════════════════════════════════ الباحث
-var table sc = table.new(f_pos(scanPos), 7, 20, border_width = 1, border_color = color.new(#30363d, 30))
-if scanOn and not mobile and barstate.islast
-    table.clear(sc, 0, 0, 6, 19)
+var table sc = table.new(f_pos(scanPos), 7, 34, border_width = 1, border_color = color.new(#30363d, 30))
+if scanOn and (not mobile or scanOnly) and barstate.islast
+    table.clear(sc, 0, 0, 6, 33)
     syms = str.split(str.replace_all(scanList, " ", ""), ",")
-    n = math.min(array.size(syms), 16)
-    mkTxt = "S&P " + f_sg(nz(spyChg), "0.00") + "٪  ·  ناسداك " + f_sg(nz(qqqChg), "0.00") + "٪  ·  " +
-         str.tostring(n) + " رمز  ·  " + timeframe.period + "د  ·  " + mode
-    table.cell(sc, 0, 0, "الباحث  ·  " + mkTxt, text_color = cGold, text_size = f_sz(), bgcolor = cHd)
+    n = math.min(array.size(syms), scanOnly ? 30 : 16)
+    mkTxt = LRM + "S&P" + LRM + " " + f_sg(nz(spyChg), "0.00") + "٪" + SEP + "ناسداك " + f_sg(nz(qqqChg), "0.00") + "٪" +
+         SEP + f_n(n, "#") + " رمز" + SEP + f_tf(timeframe.period) + SEP + mode
+    table.cell(sc, 0, 0, "الباحث" + SEP + mkTxt, text_color = cGold, text_size = f_sz(), bgcolor = cHd)
     table.merge_cells(sc, 0, 0, 6, 0)
     if n > 0
         scores = array.new_float(n, 0.0)
@@ -637,17 +738,17 @@ if scanOn and not mobile and barstate.islast
             me = array.get(syms, j) == syminfo.ticker
             iv = array.get(invA, j)
             sn = array.get(snA, j)
-            table.cell(sc, 0, r + 2, (me ? "★ " : "") + array.get(syms, j), text_color = cTxt, text_size = f_sz(), bgcolor = me ? cSel : cBg)
+            table.cell(sc, 0, r + 2, (me ? "★ " : "") + LRM + array.get(syms, j) + LRM, text_color = cTxt, text_size = f_sz(), bgcolor = me ? cSel : cBg)
             table.cell(sc, 1, r + 2, stTxt, text_color = cTxt, text_size = f_sz(), bgcolor = bg)
             table.cell(sc, 2, r + 2, str.repeat("●", k) + str.repeat("○", 5 - k), text_color = cTxt, text_size = f_sz(), bgcolor = bg)
             table.cell(sc, 3, r + 2, f_sg(array.get(rsA, j), "0.00") + "٪", text_color = array.get(rsA, j) >= 0 ? cUp : cDn, text_size = f_sz(), bgcolor = cBg)
-            table.cell(sc, 4, r + 2, "×" + str.tostring(array.get(rvA, j), "0.0"), text_color = array.get(rvA, j) >= 1.5 ? cGold : cMut, text_size = f_sz(), bgcolor = cBg)
-            table.cell(sc, 5, r + 2, na(iv) ? "—" : (d == 1 ? "تحت " : "فوق ") + str.tostring(iv, "0.00"), text_color = cMut, text_size = f_sz(), bgcolor = cBg)
+            table.cell(sc, 4, r + 2, f_x(array.get(rvA, j)), text_color = array.get(rvA, j) >= 1.5 ? cGold : cMut, text_size = f_sz(), bgcolor = cBg)
+            table.cell(sc, 5, r + 2, na(iv) ? "—" : (d == 1 ? "تحت " : "فوق ") + f_n(iv, "0.00"), text_color = cMut, text_size = f_sz(), bgcolor = cBg)
             table.cell(sc, 6, r + 2, na(sn) ? "—" : f_sg(sn, "0.00") + "٪", text_color = na(sn) ? cMut : sn >= 0 ? cUp : cDn, text_size = f_sz(), bgcolor = cBg)
         best = array.get(order_, 0)
         bd = array.get(sides, best)
         bk = int(math.round(math.max(array.get(scores, best), 0.0)))
-        foot = bd == 0 ? "لا فرصة واضحة الآن" : "أقوى فرصة الآن: " + array.get(syms, best) + (bd == 1 ? " CALL" : " PUT") +
-             "  ·  " + str.tostring(bk) + "/5" + (bd * nz(spyChg) < 0 ? "  ·  ⚠ عكس اتجاه السوق" : "")
+        foot = bd == 0 ? "لا فرصة واضحة الآن" : "أقوى فرصة الآن: " + LRM + array.get(syms, best) + (bd == 1 ? " CALL" : " PUT") + LRM +
+             SEP + f_n(bk, "#") + " من ٥" + (bd * nz(spyChg) < 0 ? SEP + "⚠ عكس اتجاه السوق" : "")
         table.cell(sc, 0, rows + 2, foot, text_color = cGold, text_size = f_sz(), bgcolor = cHd)
         table.merge_cells(sc, 0, rows + 2, 6, rows + 2)
