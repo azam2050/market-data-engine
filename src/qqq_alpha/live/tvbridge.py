@@ -444,7 +444,7 @@ def indicator_report_text(
     from qqq_alpha.live.cards import arabic_date
 
     span = arabic_date(until) if since == until else f"من {arabic_date(since)} إلى {arabic_date(until)}"
-    lines = [f"📊 مِرصاد ٩ — تقرير الأداء {REPORT_KIND_AR.get(kind, kind)} · {span}", "━━━━━━━━━━━━━━"]
+    lines = [f"📊 مِرصاد أوبشن — تقرير الأداء {REPORT_KIND_AR.get(kind, kind)} · {span}", "━━━━━━━━━━━━━━"]
     if rows:
         wins = [r for r in rows if r["pct"] > 0]
         total = sum(r["pct"] for r in rows)
@@ -568,7 +568,7 @@ class TvBridge:
     async def _on_entry(self, sig: TvSignal) -> None:
         side_txt = "كول 🟢" if sig.side > 0 else "بوت 🔴"
         now = datetime.now(UTC)
-        # MIRSAD 9 in immediate mode sends the signal alert and, one bar
+        # MIRSAD OPTION in immediate mode sends the signal alert and, one bar
         # later, the entry alert with the fill price: the same trade twice.
         # The second one refines the entry price instead of opening a twin.
         live = self._open.get(sig.symbol)

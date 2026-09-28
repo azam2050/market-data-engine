@@ -1,4 +1,4 @@
-"""The channels carry MIRSAD 9's reports and nothing else: a card to both
+"""The channels carry MIRSAD OPTION's reports and nothing else: a card to both
 rooms after the bell, the text ledger when a photo cannot be delivered, and
 never an exception into the engine."""
 
@@ -208,7 +208,7 @@ def _one_indicator_trade(engine, day: date) -> None:
 
 @pytest.mark.asyncio
 async def test_the_after_bell_package_is_the_indicator_report_in_both_rooms(tmp_path):
-    """After the bell the only thing the channels receive is MIRSAD 9's
+    """After the bell the only thing the channels receive is MIRSAD OPTION's
     card — the desk's own trades stay with the operator."""
     engine = _reporting_engine(tmp_path)
     assert engine.private_channel is not None
@@ -241,7 +241,7 @@ async def test_reports_still_publish_with_no_private_channel_configured(tmp_path
     await engine.channel._notifier._client.aclose()
 
 
-# ---------------------------------------------------------------- MIRSAD 9 report cards
+# ---------------------------------------------------------------- MIRSAD OPTION report cards
 def _tv_row(symbol, side, entry, peak, exit_px, how, day):
     return {
         "symbol": symbol, "label": f"{symbol} 180{'C' if side > 0 else 'P'}", "side": side,
@@ -275,7 +275,7 @@ def test_the_indicator_report_card_renders_for_every_period_and_for_nothing():
 
 @pytest.mark.asyncio
 async def test_the_indicator_report_reaches_both_rooms_as_a_card(tmp_path):
-    """After the bell MIRSAD 9's own scoreboard goes to the public channel
+    """After the bell MIRSAD OPTION's own scoreboard goes to the public channel
     and the updates channel alike, as a photo with the ledger as caption."""
     engine = _reporting_engine(tmp_path)
     friday = date(2026, 9, 4)
@@ -302,7 +302,7 @@ async def test_the_indicator_report_reaches_both_rooms_as_a_card(tmp_path):
     chats = [chat for chat, _ in photos]
     # Friday: the daily card and the weekly card, each to both rooms
     assert chats.count("@public") == 2 and chats.count("-1009999") == 2
-    assert all("مِرصاد ٩".encode() in body for _, body in photos)
+    assert all("مِرصاد أوبشن".encode() in body for _, body in photos)
     assert any("الأسبوعي".encode() in body for _, body in photos)
     for channel in engine._report_channels:
         await channel._notifier._client.aclose()

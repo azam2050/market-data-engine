@@ -23,7 +23,7 @@ import logging
 import statistics
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -139,10 +139,28 @@ class Opportunity:
     r: float = 0.0
     best: float | None = None   # the best price seen while open
     bars_in: int = 0
+    # a refused or skipped signal is still followed as if it had been taken,
+    # with the same fill, stop, target and bell — so the record can show what
+    # the rule declined and what that would have done. Never a position.
+    shadow: Opportunity | None = None
 
     @property
     def day(self) -> date:
         return self.signal_ts.astimezone(NY).date()
+
+    def brief(self) -> dict[str, Any]:
+        """The shadow's outcome, small enough to ride inside its signal."""
+        return {
+            "status": self.status,
+            "entry_time": _hhmm(self.entry_ts) if self.entry_ts else None,
+            "entry": _r2(self.entry),
+            "exit_time": _hhmm(self.exit_ts) if self.exit_ts else None,
+            "exit": _r2(self.exit),
+            "how": self.how,
+            "how_text": {"target": "الهدف", "stop": "الوقف", "eod": "إغلاق الجلسة"}.get(self.how, ""),
+            "r": round(self.r, 2),
+            "move_pct": self.move_pct,
+        }
 
     def fill(self, i: int, ts: datetime, px: float, via_zone: bool) -> None:
         self.status, self.entry_i, self.entry_ts, self.entry, self.via_zone = "open", i, ts, px, via_zone
@@ -194,6 +212,7 @@ class Opportunity:
             "move_pct": self.move_pct,
             "best": _r2(self.best),
             "bars_in": self.bars_in,
+            "shadow": self.shadow.brief() if self.shadow else None,
         }
 
 
@@ -239,6 +258,32 @@ def _level_price(contract: Any, spot: float, level: float, now: datetime) -> flo
 
 def _r2(x: float | None) -> float | None:
     return None if x is None else round(x, 2)
+
+
+def _declined_record(declined: list[Opportunity]) -> dict[str, Any]:
+    """What the rule refused or skipped over these sessions, and what taking
+    it all would have done — the honest side of "no trade"."""
+    shadows = [p.shadow for p in declined if p.shadow is not None]
+    closed = [s for s in shadows if s.status == "closed"]
+    rs = [s.r for s in closed]
+    wins = sum(1 for r in rs if r > 0)
+    losses = sum(1 for r in rs if r < 0)
+    total = round(sum(rs), 2)
+    rejected = sum(1 for p in declined if p.status == "rejected")
+    skipped = len(declined) - rejected
+    if not declined:
+        text = "لم ترفض القاعدة أي إشارة في هذه الجلسات."
+    elif not closed:
+        text = f"رفضت القاعدة {len(declined)} إشارة، ولم تتعبأ أي منها لو أُخذت."
+    else:
+        pct = round(100 * wins / len(rs))
+        verdict = ("الرفض كان في محله." if total <= 0
+                   else f"كانت لتضيف ربحاً، لكن بنسبة نجاح {pct}٪ أضعف من الصفقات المأخوذة وبتذبذب أكبر.")
+        text = (f"رفضت القاعدة {len(declined)} إشارة ({rejected} ضد الميل، {skipped} لضيق الفرص). "
+                f"لو أُخذت كلها: {wins} رابحة و{losses} خاسرة، المجموع {total:+.2f}R. {verdict}")
+    return {"signals": len(declined), "rejected": rejected, "skipped": skipped, "filled": len(closed),
+            "wins": wins, "losses": losses, "win_pct": round(100 * wins / len(rs)) if rs else None,
+            "r": total, "text": text}
 
 
 def _action(status: str | None, side: int, price: float | None, target: float | None, stop: float | None) -> dict[str, str]:
@@ -325,32 +370,27 @@ def replay(
     opps: list[Opportunity] = []
     pending: list[Opportunity] = []
     open_: list[Opportunity] = []
+    # the shadows: refused and skipped signals followed as if taken, through
+    # the same fill and management code, never touching the real lists
+    shadow_pending: list[Opportunity] = []
+    shadow_open: list[Opportunity] = []
     per_day: Counter[date] = Counter()
     busy = -1
     day_open = o[0]
-    for i in range(n):
-        confirmed = i < upto
-        ts = bars[i].ts
-        day = ts.astimezone(NY).date()
-        k = core[i]
-        if i == 0 or day != bars[i - 1].ts.astimezone(NY).date():
-            day_open = o[i]
-            for t in open_:
-                t.close(i - 1, bars[i - 1].ts, c[i - 1], "eod")
-            open_ = []
-            for p in pending:
-                p.cancel("انتهت الجلسة قبل التعبئة")
-            pending = []
 
-        # fills: a confirmation seen at the previous close fills at this open,
-        # a touch of the zone fills at the zone
+    def fills(i: int, confirmed: bool, waiting: list[Opportunity], held: list[Opportunity]) -> tuple[list[Opportunity], bool]:
+        """A confirmation seen at the previous close fills at this open, a
+        touch of the zone fills at the zone. Returns what still waits and
+        whether anything filled on this bar."""
+        ts = bars[i].ts
         still: list[Opportunity] = []
-        for p in pending:
+        filled = False
+        for p in waiting:
             kk = i - p.signal_i
             if p.status == "chase":
                 p.fill(i, ts, o[i], False)
-                open_.append(p)
-                busy = i
+                held.append(p)
+                filled = True
                 continue
             if not confirmed:
                 still.append(p)
@@ -359,8 +399,8 @@ def replay(
             if touched:
                 px = min(o[i], p.level) if p.side > 0 else max(o[i], p.level)
                 p.fill(i, ts, px, True)
-                open_.append(p)
-                busy = i
+                held.append(p)
+                filled = True
                 continue
             beyond = (c[i] > p.sig_hi) if p.side > 0 else (c[i] < p.sig_lo)
             if kk <= CHASE_BARS and beyond and abs(c[i] - p.level) <= MAX_CHASE_ATR * p.atr:
@@ -371,11 +411,13 @@ def replay(
                 p.cancel("لا رجوع للمنطقة ولا تأكيد خلال ٨ شموع")
                 continue
             still.append(p)
-        pending = still
+        return still, filled
 
-        # manage: the stop first, then the target, then the bell
+    def manage(i: int, confirmed: bool, held: list[Opportunity]) -> list[Opportunity]:
+        """The stop first, then the target, then the bell."""
+        ts = bars[i].ts
         kept: list[Opportunity] = []
-        for t in open_:
+        for t in held:
             t.bars_in += 1
             t.best = max(t.best or h[i], h[i]) if t.side > 0 else min(t.best or lo[i], lo[i])
             hit_stop = (lo[i] <= t.stop) if t.side > 0 else (h[i] >= t.stop)
@@ -384,11 +426,37 @@ def replay(
                 t.close(i, ts, float(t.stop), "stop")
             elif hit_target:
                 t.close(i, ts, float(t.target), "target")
-            elif confirmed and k.minute >= EOD_MINUTE:
+            elif confirmed and core[i].minute >= EOD_MINUTE:
                 t.close(i, ts, c[i], "eod")
             else:
                 kept.append(t)
-        open_ = kept
+        return kept
+
+    def follow(p: Opportunity) -> None:
+        """The declined signal walks the same path a taken one would."""
+        p.shadow = replace(p, n=0, status="waiting", reason="", shadow=None)
+        shadow_pending.append(p.shadow)
+
+    for i in range(n):
+        confirmed = i < upto
+        ts = bars[i].ts
+        day = ts.astimezone(NY).date()
+        k = core[i]
+        if i == 0 or day != bars[i - 1].ts.astimezone(NY).date():
+            day_open = o[i]
+            for t in (*open_, *shadow_open):
+                t.close(i - 1, bars[i - 1].ts, c[i - 1], "eod")
+            open_, shadow_open = [], []
+            for p in (*pending, *shadow_pending):
+                p.cancel("انتهت الجلسة قبل التعبئة")
+            pending, shadow_pending = [], []
+
+        pending, filled = fills(i, confirmed, pending, open_)
+        if filled:
+            busy = i
+        shadow_pending, _ = fills(i, confirmed, shadow_pending, shadow_open)
+        open_ = manage(i, confirmed, open_)
+        shadow_open = manage(i, confirmed, shadow_open)
 
         # a new signal: this bar and the last, the basket leaning one way,
         # the leader's bar and its own trend agreeing
@@ -409,6 +477,7 @@ def replay(
         opps.append(opp)
         if trend != side:
             opp.status, opp.reason = "rejected", "ضد ميل القائد: لا تُؤخذ"
+            follow(opp)
             continue
         opp.grade = "أ" if (c[i] - day_open) * side > 0 else "ب"
         blocked_by = (
@@ -419,11 +488,13 @@ def replay(
         )
         if blocked_by and not skipped_count:
             opp.status, opp.reason = "skipped", blocked_by
+            follow(opp)
             continue
         per_day[day] += 1
         opp.n = per_day[day]
         if blocked_by:
             opp.status, opp.reason = "skipped", blocked_by
+            follow(opp)
         else:
             pending.append(opp)
     return opps
@@ -1005,9 +1076,11 @@ class LeaderService:
             by_day.setdefault(p.day, []).append(p)
         days = sorted(set(by_day) | set(sessions or []))
         recent = []
+        declined: list[Opportunity] = []
         for d in days[-10:]:
             rows = sorted(by_day.get(d, []), key=lambda p: p.signal_ts)
             closed = [p for p in rows if p.status == "closed"]
+            declined.extend(p for p in rows if p.shadow is not None)
             recent.append({
                 "day": d.isoformat(),
                 "trades": [p.as_dict() for p in rows],
@@ -1018,6 +1091,7 @@ class LeaderService:
         return {
             "today": [p.as_dict() for p in sorted(by_day.get(today, []), key=lambda p: p.signal_ts)],
             "recent": recent,
+            "declined": _declined_record(declined),
             "live": self._live_record(today),
         }
 

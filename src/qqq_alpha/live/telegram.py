@@ -809,7 +809,7 @@ def welcome_pitch_message(
     indicator is an analysis assistant, the decision stays with the reader.
     """
     lines = [
-        "أهلاً بك في مِرصاد ٩ 👋",
+        "أهلاً بك في مِرصاد أوبشن 👋",
         "",
         "مؤشر على TradingView يقرأ الشموع عنك ويرسم لك على الشارت مباشرة:",
         "",
@@ -846,7 +846,7 @@ def consent_terms_message() -> str:
     """
     return (
         "إقرار وإخلاء مسؤولية:\n\n"
-        "🧭 ما هو مِرصاد ٩؟\n"
+        "🧭 ما هو مِرصاد أوبشن؟\n"
         "مؤشر يساعدك في تحليلك ويتابع السوق عنك داخل TradingView. يراقب الشموع "
         "على الشركات التي تختارها، ويرسم لك على الشارت الإشارة ودرجة جودتها، "
         "وخط الدخول، والوقف، والأهداف، ويذكّرك بتأمين صفقتك. وظيفته أن يوفر عليك "
@@ -878,7 +878,7 @@ def consent_accepted_note(trial_days: int, expires_on: str = "", link: str = "")
     is a private-channel invite for deployments that still run one; the
     indicator-only product leaves it empty."""
     lines = [
-        "✅ تم تسجيل إقرارك، أهلاً بك في مِرصاد ٩ 🎉",
+        "✅ تم تسجيل إقرارك، أهلاً بك في مِرصاد أوبشن 🎉",
         f"بدأت فترتك المجانية ({_days_ar(trial_days)})"
         + (f"، وتنتهي بتاريخ {expires_on}." if expires_on else "."),
     ]
@@ -903,7 +903,7 @@ def cards_guide_message(walkthrough_url: str = "", youtube_url: str = "") -> str
         "📖 دليل البداية، خطوة بخطوة:",
         "",
         "١. حين تصلك دعوة الوصول: افتح أي شارت في TradingView ← المؤشرات ← "
-        "«النصوص البرمجية بدعوة فقط» ← مِرصاد ٩ ← أضفه.",
+        "«النصوص البرمجية بدعوة فقط» ← مِرصاد أوبشن ← أضفه.",
         "٢. الفريم المقترح للبداية ٣ دقائق للصفقات اليومية. يعمل على ٥ و١٥ "
         "واليومي والأسبوعي بلا تغيير إعدادات.",
         "٣. الإشارة «كول» أو «بوت» مع رقم الجودة. لا تدخل عندها، انتظر الخط "
@@ -924,7 +924,7 @@ def cards_guide_message(walkthrough_url: str = "", youtube_url: str = "") -> str
 
 
 def trial_status_message(days_left: int, tv_username: str = "") -> str:
-    lines = [f"فترتك المجانية في مِرصاد ٩ فعّالة، المتبقي {_days_ar(max(days_left, 0))}."]
+    lines = [f"فترتك المجانية في مِرصاد أوبشن فعّالة، المتبقي {_days_ar(max(days_left, 0))}."]
     if tv_username:
         lines.append(f"الوصول على حساب TradingView‏: {tv_username}")
     else:
@@ -940,7 +940,7 @@ def plans_offer_message(ind_sar: int, ch_sar: int = 0, vip_sar: int = 0, days: i
     indicator; the older plan arguments are accepted and ignored so callers
     written for the three-plan era keep working."""
     return (
-        "💳 اشتراك مِرصاد ٩\n\n"
+        "💳 اشتراك مِرصاد أوبشن\n\n"
         f"📊 {ind_sar} ريال لكل {_days_ar(days)}\n"
         "المؤشر كاملاً على حساب TradingView الخاص بك: الإشارات، خط الدخول، "
         "الوقف والأهداف، تنبيه بيع النصف، الستررايك، وشاشة المراقبة.\n\n"
@@ -955,7 +955,7 @@ def renewal_reminder_message(expires_on: str, from_sar: int, with_button: bool) 
     """The two-days-left nudge — sent once per trial window. The pay URL
     rides an inline button, never the text."""
     lines = [
-        f"⏳ تنبيه ودّي: تنتهي فترتك المجانية في مِرصاد ٩ بتاريخ {expires_on}، "
+        f"⏳ تنبيه ودّي: تنتهي فترتك المجانية في مِرصاد أوبشن بتاريخ {expires_on}، "
         "وبعدها يُزال الوصول من TradingView تلقائياً.",
     ]
     if with_button:
@@ -990,8 +990,8 @@ def tv_username_booked_note(username: str, expires_on: str = "") -> str:
 def tv_granted_note(username: str, expires_on: str = "") -> str:
     """The operator confirmed the grant on TradingView: the indicator is live."""
     return (
-        f"✅ تم تفعيل مِرصاد ٩ على حسابك في TradingView‏: {username}\n"
-        "افتح الشارت ← المؤشرات ← «Invite-only scripts» وأضف مِرصاد ٩.\n"
+        f"✅ تم تفعيل مِرصاد أوبشن على حسابك في TradingView‏: {username}\n"
+        "افتح الشارت ← المؤشرات ← «Invite-only scripts» وأضف مِرصاد أوبشن.\n"
         + (f"الوصول ساري حتى {expires_on}.\n" if expires_on else "")
         + "دليل البداية في الرسائل السابقة، وإن احتجت شيئاً اكتب لنا هنا."
     )
@@ -999,7 +999,7 @@ def tv_granted_note(username: str, expires_on: str = "") -> str:
 
 def tv_revoked_note(username: str) -> str:
     return (
-        f"انتهى وصول حسابك {username} إلى مِرصاد ٩ في TradingView.\n"
+        f"انتهى وصول حسابك {username} إلى مِرصاد أوبشن في TradingView.\n"
         "للعودة في أي وقت أرسل /start 🤍"
     )
 
@@ -1013,7 +1013,7 @@ def payment_activated_note(plan_label: str, expires_on: str) -> str:
 
 def desk_link_message() -> str:
     return (
-        "🖥️ مكتب مِرصاد ٩ — شاشتك الخاصة\n"
+        "🖥️ مكتب مِرصاد أوبشن — شاشتك الخاصة\n"
         "رموزك، فريمك، وعقودك في شاشة واحدة تتحدث كل نصف دقيقة وقت السوق: "
         "الحالة، الستررايك، سعر العقد، أهداف العقد بالنسبة، والوقف، ومعها ملاحظة "
         "لكل صفقة والفريم الأعلى.\n\n"
@@ -1033,7 +1033,7 @@ def leader_link_message() -> str:
 
 def farewell_message(has_buttons: bool) -> str:
     text = (
-        "انتهت فترتك المجانية في مِرصاد ٩ وأُزيل الوصول من TradingView. "
+        "انتهت فترتك المجانية في مِرصاد أوبشن وأُزيل الوصول من TradingView. "
         "شكراً لبقائك معنا 🙏"
     )
     if has_buttons:
@@ -1077,7 +1077,7 @@ async def verify_telegram(token: str, chat_id: str) -> tuple[bool, str]:
             name = me.json().get("result", {}).get("username", "unknown")
 
             notifier = TelegramNotifier(token, chat_id, client=client)
-            sent = await notifier._send("✅ مِرصاد ٩ متصل بنجاح — هذه رسالة اختبار")
+            sent = await notifier._send("✅ مِرصاد أوبشن متصل بنجاح — هذه رسالة اختبار")
             if not sent:
                 return False, f"bot @{name} works, but cannot post to chat {chat_id}"
 

@@ -167,7 +167,7 @@ def _panel(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], outline: s
 
 def _header(draw: ImageDraw.ImageDraw, subtitle: str) -> int:
     _panel(draw, (MARGIN, 56, W - MARGIN, 196))
-    _rtl(draw, (W / 2, 112), "مِرصاد ٩", _font(54, bold=True), GOLD, "mm")
+    _rtl(draw, (W / 2, 112), "مِرصاد أوبشن", _font(54, bold=True), GOLD, "mm")
     _rtl(draw, (W / 2, 164), subtitle, _font(28), MUTED, "mm")
     return 226
 
@@ -521,7 +521,7 @@ def _result_color(pct: float) -> str:
 
 
 # ---------------------------------------------------------------- report parts
-# The parts MIRSAD 9's report card is built from: a split bar, a KPI tile,
+# The parts MIRSAD OPTION's report card is built from: a split bar, a KPI tile,
 # a cumulative curve and a column per period.
 def _split_bar(
     draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], win: float, loss: float
@@ -670,7 +670,7 @@ def _week_bars(
     draw.line([(inner_l, zero_y), (inner_r, zero_y)], fill=BORDER, width=2)
 
 
-# ---------------------------------------------------------------- MIRSAD 9 reports
+# ---------------------------------------------------------------- MIRSAD OPTION reports
 # The indicator's scoreboard. One card family for the day, the week and the
 # month, so a reader learns its shape once: the net at the top, how many and
 # how well underneath, the ledger table, and — for a week or a month — the
@@ -683,7 +683,7 @@ _SIDE_AR = {1: "كول", -1: "بوت"}
 
 def _indicator_header(draw: ImageDraw.ImageDraw, kind: str, span: str) -> int:
     _panel(draw, (MARGIN, 56, W - MARGIN, 208))
-    _rtl(draw, (W / 2, 108), "مِرصاد ٩", _font(58, bold=True), GOLD, "mm")
+    _rtl(draw, (W / 2, 108), "مِرصاد أوبشن", _font(58, bold=True), GOLD, "mm")
     _rtl(draw, (W / 2, 158), f"تقرير الأداء {_REPORT_KIND_AR.get(kind, kind)} — {span}",
          _font(30), TEXT, "mm")
     _rtl(draw, (W / 2, 190), "إشارات المؤشر كما وقعت، على عقود حقيقية من السوق", _font(22), MUTED, "mm")
@@ -743,7 +743,7 @@ def render_indicator_report_card(
     rows: list[dict],
     open_rows: list[dict] | None = None,
 ) -> bytes:
-    """MIRSAD 9's report card for a day, a week or a month.
+    """MIRSAD OPTION's report card for a day, a week or a month.
 
     ``rows`` are the persisted closed contracts (symbol, label, side, entry,
     peak, exit, pct, peak_pct, how, day). A daily card lists every row and
@@ -1006,7 +1006,7 @@ def self_test() -> tuple[bool, str]:
             ("بطاقة قيد التكوّن", lambda: render_watch_card(
                 "QQQ", "صعود CALL", "اختراق 580.10 بحجم", 7, trade.opened_at, level=578.40
             )),
-            ("تقرير مِرصاد ٩", lambda: render_indicator_report_card(
+            ("تقرير مِرصاد أوبشن", lambda: render_indicator_report_card(
                 "daily", date(2026, 8, 14), date(2026, 8, 14),
                 [{"symbol": "NVDA", "label": "NVDA 180C", "side": 1, "entry": 2.1,
                   "peak": 3.4, "exit": 3.05, "pct": 45.2, "peak_pct": 61.9,

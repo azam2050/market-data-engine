@@ -798,7 +798,7 @@ def test_subscriber_conversation_page_shows_both_directions(tmp_path):
     settings, memory = _with_subscribers(tmp_path)
     memory.set_tv_username("111", "layth_tv")
     memory.log_message("111", "in", "/start")
-    memory.log_message("111", "out", "أهلاً بك في مِرصاد ٩")
+    memory.log_message("111", "out", "أهلاً بك في مِرصاد أوبشن")
     memory.log_message("111", "in", "[زر] ✅ أوافق وأقر")
     memory.log_message("111", "out", "الخطوة الأخيرة: أرسل اسم المستخدم")
 
@@ -809,7 +809,7 @@ def test_subscriber_conversation_page_shows_both_directions(tmp_path):
 
     page = client.get("/subscribers/111/messages", auth=AUTH).text
     assert "layth_tv" in page
-    assert page.index("/start") < page.index("أهلاً بك في مِرصاد ٩") < page.index("[زر] ✅ أوافق")
+    assert page.index("/start") < page.index("أهلاً بك في مِرصاد أوبشن") < page.index("[زر] ✅ أوافق")
 
     # an unknown chat renders an empty conversation, not an error
     assert "لا رسائل مسجلة" in client.get("/subscribers/999/messages", auth=AUTH).text

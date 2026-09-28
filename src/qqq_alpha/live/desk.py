@@ -1,4 +1,4 @@
-"""The customer's desk: MIRSAD 9 for their own symbols, on their own frame,
+"""The customer's desk: MIRSAD OPTION for their own symbols, on their own frame,
 priced as contracts, in one screen that refreshes while the market is open.
 
 The desk *shows and explains*; the customer executes at their broker. It

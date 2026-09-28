@@ -173,7 +173,7 @@ class Settings(BaseSettings):
     # what one payment buys, in days
     subscription_days: int = 30
     # the identity on the payment page — the channel's, never the gateway's
-    brand_name: str = "مِرصاد ٩"
+    brand_name: str = "مِرصاد أوبشن"
     brand_logo_url: str = ""
     # what the payer's bank SMS/statement will show (the Moyasar account's
     # registered trade name) — stated on the page so nobody mistakes their

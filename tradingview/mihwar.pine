@@ -1,0 +1,404 @@
+// ══════════════════════════════════════════════════════════════════════════
+//  مِحـور  ·  MIHWAR
+//
+//  فلسفة واحدة، خرجت من ٢٦٣ ألف إشارة على ٧٠ رمزاً و٧٦٤ جلسة:
+//
+//      لا أحد يتنبّأ بالاتجاه. الفرق كلّه في السعر الذي تدخل عنده.
+//
+//  الدخول لحظة الإشارة أعطى ٤٩٫٧٪ اتجاهاً صحيحاً — في كل حالة سوق بلا
+//  استثناء: مندفع، عرضي، فجوة، أول نصف ساعة. عملة معدنية.
+//  والدخول من المحور أعطى ٥٨٪ — ثابتة في ٢٠٢٣ و٢٠٢٤ و٢٠٢٥ و٢٠٢٦،
+//  وعلى الرموز السبعين كلها: ٦٩ من ٦٩ رمزاً رابحة في سنة الاختبار وحدها.
+//
+//  فالاستباقية هنا ليست تنبّؤاً: المحور يُرسم **قبل** أن يصله السعر،
+//  ثم ننتظر. وإن لم يرجع السعر — لا صفقة، ولا مطاردة.
+//
+//  ─────────────────────────────────────────────────────────────────────
+//  الاختبار · بُنيت القواعد على ٢٠٢٣–٢٠٢٥ ثم شُغِّلت على ٢٠٢٦ ولم تُلمس
+//  ٢٠٢٦ في أي اختيار. وبجانب كل رقم عشوائيٌّ بنفس الرموز والأيام والإدارة:
+//
+//                         مِحـور        عشوائي      الرموز الرابحة
+//    فريم ٣ دقائق         ٥٨٫٠٪        ٤٩٫٦٪       ٦٩ من ٦٩
+//                      +٠٫١٣٥R      +٠٫٠٠٤R      (٢٠٬٦٩٩ صفقة)
+//    فريم ٥ دقائق         ٥٨٫٢٪        ٥٠٫١٪       ٦٨ من ٦٩
+//                      +٠٫١٣٨R      +٠٫٠٠١R      (١٥٬٤٧٨ صفقة)
+//    فريم ١٥ دقيقة        ٥٨٫٠٪        ٤٨٫٨٪       ٥٤ من ٦٨
+//                      +٠٫٠٨٧R      −٠٫٠٠٣R      (٤٬٨٨٠ صفقة) — الأضعف
+//
+//  الأهداف كما قِيست فعلاً على ٢٠٢٦، لا كما نتمنّاها (فريم ٣ دقائق):
+//    هدف ١  ٤٩٪   ·  هدف ٢  ٢٢٪   ·  هدف ٣  ١١٪
+//    والعشوائي  ٣٨٪  ·  ١٦٪  ·  ٨٪
+//    فإن عبرت الصفقة الحَكَم (٥٧٪ منها تعبر):  ٨٥٪  ·  ٣٩٪  ·  ١٨٪
+//
+//  وبصراحة تامة: الرابحة ٢٧٪ فقط. لأن الحَكَم يقطع ٤٢٪ من الصفقات
+//  مبكراً بثلث الوقف. الوقف الكامل لا يقع إلا في ٨٪.
+//  متوسط الرابحة +١٫٣٣R ومتوسط الخاسرة −٠٫٤٤R — من هنا يأتي الربح،
+//  لا من كثرة الإصابة. ولا يوجد ٩٠٪ في هذه الصنعة.
+//
+//  ─────────────────────────────────────────────────────────────────────
+//  ما بُني على قياس، وما حُذف لأنه لم يقِس شيئاً:
+//
+//   ✔ المحور عند متوسط ٩          الدخول عنده ٥٨٪ · الفوري ٤٩٫٧٪
+//   ✔ الحَكَم بعد الدخول بشمعة     عبَرته ← ٨٥٪ تصل هدف ١ · لم تعبره ← تخرج
+//   ✔ الوقف ١٫٥×ATR               سبع قيم جُرّبت · الأوسع يرفع النسبة ويخفض الربح
+//   ✔ الأهداف ١ و٢ و٣ ×ATR        ثم اتباع قاع ٨ شموع · أفضل صفقة ٢٠٢٦: +١٠٫٨R
+//   ✔ ميزانية صفقتين للجلسة        المحاولة الأولى +٠٫١٦١R والثانية +٠٫٠٩٠R
+//   ✔ كل شيء بالـ ATR              لذلك يعمل على فورد وإل إل واي بنفس النسبة
+//
+//   ✘ درجة الجودة كبوّابة اتجاه    ترفع حجم الحركة ولا ترفع صحّتها
+//   ✘ حجب ما يخالف الفريم الأكبر   يحذف الانعكاسات الصحيحة معه
+//   ✘ اشتراط توافق الفريمات        يقلّل الإشارات ولا يحسّن الجودة
+//   ✘ مطاردة السعر بعيداً          كل خطوة ابتعاد تأخذ من نسبتك
+//   ✘ الدخول الفوري                حُذف من الخيارات أصلاً
+//
+//  ملاحظة: بميزانية صفقتين لا تُستعمل المحاولة الثالثة عملياً — الميزانية
+//  تُغلق الباب قبلها. ترفعها فقط إن جعلت الميزانية ٠ أو ٣.
+//  ══════════════════════════════════════════════════════════════════════
+//@version=5
+indicator("مِحـور", "MIHWAR", overlay = true, max_labels_count = 500,
+          max_lines_count = 500, max_boxes_count = 200)
+
+// ───────────────────────────────────────────────────────────── الإعدادات
+g1 = "المحرّك"
+dirIn  = input.string("الاتجاهان", "الاتجاه", options = ["الاتجاهان", "كول فقط", "بوت فقط"], group = g1)
+bodyK  = input.float(0.8, "شمعة الاندفاع: الجسم ≥ × ATR", minval = 0.3, maxval = 2.0, step = 0.1, group = g1)
+closeP = input.float(0.65, "وتُغلق في هذا الجزء من الشمعة", minval = 0.5, maxval = 0.9, step = 0.05, group = g1)
+brkN   = input.int(6, "وتكسر قمة/قاع آخر N شمعة", minval = 3, maxval = 20, group = g1)
+revK   = input.float(1.5, "شمعة انعكاس ضخمة تكفي بكسر السابقة (٠ = إيقاف)", minval = 0, maxval = 4.0, step = 0.25, group = g1)
+
+g2 = "المحور — مكان دخولك"
+axisSrc  = input.string("متوسط ٩", "المحور عند", options = ["متوسط ٩", "متوسط ٢١", "المرجّح VWAP"], group = g2)
+axisLen  = input.int(5, "عمر المحور للدخول الأول (شموع)", minval = 2, maxval = 15, group = g2, tooltip = "خلال هذه المدة إن رجع السعر إلى الخط دخلتَ عنده. وإن لم يرجع، لا صفقة ولا مطاردة: الدخول الفوري قِيس بـ ٤٩٫٧٪ — عملة معدنية")
+axisLife = input.int(40, "ويبقى للمحاولات التالية (شموع)", minval = 10, maxval = 120, group = g2)
+maxTries = input.int(3, "أقصى محاولات على المحور", minval = 1, maxval = 5, group = g2, tooltip = "قياس ٢٠٢٦: المحاولة الأولى +٠٫١٦١R والثانية +٠٫٠٩٠R. الأولى أقوى، والثانية ما زالت رابحة. وبميزانية صفقتين لا تُستعمل الثالثة")
+
+g3 = "الحَكَم — أول حركة بعد دخولك"
+judgeOn = input.bool(true, "اخرج إن نزل السعر قبل أن يصعد", group = g3, tooltip = "أقوى فرق في القياس كله. الصفقة التي عبرت الحَكَم: ٨٥٪ تصل هدف ١ و٣٩٪ هدف ٢. والتي لم تعبره تخرج بثلث الوقف فقط. الحَكَم يقطع ٤٢٪ من الصفقات — ولهذا الوقف الكامل لا يقع إلا في ٨٪")
+judgeX  = input.float(0.5, "مسافة الحَكَم = × ATR", minval = 0.2, maxval = 1.0, step = 0.1, group = g3)
+
+g4 = "الوقف والأهداف"
+stopX  = input.float(1.5, "الوقف = × ATR", minval = 0.5, maxval = 3.0, step = 0.25, group = g4, tooltip = "جُرّبت ١٫٢٥ و١٫٥ و١٫٨ و٢ و٢٫٢٥ و٢٫٥ و٣: كلما اتّسع ارتفعت نسبة الرابحة وانخفضت الحصيلة. الخاسرة لا تلمس الوقف وترجع، بل تكسره وتواصل — وسيط نزولها ٣٫٢٥×ATR")
+x1     = input.float(1.0, "هدف ١ = × ATR", minval = 0.25, step = 0.25, group = g4)
+x2     = input.float(2.0, "هدف ٢ = × ATR", minval = 0.5, step = 0.25, group = g4)
+x3     = input.float(3.0, "هدف ٣ = × ATR", minval = 1.0, step = 0.25, group = g4)
+secPct = input.float(35, "التأمين: بع النصف عند ٪ من الطريق للهدف ٣", minval = 10, maxval = 90, step = 5, group = g4)
+trailN = input.int(8, "وبعد هدف ٣: الوقف يتبع قاع/قمة N شمعة", minval = 3, maxval = 20, group = g4, tooltip = "القاع الأوسع يعطي السعر مساحة يتنفّس فيها. بلا اتباع تُغلق الصفقة عند +٢R؛ ومع الاتباع كانت أفضل صفقة في ٢٠٢٦ +١٠٫٨R وفي ٢٠٢٣–٢٠٢٥ +٢٠٫٨R")
+
+g5 = "الميزانية والجلسة"
+budget   = input.int(2, "أقصى صفقات في الجلسة (٠ = بلا حد)", minval = 0, maxval = 10, group = g5, tooltip = "الصفقة الثالثة والرابعة في اليوم هي الأضعف. سقف صفقتين قِيس على ٢٠٢٦ بـ +٠٫١٣٥R للصفقة · وبصفقة واحدة +٠٫١٦١R لكن نصف عدد الفرص")
+skipOpen = input.int(1, "تجاهل أول N شمعة", minval = 0, maxval = 6, group = g5)
+lateMin  = input.int(90, "لا إشارة في آخر N دقيقة من الجلسة", minval = 0, maxval = 240, step = 15, group = g5)
+eodOut   = input.bool(true, "أغلق الصفقة آخر الجلسة", group = g5)
+
+g6 = "قراءة السوق"
+adxLen = input.int(14, "طول ADX", minval = 7, maxval = 30, group = g6)
+adxTr  = input.float(25, "فوقه: السوق مندفع", minval = 15, maxval = 40, group = g6)
+adxRg  = input.float(18, "تحته: السوق عرضي", minval = 10, maxval = 25, group = g6)
+boxN   = input.int(30, "صندوق العرضي: آخر N شمعة", minval = 10, maxval = 60, group = g6)
+quiet  = input.bool(true, "اصمت في العرضي داخل الصندوق", group = g6)
+
+g7 = "العرض"
+showAxis  = input.bool(true, "خط المحور", group = g7)
+showLv    = input.bool(true, "الوقف والأهداف", group = g7)
+showPanel = input.bool(true, "لوحة القراءة", group = g7)
+cleanN    = input.int(30, "احذف خطوط الصفقة المقفلة بعد N شمعة", minval = 0, maxval = 200, group = g7)
+
+cUp   = color.new(#16a34a, 0)
+cDn   = color.new(#dc2626, 0)
+cAxis = color.new(#f59e0b, 0)
+cMut  = color.new(#94a3b8, 0)
+cWarn = color.new(#eab308, 0)
+
+allowL = dirIn != "بوت فقط"
+allowS = dirIn != "كول فقط"
+
+// ───────────────────────────────────────────────────────────────── الحساب
+atr = ta.atr(14)
+e9  = ta.ema(close, 9)
+e21 = ta.ema(close, 21)
+vw  = ta.vwap(hlc3)
+axisPx = axisSrc == "متوسط ٩" ? e9 : axisSrc == "متوسط ٢١" ? e21 : vw
+[diP, diM, adx] = ta.dmi(adxLen, adxLen)
+
+intraday = timeframe.isintraday
+minsNY = hour(time, "America/New_York") * 60 + minute(time, "America/New_York")
+barMin = math.max(timeframe.in_seconds() / 60, 1)
+barDay = intraday ? (minsNY - 570) / barMin : 1000.0
+barsToday = intraday ? int(math.max(barDay, 0)) : brkN
+lateBar = intraday and lateMin > 0 and minsNY >= 960 - lateMin
+lastBarOfDay = eodOut and intraday and minsNY >= 955
+budgetOn = budget > 0 and intraday
+
+// قمة/قاع الشموع السابقة — داخل الجلسة فقط، لا نقارن صباح اليوم بأمس
+hiN = high[1]
+loN = low[1]
+for k = 2 to brkN
+    if k <= barsToday
+        hiN := math.max(hiN, high[k])
+        loN := math.min(loN, low[k])
+
+rng  = high - low
+body = close - open
+impL = rng > 0 and body >= bodyK * atr and (close - low) / rng >= closeP and close > hiN
+impS = rng > 0 and -body >= bodyK * atr and (high - close) / rng >= closeP and close < loN
+revL = revK > 0 and rng > 0 and body >= revK * atr and (close - low) / rng >= closeP and close > high[1]
+revS = revK > 0 and rng > 0 and -body >= revK * atr and (high - close) / rng >= closeP and close < low[1]
+rawSide = impL or revL ? 1 : impS or revS ? -1 : 0
+
+// ── قراءة حالة السوق · تُعرض دائماً وتُحدّث كل شمعة
+boxH = ta.highest(high, boxN)[1]
+boxL = ta.lowest(low, boxN)[1]
+boxW = boxH - boxL
+inBox = boxW > 0 and close > boxL + 0.25 * boxW and close < boxH - 0.25 * boxW
+sideways = adx < adxRg and inBox
+pushing = adx >= adxTr and not inBox
+stateTxt = sideways ? "عرضي" : pushing ? (close > axisPx ? "مندفع صاعد" : "مندفع هابط") : "متحوّل"
+stateCol = sideways ? cMut : pushing ? (close > axisPx ? cUp : cDn) : cWarn
+
+// ── بُعد السعر عن المحور: يقول كم يُرجَّح أن يرجع
+//    قياس: ملاصق ٩٦٪ يرجع · ٠٫٨–١٫٥ ← ٣٧٪ · أبعد من ٢٫٥ ← ١٠٪ فقط
+stretch = atr > 0 ? math.abs(close - axisPx) / atr : 0.0
+retTxt = stretch < 0.3 ? "ملاصق للمحور · يرجع ٩٦٪" :
+     stretch < 0.8 ? "قريب · يرجع ٦١٪" :
+     stretch < 1.5 ? "بعيد · يرجع ٣٧٪" :
+     stretch < 2.5 ? "بعيد جداً · يرجع ٢١٪" : "طيّارة · يرجع ١٠٪ — لا تلحقها"
+
+ready = bar_index >= 120 and not na(atr) and not na(adx) and atr > 0
+gateOk = not (quiet and sideways) and barDay >= skipOpen and not lateBar
+okL = ready and allowL and rawSide == 1 and gateOk
+okS = ready and allowS and rawSide == -1 and gateOk
+blockTxt = rawSide == 0 ? "" : (quiet and sideways) ? "عرضي — صامت" :
+     lateBar ? "آخر الجلسة" : barDay < skipOpen ? "أول شمعة" : ""
+
+// ───────────────────────────────────────────── المحور وحالة الصفقة
+var int   axSide = 0          // اتجاه المحور الحيّ
+var float axLvl  = na         // سعره
+var float axAtr  = na         // ATR لحظة رسمه — الوقف والأهداف تُقاس به
+var int   axBorn = 0
+var int   axUses = 0
+var bool  axDead = false      // مات بوقف كامل: لا محاولة بعده
+
+var int   pend = 0            // دخول معلّق: يُنفَّذ على افتتاح الشمعة القادمة
+var int   pos = 0
+var float eP = na
+var float sP = na
+var float t1 = na
+var float t2 = na
+var float t3 = na
+var float halfLvl = na
+var float unit = na
+var float jUp = na
+var float jDn = na
+var int   hit = 0
+var int   nth = 0
+var int   barsIn = 0
+var bool  half = false
+var bool  judged = false
+var int   spent = 0           // صفقات هذه الجلسة
+var string exitTxt = ""
+var float lastR = na
+var int   lastSide = 0
+var int   closedAt = -100000
+
+var line   axLine = na
+var line[] lv = array.new_line()
+
+f_clear() =>
+    if array.size(lv) > 0
+        for i = 0 to array.size(lv) - 1
+            line.delete(array.get(lv, i))
+        array.clear(lv)
+
+f_dur(int n) =>
+    m = int(n * barMin)
+    m >= 60 ? str.tostring(m / 60.0, "#.#") + " س" : str.tostring(m) + " د"
+
+// الجلسة الجديدة: المحور والميزانية من الصفر
+if intraday and session.isfirstbar_regular
+    spent := 0
+    axSide := 0
+    pend := 0
+
+closed = false
+secNow = false
+entered = false
+
+trailLo = ta.lowest(low, trailN)
+trailHi = ta.highest(high, trailN)
+
+// ── ١) تنفيذ الدخول المعلّق — على افتتاح هذه الشمعة، أو سعر المحور أيّهما أسوأ
+if pend != 0 and pos == 0 and not na(axAtr)
+    pos := pend
+    axUses += 1
+    nth := axUses
+    spent += 1
+    unit := stopX * axAtr
+    eP := pend == 1 ? math.min(open, axLvl) : math.max(open, axLvl)
+    sP := eP - pend * unit
+    t1 := eP + pend * x1 * axAtr
+    t2 := eP + pend * x2 * axAtr
+    t3 := eP + pend * x3 * axAtr
+    halfLvl := eP + pend * (secPct / 100.0) * x3 * axAtr
+    jUp := eP + pend * judgeX * axAtr
+    jDn := eP - pend * judgeX * axAtr
+    hit := 0
+    half := false
+    judged := false
+    barsIn := 0
+    exitTxt := ""
+    entered := true
+    pend := 0
+else if pend != 0 and pos == 0
+    pend := 0
+
+// ── ٢) إدارة الصفقة المفتوحة — شمعة الدخول نفسها داخلة في الحساب
+if pos != 0 and barstate.isconfirmed
+    barsIn += 1
+    jAgainst = pos == 1 ? low <= jDn : high >= jDn
+    jWith = pos == 1 ? high >= jUp : low <= jUp
+    stopHit = pos == 1 ? low <= sP : high >= sP
+    if judgeOn and not judged and hit == 0 and jAgainst
+        // الحَكَم قال لا: خروج بثلث الوقف، والمحور يبقى حيّاً لمحاولة أخرى
+        lastR := -judgeX / stopX
+        exitTxt := "حَكَم"
+        lastSide := pos
+        pos := 0
+        closed := true
+    else if stopHit
+        lastR := (sP - eP) / unit * pos
+        exitTxt := hit >= 3 ? "خروج بعد هدف ٣" : lastR > 0.001 ? "خروج بربح" : lastR > -0.001 ? "تعادل" : "وقف"
+        if lastR < -0.001
+            axDead := true
+        lastSide := pos
+        pos := 0
+        closed := true
+    else
+        if judgeOn and not judged and hit == 0 and jWith
+            judged := true
+        hit := pos == 1 ? (high >= t3 ? 3 : high >= t2 ? 2 : high >= t1 ? 1 : hit) : (low <= t3 ? 3 : low <= t2 ? 2 : low <= t1 ? 1 : hit)
+        if not half and (pos == 1 ? high >= halfLvl : low <= halfLvl)
+            half := true
+            secNow := true
+        if half or hit >= 1
+            sP := pos == 1 ? math.max(sP, eP) : math.min(sP, eP)
+        if hit >= 2
+            sP := pos == 1 ? math.max(sP, t1, trailLo) : math.min(sP, t1, trailHi)
+        if hit >= 3
+            sP := pos == 1 ? math.max(sP, t2, trailLo) : math.min(sP, t2, trailHi)
+        if lastBarOfDay
+            lastR := (close - eP) / unit * pos
+            exitTxt := "إغلاق الجلسة"
+            lastSide := pos
+            pos := 0
+            closed := true
+
+if closed
+    closedAt := bar_index
+
+// ── ٣) لمس المحور ← دخول على افتتاح الشمعة القادمة. لا شيء غير اللمس.
+canTry = axSide != 0 and pos == 0 and pend == 0 and not axDead and axUses < maxTries and bar_index <= axBorn + (axUses == 0 ? axisLen : axisLife) and (not budgetOn or spent < budget)
+touch = canTry and barstate.isconfirmed and (axSide == 1 ? low <= axLvl : high >= axLvl)
+if touch
+    pend := axSide
+
+// ── ٤) إشارة جديدة: ترسم محوراً جديداً (الاستباق: الخط قبل أن يصله السعر)
+if barstate.isconfirmed and pos == 0 and pend == 0 and (okL or okS)
+    s0 = okL ? 1 : -1
+    axSide := s0
+    axLvl := s0 == 1 ? math.min(axisPx, close) : math.max(axisPx, close)
+    axBorn := bar_index
+    axUses := 0
+    axAtr := atr
+    axDead := false
+
+// ── ٥) موت المحور
+if axSide != 0 and pos == 0 and pend == 0 and (bar_index > axBorn + axisLife or axUses >= maxTries or axDead or (budgetOn and spent >= budget))
+    axSide := 0
+
+// ───────────────────────────────────────────────────────────────── الرسم
+if showAxis
+    if not na(axLine)
+        line.delete(axLine)
+        axLine := na
+    if axSide != 0 and pos == 0
+        axLine := line.new(math.max(axBorn, bar_index - 60), axLvl, bar_index + 6, axLvl,
+                       color = cAxis, style = line.style_dashed, width = 2)
+
+if entered and showLv
+    f_clear()
+    array.push(lv, line.new(bar_index, eP, bar_index + 40, eP, color = cAxis, width = 2))
+    array.push(lv, line.new(bar_index, sP, bar_index + 40, sP, color = cDn, style = line.style_dotted))
+    array.push(lv, line.new(bar_index, t1, bar_index + 40, t1, color = cUp, style = line.style_dotted))
+    array.push(lv, line.new(bar_index, t2, bar_index + 40, t2, color = cUp, style = line.style_dotted))
+    array.push(lv, line.new(bar_index, t3, bar_index + 40, t3, color = cUp, width = 2))
+
+if closed and cleanN == 0
+    f_clear()
+if cleanN > 0 and pos == 0 and bar_index - closedAt == cleanN
+    f_clear()
+
+if entered
+    label.new(bar_index, pos == 1 ? low : high,
+          (pos == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) +
+          (nth > 1 ? "  ·  محاولة " + str.tostring(nth) : ""),
+          style = pos == 1 ? label.style_label_up : label.style_label_down,
+          color = pos == 1 ? cUp : cDn, textcolor = color.white, size = size.small)
+
+if closed
+    label.new(bar_index, lastSide == 1 ? high : low,
+          exitTxt + "  " + (lastR >= 0 ? "+" : "") + str.tostring(lastR, "#.##") + "R",
+          style = lastSide == 1 ? label.style_label_down : label.style_label_up,
+          color = lastR > 0.001 ? cUp : lastR > -0.001 ? cMut : cDn,
+          textcolor = color.white, size = size.small)
+
+if secNow
+    label.new(bar_index, pos == 1 ? high : low, "بع النصف  ·  الوقف إلى الدخول",
+          style = pos == 1 ? label.style_label_down : label.style_label_up,
+          color = cAxis, textcolor = color.white, size = size.small)
+
+plotshape(entered and pos == 1, "دخول كول", shape.triangleup, location.belowbar, cUp, size = size.tiny)
+plotshape(entered and pos == -1, "دخول بوت", shape.triangledown, location.abovebar, cDn, size = size.tiny)
+
+// ───────────────────────────────────────────────────────────────── اللوحة
+var table tb = table.new(position.top_right, 2, 9, border_width = 1)
+tbBg = color.new(#0f172a, 12)
+
+f_row(int r, string a, string b, color cb) =>
+    table.cell(tb, 0, r, a, text_color = cMut, text_size = size.small,
+           text_halign = text.align_right, bgcolor = tbBg)
+    table.cell(tb, 1, r, b, text_color = cb, text_size = size.small,
+           text_halign = text.align_left, bgcolor = tbBg)
+
+if showPanel and barstate.islast
+    f_row(0, "مِحـور", syminfo.ticker + " · " + timeframe.period, color.white)
+    f_row(1, "حالة السوق", stateTxt + "   (ADX " + str.tostring(adx, "#") + ")", stateCol)
+    f_row(2, "بُعد السعر", retTxt, stretch < 1.5 ? cUp : cMut)
+    f_row(3, "المحور", axSide == 0 ? (blockTxt != "" ? blockTxt : "لا محور — انتظار إشارة") :
+         (axSide == 1 ? "كول عند " : "بوت عند ") + str.tostring(axLvl, format.mintick) +
+         "  ·  محاولة " + str.tostring(axUses + 1) + "/" + str.tostring(maxTries),
+         axSide == 0 ? cMut : cAxis)
+    f_row(4, "الصفقة", pos == 0 ? "—" :
+         (pos == 1 ? "كول " : "بوت ") + str.tostring(eP, format.mintick) +
+         "  ·  " + f_dur(barsIn) + (judged ? "  ·  الحَكَم ✓" : "  ·  بانتظار الحَكَم"),
+         pos == 0 ? cMut : pos == 1 ? cUp : cDn)
+    f_row(5, "الوقف", pos == 0 ? "—" : str.tostring(sP, format.mintick) +
+         (half ? "  ·  مؤمَّنة" : ""), pos == 0 ? cMut : cDn)
+    f_row(6, "الأهداف", pos == 0 ? "—" :
+         (hit >= 1 ? "✓" : "○") + " " + str.tostring(t1, format.mintick) + "   " +
+         (hit >= 2 ? "✓" : "○") + " " + str.tostring(t2, format.mintick) + "   " +
+         (hit >= 3 ? "✓" : "○") + " " + str.tostring(t3, format.mintick),
+         pos == 0 ? cMut : cUp)
+    f_row(7, "الميزانية", not budgetOn ? "بلا حد" :
+         str.tostring(spent) + " من " + str.tostring(budget) + " هذه الجلسة",
+         budgetOn and spent >= budget ? cDn : cMut)
+    f_row(8, "آخر صفقة", na(lastR) ? "—" :
+         (lastSide == 1 ? "كول" : "بوت") + " · " + exitTxt + " " +
+         (lastR >= 0 ? "+" : "") + str.tostring(lastR, "#.##") + "R · قبل " +
+         f_dur(bar_index - closedAt), na(lastR) ? cMut : lastR > 0.001 ? cUp : cDn)
+
+// ─────────────────────────────────────────────────────────────── التنبيهات
+alertcondition(barstate.isconfirmed and pos == 0 and pend == 0 and (okL or okS), "مِحور — محور جديد", "مِحور: رُسم محور جديد · انتظر رجوع السعر إليه")
+alertcondition(touch and axSide == 1, "مِحور — كول", "مِحور: لمس المحور · دخول كول على الافتتاح القادم")
+alertcondition(touch and axSide == -1, "مِحور — بوت", "مِحور: لمس المحور · دخول بوت على الافتتاح القادم")
+alertcondition(secNow, "مِحور — بع النصف", "مِحور: بع النصف والوقف إلى الدخول")
+alertcondition(closed, "مِحور — خروج", "مِحور: خروج من الصفقة")

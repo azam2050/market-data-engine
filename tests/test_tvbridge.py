@@ -281,7 +281,7 @@ def test_secure_alert_tells_the_channel_to_sell_half() -> None:
 
 
 def test_signal_then_entry_alert_is_one_trade() -> None:
-    # MIRSAD 9 immediate mode: the signal alert, then the entry alert one bar later
+    # MIRSAD OPTION immediate mode: the signal alert, then the entry alert one bar later
     wire = _Wire([_c(352.5, 1.9, 2.0)])
     bridge = TvBridge(wire.admin_send, wire.channel_send, wire.chain_fetch)
 
@@ -660,7 +660,7 @@ def test_indicator_report_text_is_a_full_ledger() -> None:
         open_rows=[{"label": "META 610C", "entry": 5.0, "mark": 6.0}],
     )
     head = text.split("\n", 1)[0]
-    assert "مِرصاد ٩" in head and "اليومي" in head and "4 سبتمبر 2026" in head
+    assert "مِرصاد أوبشن" in head and "اليومي" in head and "4 سبتمبر 2026" in head
     assert "الصفقات: 2 · رابحة 1 · خاسرة 1 · نسبة النجاح 50%" in text
     assert "NVDA كول NVDA 180C: 2.00 ← 3.00 (+50%)" in text and "الهدف الثاني" in text
     assert "AMD: كول بلا عقد" in text

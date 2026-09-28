@@ -1,4 +1,4 @@
-"""MIRSAD 9 on the server.
+"""MIRSAD OPTION on the server.
 
 A faithful port of ``tradingview/mirsad9.pine``: the same impulse engine,
 the same zone / confirmation entry, the same stop, targets, secure level

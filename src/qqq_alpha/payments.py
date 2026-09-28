@@ -39,7 +39,7 @@ MOYASAR_API = "https://api.moyasar.com/v1"
 # the three monthly plans. Codes are wire format — they ride pay links and
 # payment metadata, so they never change; labels and prices are display.
 PLAN_LABELS: dict[str, str] = {
-    "indicator": "📊 مِرصاد ٩ — المؤشر",
+    "indicator": "📊 مِرصاد أوبشن — المؤشر",
     "channel": "⭐️ القناة الخاصة",
     "vip": "👑 VIP — القناة والمؤشر معاً",
 }

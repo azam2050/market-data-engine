@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_chat ON messages (chat_id, id);
 
--- every contract the TradingView bridge closed on a MIRSAD 9 signal: the
+-- every contract the TradingView bridge closed on a MIRSAD OPTION signal: the
 -- record the indicator's daily, weekly and monthly report cards are drawn
 -- from, so a restart between two signals never loses a week
 CREATE TABLE IF NOT EXISTS tv_trades (

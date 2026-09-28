@@ -477,5 +477,5 @@ def test_mirsad_walkthrough_is_public_and_served_from_our_domain(tmp_path):
     assert page.headers["content-type"].startswith("text/html")
     assert page.text.startswith("<!doctype html>")
     assert 'lang="ar" dir="rtl"' in page.text
-    assert "مِرصاد ٩" in page.text
+    assert "مِرصاد أوبشن" in page.text
     assert client.head("/mirsad").status_code == 200

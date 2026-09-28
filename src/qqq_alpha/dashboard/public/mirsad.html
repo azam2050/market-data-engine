@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <link rel="icon" href="data:,">
-<title>مِرصاد ٩ حيّاً</title>
+<title>مِرصاد أوبشن حيّاً</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
@@ -99,7 +99,7 @@
 </head>
 <body>
 <div class="stage">
-  <header><span><b>MIRSAD 9</b> · مِرصاد ٩ · QQQ · ٣ د</span><span id="clock">09:30</span></header>
+  <header><span><b>MIRSAD OPTION</b> · مِرصاد أوبشن · QQQ · ٣ د</span><span id="clock">09:30</span></header>
   <div class="chartwrap" id="wrap">
     <canvas id="cv"></canvas>
     <div class="ov" id="ov">
@@ -118,7 +118,7 @@
       <span class="tag tg" id="tT2">● هدف ٢</span>
       <span class="tag dark" id="tExit">خروج بربح +2.4R</span>
       <table class="card" id="card">
-        <tr><td class="h" colspan="2">مِرصاد ٩ · QQQ · ٣ د</td></tr>
+        <tr><td class="h" colspan="2">مِرصاد أوبشن · QQQ · ٣ د</td></tr>
         <tr><td class="upbg" colspan="2" id="cState">كول قائمة · جودة ٧٤</td></tr>
         <tr><td class="k">الستررايك</td><td class="huge"><span class="num">605</span> <small style="font-size:.8rem;font-family:'IBM Plex Sans Arabic'">كول · ينتهي اليوم</small></td></tr>
         <tr><td class="k">سعر العقد</td><td class="huge"><span class="num" id="cPx">0.76</span> <small style="font-size:.85rem;font-family:'IBM Plex Sans Arabic'" id="cPct"></small></td></tr>
@@ -129,7 +129,7 @@
       </table>
       <!-- display modes: ribbon (top) and floating label -->
       <table class="rib" id="rib">
-        <tr><td class="h">مِرصاد ٩</td><td class="upbg">كول · جودة ٧٤</td><td><span class="k">الستررايك</span> <b class="num">605</b> كول</td><td><span class="k">العقد</span> <b class="num" id="rPx">1.02</b> <span class="upT">+34%</span></td><td><span class="k">الوقف</span> <span class="num dnT">604.90</span></td><td class="upT">● ○ ○</td><td class="half">½ ✓</td></tr>
+        <tr><td class="h">مِرصاد أوبشن</td><td class="upbg">كول · جودة ٧٤</td><td><span class="k">الستررايك</span> <b class="num">605</b> كول</td><td><span class="k">العقد</span> <b class="num" id="rPx">1.02</b> <span class="upT">+34%</span></td><td><span class="k">الوقف</span> <span class="num dnT">604.90</span></td><td class="upT">● ○ ○</td><td class="half">½ ✓</td></tr>
       </table>
       <span class="flab" id="flab">كول · <b class="num">605</b> كول · العقد <b class="num">1.02</b> (+34%) · وقف <span class="num">604.90</span> · ● ○ ○ · ½ ✓</span>
       <div class="setbox" id="setbox">
@@ -158,9 +158,9 @@
     </div>
     <div class="final" id="final">
       <div>
-        <p style="font-family:'IBM Plex Mono';letter-spacing:.16em;color:var(--zone);font-size:.75rem;margin:0 0 .5rem">MIRSAD 9</p>
+        <p style="font-family:'IBM Plex Mono';letter-spacing:.16em;color:var(--zone);font-size:.75rem;margin:0 0 .5rem">MIRSAD OPTION</p>
         <h1>مساعدك في التحليل. سبعة أيام مجاناً</h1>
-        <p>أرسل اسم المستخدم في TradingView إلى البوت، ويُفعَّل لك مِرصاد ٩ سبعة أيام كاملة. لا بطاقة، لا التزام، ولا نطلب كلمة مرور أبداً.</p>
+        <p>أرسل اسم المستخدم في TradingView إلى البوت، ويُفعَّل لك مِرصاد أوبشن سبعة أيام كاملة. لا بطاقة، لا التزام، ولا نطلب كلمة مرور أبداً.</p>
         <div class="stats">
           <div><div class="v">كول · بوت</div><div class="k">العلامة تقول الاتجاه</div></div>
           <div><div class="v">— —</div><div class="k">الخط البرتقالي سعر دخولك</div></div>
@@ -283,7 +283,7 @@
       hiRow(null); await wait(800);
     },
     async () => {
-      await say('مِرصاد ٩ مساعدك في التحليل: يقرأ كل شركة في قائمتك ويحسب لك المنطقة والوقف والأهداف والعقد، ويعرضها في مكان واحد.');
+      await say('مِرصاد أوبشن مساعدك في التحليل: يقرأ كل شركة في قائمتك ويحسب لك المنطقة والوقف والأهداف والعقد، ويعرضها في مكان واحد.');
       await say('القرار يبقى لك. أنت تدخل، وأنت تبيع النصف، وأنت تغلق. هو يعطيك الصورة كاملة، ويوقظك بتنبيه حين يحدث شيء.');
     },
     async () => { $('final').classList.add('show'); await say('هذا كل ما تحتاج: علامة، خط دخول، وقف، أهداف تنوّر، ونصف تبيعه، وشاشة تجمع شركاتك. فعّل التنبيهات وجرّبه سبعة أيام مجاناً.'); }

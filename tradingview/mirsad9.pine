@@ -28,6 +28,7 @@ lifeN   = input.int(5, "صلاحية الدخول الأول في المنطقة
 chaseN  = input.int(8, "التأكيد: إغلاق فوق قمة شمعة الإشارة خلال N شموع", minval = 2, maxval = 20, group = gM)
 maxChase = input.float(1.5, "لا تأكيد إن ابتعد السعر عن المنطقة أكثر من × ATR", minval = 0.5, maxval = 4.0, step = 0.25, group = gM, tooltip = "يمنع مطاردة السعر في قمة الحركة: إن كان إغلاق شمعة التأكيد أبعد من هذا عن خط المنطقة تُترك الإشارة. في الاختبار: ٥٨٪ حركة أولى معك مقابل ٥٥٪ بلا الحد، مع ثلثي الإشارات")
 reEntry = input.bool(true, "دخول ثانٍ حين يرتد السعر إلى المنطقة", group = gM, tooltip = "بعد صفقة أولى لم تُوقف، إن رجع السعر إلى خط المنطقة خلال مدة بقائها يُفتح دخول ثانٍ. لا دخول ثانٍ بعد وقف: السعر اخترق المنطقة")
+maxTries = input.int(3, "أقصى محاولات على المنطقة الواحدة", minval = 1, maxval = 5, group = gM, tooltip = "كانت محاولتين. مع الخروج المبكر صارت ثلاثاً: الخروج المبكر رخيص (ثلث الوقف) ويترك المنطقة حيّة، فالمحاولة الثالثة تلتقط الحركة التي نضجت متأخرة. في الاختبار على ٧٠ رمزاً: ٣٤٪ من الإشارات تنجح من المحاولة الأولى، و١٤٪ تحتاج ثانية، و٣٠٪ ثالثة")
 reLife  = input.int(40, "المنطقة تبقى للدخول الثاني (شموع)", minval = 5, maxval = 120, group = gM)
 minQ    = input.int(0, "أدنى جودة مقبولة (٠ = الكل)", minval = 0, maxval = 90, step = 5, group = gM)
 fmX     = input.float(1.0, "مقياس الحركة الأولى (× ATR)", minval = 0.25, maxval = 3.0, step = 0.25, group = gM)
@@ -44,13 +45,16 @@ adxOn   = input.bool(true, "حجب الإشارة في العرضي (ADX داخ�
 adxLvl  = input.float(18, "ADX تحته عرضي", minval = 10, maxval = 30, group = gF)
 boxN    = input.int(30, "صندوق العرضي: آخر N شمعة", minval = 10, maxval = 60, group = gF)
 coolN   = input.int(2, "راحة بعد كل إشارة (شموع) — لا انقلاب قبلها", minval = 0, maxval = 30, group = gF, tooltip = "كانت ٨ وحجبت انعكاسات صحيحة بعد وقف. الاختبار مع المنطقة والتأكيد: الراحة الطويلة لا ترفع النسبة، فصارت شمعتين فقط")
+coolMode = input.string("للمعاكس فقط", "الراحة تمنع", options = ["للمعاكس فقط", "كل الإشارات"], group = gF, tooltip = "للمعاكس فقط: بعد الكول يُمنع البوت خلال الراحة، ويُسمح بكول آخر. كل الإشارات: تُمنع الإشارتان (السلوك القديم). في الاختبار على ٧٠ رمزاً و٧٦٤ جلسة: «للمعاكس فقط» أعطى ١٩٧٢١٩ إشارة بحصيلة +٢٥٧٨٣R مقابل ١٧٣٨٩٨ إشارة و+٢٢٣٤٢R للمنع الكامل — زيادة ١٥٪ بنفس جودة الإشارة (+٠٫١٣١R مقابل +٠٫١٢٨R). والإشارات الزائدة كلها استمرار في نفس الاتجاه كان المنع الكامل يحجبها بلا سبب")
 htfOn   = input.bool(false, "حجب الإشارة ضد الفريم الأكبر (متوسط ٩ و٢١ على ٣× الفريم)", group = gF, tooltip = "مطفأ: اتجاه الفريم الأكبر يدخل في درجة الجودة فقط ولا يحجب. مشتغل: يحجب كل إشارة ضده — يقطع نصف الإشارات ويتأخر عن الانعكاسات، ورفع النسبة قليلاً في الاختبار")
 skipOpen = input.int(1, "تجاهل أول N شمعة في الجلسة", minval = 0, maxval = 6, group = gF)
 lateN    = input.int(15, "لا إشارة في آخر N دقيقة من الجلسة (٠ = حتى الإغلاق)", minval = 0, maxval = 120, step = 5, group = gF, tooltip = "٠ يترك الإشارات حتى الجرس، ٦٠ يوقف الساعة الأخيرة كاملة. الافتراضي ١٥ دقيقة. على الفريم اليومي والأسبوعي لا أثر له")
 late3N   = input.int(120, "فريم ٣ دقائق وأقل: لا إشارة في آخر N دقيقة (٠ = حسب الإعداد أعلاه)", minval = 0, maxval = 240, step = 15, group = gF, tooltip = "الفريم الصغير يعطي إشارات في هدوء آخر الجلسة لا تكتمل قبل الجرس، وعقود اليوم تفقد قيمتها هناك أسرع من الحركة. الافتراضي: آخر ساعتين بلا إشارات على ٣ دقائق وأقل")
 
 gS = "الوقف والأهداف والتأمين"
-stopX  = input.float(1.5, "الوقف = × ATR من الدخول", minval = 0.5, maxval = 3.0, step = 0.25, group = gS)
+stopX  = input.float(1.5, "الوقف = × ATR من الدخول", minval = 0.5, maxval = 3.0, step = 0.25, group = gS, tooltip = "جُرّبت سبع قيم على ٧٠ رمزاً و٧٦٤ جلسة: كلما اتّسع الوقف ارتفعت نسبة الرابحة وانخفضت الحصيلة، بلا استثناء في السنوات الأربع. الخاسرة لا تلمس الوقف وترجع — بل تكسره وتواصل، ووسيط نزولها ٣٫٢٥×ATR أي ضعف الوقف. فتوسيعه تأجيل للخسارة لا منع لها")
+earlyOn = input.bool(true, "خروج مبكر: اخرج إن نزل السعر قبل أن يصعد", group = gS, tooltip = "الحَكَم هو أول حركة بعد دخولك. في الاختبار على ٧٠ رمزاً: إن صعد السعر نصف ATR معك أولاً انتهت الصفقة رابحة في ٨٠٫٦٪، وإن نزل نصف ATR ضدّك أولاً فـ ٢٦٪ فقط — فرق ٥٥ نقطة، وهو أقوى فرق في المؤشر كله. والإنذار يصل في نفس شمعة الدخول أو التي تليها. الخروج هنا يكلّف ثلث الوقف بدل الوقف كاملاً، ويترك المنطقة حيّة للمحاولة التالية")
+earlyX = input.float(0.5, "مسافة الخروج المبكر = × ATR", minval = 0.2, maxval = 1.0, step = 0.1, group = gS)
 tgtMode = input.string("× ATR", "الأهداف تُحسب", options = ["× ATR", "بالدولار"], group = gS)
 x1 = input.float(1.0, "هدف ١ = × ATR", minval = 0.25, step = 0.25, group = gS)
 x2 = input.float(2.0, "هدف ٢ = × ATR", minval = 0.5, step = 0.25, group = gS)
@@ -59,8 +63,8 @@ usd1 = input.float(1.5, "هدف ١ بالدولار", minval = 0.1, step = 0.5, 
 usd2 = input.float(2.5, "هدف ٢ بالدولار", minval = 0.1, step = 0.5, group = gS)
 usd3 = input.float(4.0, "هدف ٣ بالدولار", minval = 0.1, step = 0.5, group = gS)
 secPct = input.float(35, "تنبيه التأمين «بع النصف» عند ٪ من الطريق إلى هدف ٣", minval = 10, maxval = 90, step = 5, group = gS, tooltip = "حين يقطع السعر هذه النسبة من المسافة بين الدخول والهدف الثالث: تنبيه على الشارت والجوال ببيع نصف الكمية، ويُنقل الوقف إلى سعر الدخول فتصير الصفقة مؤمَّنة")
-trailN = input.int(3, "بعد هدف ٢: الوقف يتبع قاع/قمة آخر N شمعة", minval = 2, maxval = 15, group = gS)
-t3Mode = input.string("أقفل الصفقة", "بعد هدف ٣", options = ["أقفل الصفقة", "اتبع الحركة"], group = gS, tooltip = "أقفل الصفقة: الهدف الثالث يخرج كاملاً (+2R). اتبع الحركة: عند الهدف الثالث يُباع الجزء الثاني ويبقى الربع الأخير بوقف يتبع قاع/قمة آخر N شمعة (نفس رقم إعداد هدف ٢) ولا ينزل تحت الهدف الثاني، حتى ينكسر أو تُغلق الجلسة. تأخذ الحركات الممتدة بلا مخاطرة على رأس المال")
+trailN = input.int(8, "بعد هدف ٢: الوقف يتبع قاع/قمة آخر N شمعة", minval = 2, maxval = 15, group = gS)
+t3Mode = input.string("اتبع الحركة", "بعد هدف ٣", options = ["أقفل الصفقة", "اتبع الحركة"], group = gS, tooltip = "أقفل الصفقة: الهدف الثالث يخرج كاملاً (+2R). اتبع الحركة: عند الهدف الثالث يُباع الجزء الثاني ويبقى الربع الأخير بوقف يتبع قاع/قمة آخر N شمعة (نفس رقم إعداد هدف ٢) ولا ينزل تحت الهدف الثاني، حتى ينكسر أو تُغلق الجلسة. تأخذ الحركات الممتدة بلا مخاطرة على رأس المال")
 t3Follow = t3Mode == "اتبع الحركة"
 eodOut = input.bool(true, "إغلاق الصفقة آخر الجلسة (لا مبيت)", group = gS)
 
@@ -169,14 +173,19 @@ f_core() =>
     var int lastBar = -100000
     var int lastSide = 0
     ready = bar_index >= 120 and not na(a) and not na(eH2) and not na(adx)
-    inCool = bar_index - lastBar <= coolN
-    okL = ready and allowL and side0 == 1 and not sideways and (not htfOn or htfOk) and q >= minQ and not inCool and barDay >= skipOpen and not lateBar
-    okS = ready and allowS and side0 == -1 and not sideways and (not htfOn or htfOk) and q >= minQ and not inCool and barDay >= skipOpen and not lateBar
+    // الراحة تمنع الانقلاب فقط: بعد الكول يُمنع البوت، ويُسمح بكول آخر.
+    // القياس على ٧٠ رمزاً: الاستمرار في نفس الاتجاه بنفس الجودة، وحجبه خسارة صافية.
+    cooling = bar_index - lastBar <= coolN
+    flipOnly = coolMode == "للمعاكس فقط"
+    inCoolL = cooling and (not flipOnly or lastSide == -1)
+    inCoolS = cooling and (not flipOnly or lastSide == 1)
+    okL = ready and allowL and side0 == 1 and not sideways and (not htfOn or htfOk) and q >= minQ and not inCoolL and barDay >= skipOpen and not lateBar
+    okS = ready and allowS and side0 == -1 and not sideways and (not htfOn or htfOk) and q >= minQ and not inCoolS and barDay >= skipOpen and not lateBar
     if barstate.isconfirmed and (okL or okS)
         lastBar := bar_index
         lastSide := okL ? 1 : -1
     // لماذا حُجبت: للوحة فقط
-    blockTxt = side0 == 0 ? "" : inCool ? "راحة" : sideways ? "عرضي" : (htfOn and not htfOk) ? "ضد الفريم الأكبر" : q < minQ ? "جودة منخفضة" : ""
+    blockTxt = side0 == 0 ? "" : (side0 == 1 ? inCoolL : inCoolS) ? "راحة" : sideways ? "عرضي" : (htfOn and not htfOk) ? "ضد الفريم الأكبر" : q < minQ ? "جودة منخفضة" : ""
     state = sideways ? 9 : eH1 > eH2 ? 1 : -1
     [okL, okS, q, a, e9, state, blockTxt, side0]
 
@@ -223,6 +232,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     var float qT = na
     var int hit = 0
     var bool secured = false
+    var bool fmArmed = false        // هل صعد السعر مسافة الخروج المبكر معنا؟
     var bool half = false
     var float halfLvl = na
     var int nth = 0
@@ -245,7 +255,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     // الدخول الأول: لمس المنطقة خلال صلاحيتها
     touched = barstate.isconfirmed and pos == 0 and pend == 0 and pSide != 0 and bar_index <= pExp and (pSide == 1 ? low <= pLvl : high >= pLvl)
     // الدخول الثاني: ارتداد إلى المنطقة بعد صفقة أولى لم تُوقف
-    reTouch = reEntry and barstate.isconfirmed and pos == 0 and pend == 0 and pSide == 0 and zSide != 0 and zUses == 1 and not zStopped and bar_index <= zBorn + reLife and (zSide == 1 ? low <= zLvl : high >= zLvl)
+    reTouch = reEntry and barstate.isconfirmed and pos == 0 and pend == 0 and pSide == 0 and zSide != 0 and zUses >= 1 and zUses < maxTries and not zStopped and bar_index <= zBorn + reLife and (zSide == 1 ? low <= zLvl : high >= zLvl)
     // التأكيد: لم يرجع السعر، وأغلقت شمعة فوق قمة شمعة الإشارة (أو تحت قاعها) — الدخول على افتتاح التالية
     chased = chaseOn and barstate.isconfirmed and pos == 0 and pend == 0 and pSide != 0 and not touched and bar_index <= pBorn + chaseN and (pSide == 1 ? close > pHi : close < pLo) and math.abs(close - pLvl) <= maxChase * pAtr
     if touched
@@ -265,7 +275,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
         pend := zSide
         viaZone := true
         fillLvl := zLvl
-        zUses := 2
+        zUses := zUses + 1
         eMode := 3
     if pend != 0 and pos == 0 and not na(a[1])
         pos := pend
@@ -289,6 +299,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
         halfLvl := pos == 1 ? eP + secPct / 100.0 * m3 : eP - secPct / 100.0 * m3
         hit := 0
         secured := false
+        fmArmed := false
         half := false
         barsIn := 0
         exitTxt := ""
@@ -309,8 +320,23 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
             fmOn := false
     if pos != 0
         barsIn += 1
+        // الحَكَم: أول حركة بعد الدخول. صعد معنا ← نكمل · نزل ضدّنا ← نخرج رخيصاً
+        eAtr = unit / stopX
+        fmHi = pos == 1 ? eP + earlyX * eAtr : eP - earlyX * eAtr
+        fmLo = pos == 1 ? eP - earlyX * eAtr : eP + earlyX * eAtr
+        if earlyOn and not fmArmed and hit == 0
+            if (pos == 1 ? high >= fmHi : low <= fmHi)
+                fmArmed := true
+        earlyOut = earlyOn and not fmArmed and hit == 0 and (pos == 1 ? low <= fmLo : high >= fmLo)
         hitStop = pos == 1 ? low <= sP : high >= sP
-        if hitStop
+        if earlyOut and not hitStop
+            // الخروج المبكر يكلّف ثلث الوقف · والمنطقة تبقى حيّة للمحاولة التالية
+            lastR := -earlyX / stopX
+            exitTxt := "خروج مبكر"
+            lastSide := pos
+            pos := 0
+            closed := true
+        else if hitStop
             // الوقف يُحترم: الصفقة تموت هنا ولا ● بعدها
             lastR := (sP - eP) / unit * pos
             exitTxt := hit >= 3 ? "خروج بعد هدف ٣" : (sP - eP) * pos > 0 ? "خروج بربح" : (sP - eP) * pos == 0 ? "خروج على التعادل" : "وقف"
@@ -384,7 +410,7 @@ f_trade(bool sigL, bool sigS, float q0, float a, float e9) =>
     if pSide != 0 and (bar_index > (chaseOn ? math.max(pExp, pBorn + chaseN) : pExp) or pos != 0)
         pSide := 0
     // المنطقة تموت: انتهت مدتها، أو استُعملت مرتين، أو أُوقفت الصفقة، أو فاتت بلا دخول
-    if zSide != 0 and pos == 0 and pend == 0 and (bar_index > zBorn + reLife or zUses >= 2 or zStopped or (zUses == 0 and pSide == 0))
+    if zSide != 0 and pos == 0 and pend == 0 and (bar_index > zBorn + reLife or zUses >= maxTries or zStopped or (zUses == 0 and pSide == 0))
         zSide := 0
     [pos, pend, eP, sP, t1, t2, t3, hit, secured, barsIn, closed, exitTxt, lastR, pSide, pLvl, fmWin, fmTot, qT, zSide, zLvl, zBorn, zUses, zStopped, half, halfLvl, secNow, nth, eMode, e1P, e1R, e1T, e1B, lastSide, closedAt]
 
@@ -396,7 +422,7 @@ newZone = barstate.isconfirmed and zSide != 0 and (zSide[1] == 0 or zBorn != zBo
 zoneGone = zSide == 0 and zSide[1] != 0
 entered = pos != 0 and pos[1] == 0
 missed  = barstate.isconfirmed and pSide == 0 and pSide[1] != 0 and pos == 0 and pend == 0
-reArm = reEntry and barstate.isconfirmed and zSide != 0 and zUses == 1 and not zStopped and pos == 0 and pos[1] != 0
+reArm = reEntry and barstate.isconfirmed and zSide != 0 and zUses >= 1 and zUses < maxTries and not zStopped and pos == 0 and pos[1] != 0
 
 cUp = #0E9F6E
 cDn = #E02424
@@ -562,7 +588,7 @@ bigCard = cardIn == "البطاقة الكبيرة (ب)"
 ribbon = cardIn == "الشريط العلوي (أ)"
 floatCard = cardIn == "ملاصقة للشمعة (د)"
 wideWatch = cardIn == "شاشة المراقبة الموسّعة (ج)"
-pdxMain = pend != 0 ? pend : pSide != 0 ? pSide * 2 : (zSide != 0 and zUses == 1 and not zStopped and pos == 0) ? zSide * 3 : 0
+pdxMain = pend != 0 ? pend : pSide != 0 ? pSide * 2 : (zSide != 0 and zUses >= 1 and zUses < maxTries and not zStopped and pos == 0) ? zSide * 3 : 0
 stMain = f_stateTxt(pos, pdxMain, secured, state, rawSide, blockTxt) + (pos != 0 and nth >= 2 ? " · دخول ثاني" : "")
 stCol = pos != 0 or pdxMain != 0 ? color.new(pos == -1 or pdxMain < 0 ? #FCA5A5 : #86EFAC, 0) : color.new(#FCD34D, 0)
 stBg = pos == 1 ? color.new(cUp, 20) : pos == -1 ? color.new(cDn, 20) : pdxMain > 0 ? color.new(cUp, 60) : pdxMain < 0 ? color.new(cDn, 60) : color.new(#1F2937, 10)
