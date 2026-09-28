@@ -98,7 +98,7 @@ gC = "العقد"
 conOn = input.bool(true, "اختيار العقد تلقائياً", group = gC,
      tooltip = "يبني رمز العقد من السعر لحظة الإشارة ويجلب سعره ويتابعه حتى الخروج.")
 expMode = input.string("تلقائي", "تاريخ الانتهاء", options = ["تلقائي", "اليوم", "الجمعة القادمة", "الجمعة بعد القادمة", "يدوي"], group = gC,
-     tooltip = "تلقائي: عقد اليوم لـ SPY وQQQ وIWM، وعقد الجمعة لغيرها.\nإن وافق يومُ الجمعة عطلةً فاختر يدوي.")
+     tooltip = "تلقائي: يجرّب عقد اليوم أولاً، فإن لم يوجد على هذا السهم فعقد الجمعة.\nإن وافق يومُ الجمعة عطلةً فاختر يدوي.")
 expManual = input.time(timestamp("2 Oct 2026 00:00 -0400"), "التاريخ اليدوي", group = gC)
 strikeMode = input.string("حسب نطاق السعر", "اختيار السترايك", options = ["على السعر", "داخل المال بدرجة", "خارج المال بدرجة", "حسب نطاق السعر"], group = gC,
      tooltip = "حسب نطاق السعر: يجرّب على السعر ثم خارج المال ثم داخل المال، ويختار أول عقد سعره داخل النطاق الذي تحدده تحت — لمن محفظته محدودة.")
@@ -214,6 +214,22 @@ f_occ(string root, int expT, int cp, float k) =>
 f_inc(float px) =>
     idx = syminfo.ticker == "SPY" or syminfo.ticker == "QQQ" or syminfo.ticker == "IWM"
     incIn > 0 ? incIn : idx ? 1.0 : px < 25 ? 0.5 : px < 150 ? 1.0 : px < 500 ? 2.5 : 5.0
+
+// التاريخ المرشَّح رقم n: تلقائي/اليوم = اليوم ثم الجمعة
+f_expN(int n) =>
+    dw = dayofweek(time, TZ)
+    toFri = (6 - dw + 7) % 7
+    fri = time + toFri * 86400000
+    int r = na
+    if expMode == "يدوي"
+        r := n == 0 ? expManual : na
+    else if expMode == "تلقائي" or expMode == "اليوم"
+        r := n == 0 ? time : toFri > 0 ? fri : na
+    else if expMode == "الجمعة القادمة"
+        r := n == 0 ? fri : na
+    else
+        r := n == 0 ? fri + 7 * 86400000 : na
+    r
 
 f_exp() =>
     dw = dayofweek(time, TZ)
@@ -681,57 +697,9 @@ if sigL or sigS
     eQual := side == 1 ? qL : qS
     sigToday += 1
     conMsg := ""
-    if conOn and manualSym != ""
-        conSym := manualSym
-        conName := str.replace_all(manualSym, conPrefix, "")
-        conEntry := request.security(manualSym, timeframe.period, close, ignore_invalid_symbol = true)
-    else if conOn and intraday and usEq and conWindow
-        inc = f_inc(close)
-        kAtm = math.round(close / inc) * inc
-        expT = f_exp()
-        root = syminfo.ticker
-        pick = ""
-        pickPx = float(na)
-        pickK = float(na)
-        fbSym = ""
-        fbPx = float(na)
-        fbK = float(na)
-        if strikeMode == "حسب نطاق السعر"
-            for j = 0 to 3
-                off = j == 0 ? 0.0 : j == 1 ? 1.0 : j == 2 ? -1.0 : 2.0
-                if pick == "" and (allowOtm or off <= 0)
-                    sym_ = f_occ(root, expT, side, kAtm + side * off * inc)
-                    px_ = request.security(sym_, timeframe.period, close, ignore_invalid_symbol = true)
-                    if not na(px_) and fbSym == ""
-                        fbSym := sym_
-                        fbPx := px_
-                        fbK := kAtm + side * off * inc
-                    if not na(px_) and px_ * 100 >= priceMin and px_ * 100 <= priceMax
-                        pick := sym_
-                        pickPx := px_
-                        pickK := kAtm + side * off * inc
-        else
-            off1 = strikeMode == "داخل المال بدرجة" ? -1.0 : strikeMode == "خارج المال بدرجة" and allowOtm ? 1.0 : 0.0
-            sym1 = f_occ(root, expT, side, kAtm + side * off1 * inc)
-            px1 = request.security(sym1, timeframe.period, close, ignore_invalid_symbol = true)
-            if not na(px1)
-                pick := sym1
-                pickPx := px1
-                pickK := kAtm + side * off1 * inc
-        outRange = pick == "" and fbSym != ""
-        if outRange
-            pick := fbSym
-            pickPx := fbPx
-            pickK := fbK
-        if pick != ""
-            conSym := pick
-            conName := f_n(pickK, "#.##") + (side == 1 ? " كول" : " بوت") + SEP +
-                 f_2(dayofmonth(expT, TZ)) + "/" + f_2(month(expT, TZ)) + (outRange ? SEP + "خارج نطاقك" : "")
-            conEntry := pickPx
-        else
-            conMsg := "لا عقد مطابق — راجع مسافة السترايك أو نطاق السعر"
-    conNow := conEntry
-    conMax := conEntry
+    conEntry := na
+    conNow := na
+    conMax := na
     conPeak := 0.0
     tgHit := 0
     cTxtL = conSym == "" ? "" : "\n" + conName +
@@ -743,6 +711,76 @@ if sigL or sigS
     alert("مِرصاد أوبشن: " + (side == 1 ? "كول " : "بوت ") + syminfo.ticker + " عند " +
          str.tostring(close, format.mintick) + " · " + f_sigName(entWhy) + " · جودة " + str.tostring(eQual) +
          (conName == "" ? "" : " · العقد " + conName), alert.freq_once_per_bar_close)
+
+// ــ اختيار العقد: على شمعة الدخول، ويُعاد حتى ٣ شموع بعدها — في السوق المباشر
+//    أوّل طلب لرمز عقد جديد قد يعود فارغاً قبل أن تُحمَّل بياناته
+//    والتاريخ: عقد اليوم أولاً، فإن لم يوجد فعقد الجمعة
+if pos != 0 and conOn and conSym == "" and not na(eBar) and bar_index - eBar <= 3
+    sd = pos
+    if manualSym != ""
+        px0 = request.security(manualSym, timeframe.period, close, ignore_invalid_symbol = true)
+        if not na(px0)
+            conSym := manualSym
+            conName := str.replace_all(manualSym, conPrefix, "")
+            conEntry := px0
+            conNow := px0
+            conMax := px0
+    else if intraday and usEq and conWindow
+        inc = f_inc(eP)
+        kAtm = math.round(eP / inc) * inc
+        root = syminfo.ticker
+        rngMode = strikeMode == "حسب نطاق السعر"
+        fixOff = strikeMode == "داخل المال بدرجة" ? -1.0 : strikeMode == "خارج المال بدرجة" and allowOtm ? 1.0 : 0.0
+        pick = ""
+        pickPx = float(na)
+        pickK = float(na)
+        pickT = int(na)
+        fbSym = ""
+        fbPx = float(na)
+        fbK = float(na)
+        fbT = int(na)
+        for e = 0 to 1
+            expT = f_expN(e)
+            if pick == "" and not na(expT)
+                for j = 0 to 2
+                    off = j == 0 ? 0.0 : j == 1 ? 1.0 : -1.0
+                    okOff = rngMode ? (allowOtm or off <= 0) : off == fixOff
+                    if pick == "" and okOff
+                        k_ = kAtm + sd * off * inc
+                        sym_ = f_occ(root, expT, sd, k_)
+                        px_ = request.security(sym_, timeframe.period, close, ignore_invalid_symbol = true)
+                        if not na(px_) and fbSym == ""
+                            fbSym := sym_
+                            fbPx := px_
+                            fbK := k_
+                            fbT := expT
+                        if not na(px_) and (not rngMode or (px_ * 100 >= priceMin and px_ * 100 <= priceMax))
+                            pick := sym_
+                            pickPx := px_
+                            pickK := k_
+                            pickT := expT
+        outRange = pick == "" and fbSym != ""
+        if outRange
+            pick := fbSym
+            pickPx := fbPx
+            pickK := fbK
+            pickT := fbT
+        if pick != ""
+            conSym := pick
+            conName := f_n(pickK, "#.##") + (sd == 1 ? " كول" : " بوت") + SEP +
+                 f_2(dayofmonth(pickT, TZ)) + "/" + f_2(month(pickT, TZ)) + (outRange ? SEP + "خارج نطاقك" : "")
+            conEntry := pickPx
+            conNow := pickPx
+            conMax := pickPx
+            conPeak := 0.0
+            conMsg := ""
+            label.new(bar_index, sd == 1 ? low : high, "العقد " + conName + "  ·  " + str.tostring(pickPx * 100, "#") + "$",
+                 style = sd == 1 ? label.style_label_up : label.style_label_down,
+                 color = color.new(#161b22, 0), textcolor = cGold, size = size.small)
+            alert("مِرصاد أوبشن: " + syminfo.ticker + " · العقد " + conName + " · " + str.tostring(pickPx, "0.00") + "$",
+                 alert.freq_once_per_bar)
+        else if bar_index - eBar >= 3
+            conMsg := "لا عقد مطابق — راجع مسافة السترايك أو نطاق السعر"
 
 if preL or preS
     alert("مِرصاد أوبشن: استعداد " + (preL ? "كول " : "بوت ") + syminfo.ticker +
